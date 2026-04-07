@@ -9,6 +9,7 @@ export default async function AppLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
+
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -20,60 +21,82 @@ export default async function AppLayout({
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="grid min-h-screen grid-cols-1 md:grid-cols-[260px_1fr]">
+        
+        {/* SIDEBAR */}
         <aside className="border-r border-zinc-800 bg-zinc-900/70 p-4">
-          <div className="mb-8">
-            <div className="text-xs uppercase tracking-[0.2em] text-zinc-500">
-              Standalone App
-            </div>
-            <div className="mt-2 text-xl font-semibold">Card Business OS</div>
+          <div className="mb-6 text-lg font-semibold">
+            Card Tracker
           </div>
 
-          <nav className="space-y-2">
+          <nav className="flex flex-col gap-2 text-sm">
+            
             <Link
-              href="/app"
-              className="block rounded-xl border border-zinc-800 px-3 py-2 hover:bg-zinc-800"
+              href="/app/dashboard"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
             >
               Dashboard
             </Link>
 
             <Link
               href="/app/inventory"
-              className="block rounded-xl border border-zinc-800 px-3 py-2 hover:bg-zinc-800"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
             >
               Inventory
             </Link>
 
+            {/* 🔥 NEW FEATURE */}
+            <Link
+              href="/app/starting-inventory"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
+            >
+              Starting Inventory
+            </Link>
+
             <Link
               href="/app/breaks"
-              className="block rounded-xl border border-zinc-800 px-3 py-2 hover:bg-zinc-800"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
             >
               Breaks
             </Link>
 
             <Link
-              href="/app/utilities"
-              className="block rounded-xl border border-zinc-800 px-3 py-2 hover:bg-zinc-800"
+              href="/app/sales"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
             >
-              Utilities
+              Sales
+            </Link>
+
+            <Link
+              href="/app/reports"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
+            >
+              Reports
+            </Link>
+
+            <Link
+              href="/app/settings"
+              className="rounded-lg px-3 py-2 hover:bg-zinc-800"
+            >
+              Settings
             </Link>
           </nav>
 
-          <div className="mt-10 rounded-xl border border-zinc-800 bg-zinc-950 p-3">
-            <div className="text-xs text-zinc-500">Signed in as</div>
-            <div className="mt-1 break-all text-sm">{user.email}</div>
-
-            <form action={signOutAction} className="mt-4">
+          <div className="mt-6 border-t border-zinc-800 pt-4">
+            <form action={signOutAction}>
               <button
                 type="submit"
-                className="w-full rounded-xl border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-800"
+                className="w-full rounded-lg border border-zinc-700 px-3 py-2 text-left hover:bg-zinc-800"
               >
-                Sign out
+                Sign Out
               </button>
             </form>
           </div>
         </aside>
 
-        <main className="p-6 md:p-8">{children}</main>
+        {/* MAIN CONTENT */}
+        <main className="p-6">
+          {children}
+        </main>
       </div>
     </div>
   )
