@@ -1,0 +1,225 @@
+import Link from 'next/link'
+import { createBreakAction } from '@/app/actions/breaks'
+
+export default async function NewBreakPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ error?: string }>
+}) {
+  const params = searchParams ? await searchParams : undefined
+  const error = params?.error
+
+  return (
+    <div className="max-w-5xl">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold">Add Break</h1>
+          <p className="mt-2 text-zinc-400">
+            Record a break purchase for inventory, cost basis, and tax tracking.
+          </p>
+        </div>
+
+        <Link
+          href="/app/breaks"
+          className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+        >
+          Back to Breaks
+        </Link>
+      </div>
+
+      {error ? (
+        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          {error}
+        </div>
+      ) : null}
+
+      <form
+        action={createBreakAction}
+        className="mt-6 grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 md:grid-cols-2"
+      >
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Break Date</label>
+          <input
+            name="break_date"
+            type="date"
+            required
+            defaultValue={new Date().toISOString().slice(0, 10)}
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Source / Breaker</label>
+          <input
+            name="source_name"
+            type="text"
+            required
+            placeholder="Whatnot seller, eBay breaker, LCS, etc."
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Product Name</label>
+          <input
+            name="product_name"
+            type="text"
+            required
+            placeholder="2024 Topps Chrome Hobby"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Order #</label>
+          <input
+            name="order_number"
+            type="text"
+            placeholder="Optional order / invoice / transaction number"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Cards Received</label>
+          <input
+            name="cards_received"
+            type="number"
+            min={0}
+            defaultValue={0}
+            placeholder="Total cards received in this break"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            This will auto-set the row count on the Add Cards screen.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Format Type</label>
+          <input
+            name="format_type"
+            type="text"
+            placeholder="PYT, Random Team, Personal Box, etc."
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Teams / Spots</label>
+          <input
+            name="teams"
+            type="text"
+            placeholder="Mariners, Dodgers, Orioles"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+          <p className="mt-1 text-xs text-zinc-500">
+            Optional. Separate multiple teams or spots with commas.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Purchase Price</label>
+          <input
+            name="purchase_price"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue="0.00"
+            required
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Sales Tax</label>
+          <input
+            name="sales_tax"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue="0.00"
+            required
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Shipping Cost</label>
+          <input
+            name="shipping_cost"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue="0.00"
+            required
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Other Fees</label>
+          <input
+            name="other_fees"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue="0.00"
+            required
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm text-zinc-300">Allocation Method</label>
+          <select
+            name="allocation_method"
+            defaultValue="equal_per_item"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          >
+            <option value="equal_per_item">Equal Per Item</option>
+            <option value="equal_per_sellable_item">Equal Per Sellable Item</option>
+            <option value="manual">Manual</option>
+            <option value="bulk_common_split">Bulk Common Split</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+          <div className="text-sm font-medium text-zinc-200">What this records</div>
+          <div className="mt-2 space-y-1 text-sm text-zinc-400">
+            <p>Purchase source and date</p>
+            <p>Total break cost for basis allocation</p>
+            <p>Optional order number for receipt matching</p>
+            <p>Total cards received for faster entry later</p>
+          </div>
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm text-zinc-300">Notes</label>
+          <textarea
+            name="notes"
+            rows={4}
+            placeholder="Optional remarks about this break purchase"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+
+        <div className="md:col-span-2 flex justify-end gap-3 pt-2">
+          <Link
+            href="/app/breaks"
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Cancel
+          </Link>
+          <button
+            type="submit"
+            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+          >
+            Save Break
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
