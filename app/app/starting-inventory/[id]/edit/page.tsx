@@ -22,7 +22,9 @@ export default async function EditStartingInventoryPage({
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (!user) notFound()
+  if (!user) {
+    notFound()
+  }
 
   const response = await supabase
     .from('starting_inventory_items')
@@ -138,6 +140,7 @@ export default async function EditStartingInventoryPage({
                 name="player_name"
                 defaultValue={item.player_name ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Player Name"
               />
             </div>
 
@@ -148,6 +151,7 @@ export default async function EditStartingInventoryPage({
                 name="year"
                 defaultValue={item.year ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Year"
               />
             </div>
 
@@ -158,6 +162,7 @@ export default async function EditStartingInventoryPage({
                 name="brand"
                 defaultValue={item.brand ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Brand"
               />
             </div>
 
@@ -168,6 +173,7 @@ export default async function EditStartingInventoryPage({
                 name="set_name"
                 defaultValue={item.set_name ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Set Name"
               />
             </div>
 
@@ -178,6 +184,7 @@ export default async function EditStartingInventoryPage({
                 name="card_number"
                 defaultValue={item.card_number ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Card #"
               />
             </div>
 
@@ -188,6 +195,7 @@ export default async function EditStartingInventoryPage({
                 name="parallel_name"
                 defaultValue={item.parallel_name ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Parallel"
               />
             </div>
 
@@ -198,6 +206,7 @@ export default async function EditStartingInventoryPage({
                 name="variation"
                 defaultValue={item.variation ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Variation"
               />
             </div>
 
@@ -208,6 +217,7 @@ export default async function EditStartingInventoryPage({
                 name="team"
                 defaultValue={item.team ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Team"
               />
             </div>
           </div>
@@ -237,6 +247,7 @@ export default async function EditStartingInventoryPage({
                 name="serial_number_text"
                 defaultValue={item.serial_number_text ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="e.g. 12/50"
               />
             </div>
 
@@ -257,6 +268,7 @@ export default async function EditStartingInventoryPage({
                 name="grader"
                 defaultValue={item.grader ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="PSA, SGC, BGS..."
               />
             </div>
 
@@ -267,6 +279,7 @@ export default async function EditStartingInventoryPage({
                 name="grade"
                 defaultValue={item.grade ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="10, 9.5, Raw..."
               />
             </div>
           </div>
@@ -298,6 +311,7 @@ export default async function EditStartingInventoryPage({
                 min="0"
                 step="0.0001"
                 defaultValue={item.cost_basis_unit ?? 0}
+                placeholder="Enter per-card amount"
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
               />
             </div>
@@ -321,6 +335,7 @@ export default async function EditStartingInventoryPage({
                 name="acquisition_source"
                 defaultValue={item.acquisition_source ?? ''}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Childhood collection, old purchase, trade..."
               />
             </div>
 
