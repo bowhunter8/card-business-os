@@ -129,6 +129,177 @@ export async function createStartingInventoryItemAction(formData: FormData) {
   redirect(`/app/starting-inventory?created=${insertResponse.data.id}`)
 }
 
+export async function updateStartingInventoryItemAction(formData: FormData) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const startingInventoryItemId = String(formData.get('starting_inventory_item_id') ?? '').trim()
+
+  if (!startingInventoryItemId) {
+    redirect('/app/starting-inventory?error=Missing starting inventory item id')
+  }
+
+  const existingResponse = await supabase
+    .from('starting_inventory_items')
+    .select('id, status, imported_inventory_item_id')
+    .eq('id', startingInventoryItemId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (existingResponse.error || !existingResponse.data) {
+    redirect('/app/starting-inventory?error=Starting inventory item not found')
+  }
+
+  if (existingResponse.data.status === 'imported') {
+    redirect('/app/starting-inventory?error=Imported items cannot be edited here')
+  }
+
+  const itemType = String(formData.get('item_type') ?? 'single_card').trim()
+  const destination = String(formData.get('destination') ?? 'sell').trim()
+  const title = String(formData.get('title') ?? '').trim()
+  const playerName = String(formData.get('player_name') ?? '').trim()
+  const yearRaw = String(formData.get('year') ?? '').trim()
+  const brand = String(formData.get('brand') ?? '').trim()
+  const setName = String(formData.get('set_name') ?? '').trim()
+  const cardNumber = String(formData.get('card_number') ?? '').trim()
+  const parallelName = String(formData.get('parallel_name') ?? '').trim()
+  const variation = String(formData.get('variation') ?? '').trim()
+  const team = String(formData.get('team') ?? '').trim()
+
+  const rookieFlag = formData.get('rookie_flag') === 'on'
+  const autoFlag = formData.get('auto_flag') === 'on'
+  const relicFlag = formData.get('relic_flag') === 'on'
+  const serialNumberText = String(formData.get('serial_number_text') ?? '').trim()
+  const serialFlag = !!serialNumberText
+
+  const conditionNote = String(formData.get('condition_note') ?? '').trim()
+  const grader = String(formData.get('grader') ?? '').trim()
+  const grade = String(formData.get('grade') ?? '').trim()
+
+  const quantity = asInt(formData.get('quantity'), 1)
+  const costBasisUnit = asMoney(formData.get('cost_basis_unit'))
+  const estimatedValueUnitRaw = formData.get('estimated_value_unit')
+  const estimatedValueUnit =
+    estimatedValueUnitRaw === null || String(estimatedValueUnitRaw).trim() === ''
+      ? null
+      : asMoney(estimatedValueUnitRaw)
+
+  const costBasisMethod = String(formData.get('cost_basis_method') ?? 'estimated_legacy').trim()
+  const acquisitionSource = String(formData.get('acquisition_source') ?? '').trim()
+  const acquiredDate = String(formData.get('acquired_date') ?? '').trim()
+  const storageLocation = String(formData.get('storage_location') ?? '').trim()
+  const taxLotMethod = String(formData.get('tax_lot_method') ?? 'specific').trim()
+  const notes = String(formData.get('notes') ?? '').trim()
+  const taxNotes = String(formData.get('tax_notes') ?? '').trim()
+
+  if (quantity < 1) {
+    redirect(
+      `/app/starting-inventory/${startingInventoryItemId}/edit?error=Quantity must be at least 1`
+    )
+  }
+
+  if (!title && !playerName) {
+    redirect(
+      `/app/starting-inventory/${startingInventoryItemId}/edit?error=Enter at least a title or player name`
+    )
+  }
+
+  const year = yearRaw ? Number(yearRaw) : null
+  const validYear = year && !Number.isNaN(year) ? year : null
+  const costBasisTotal = Number((costBasisUnit * quantity).toFixed(2))
+  const estimatedValueTotal =
+    estimatedValueUnit === null ? null : Number((estimatedValueUnit * quantity).toFixed(2))
+
+  const updateResponse = await supabase
+    .from('starting_inventory_items')
+    .update({
+      destination: destination === 'personal' ? 'personal' : 'sell',
+      item_type: itemType || 'single_card',
+      title: title || null,
+      player_name: playerName || null,
+      year: validYear,
+      brand: brand || null,
+      set_name: setName || null,
+      card_number: cardNumber || null,
+      parallel_name: parallelName || null,
+      variation: variation || null,
+      team: team || null,
+      rookie_flag: rookieFlag,
+      auto_flag: autoFlag,
+      relic_flag: relicFlag,
+      serial_flag: serialFlag,
+      serial_number_text: serialNumberText || null,
+      condition_note: conditionNote || null,
+      grader: grader || null,
+      grade: grade || null,
+      quantity,
+      cost_basis_unit: costBasisUnit,
+      cost_basis_total: costBasisTotal,
+      estimated_value_unit: estimatedValueUnit,
+      estimated_value_total: estimatedValueTotal,
+      cost_basis_method: costBasisMethod || 'estimated_legacy',
+      acquisition_source: acquisitionSource || null,
+      acquired_date: acquiredDate || null,
+      storage_location: storageLocation || null,
+      tax_lot_method: taxLotMethod || 'specific',
+      notes: notes || null,
+      tax_notes: taxNotes || null,
+    })
+    .eq('id', startingInventoryItemId)
+    .eq('user_id', user.id)
+
+  if (updateResponse.error) {
+    redirect(
+      `/app/starting-inventory/${startingInventoryItemId}/edit?error=${encodeURIComponent(
+        updateResponse.error.message
+      )}`
+    )
+  }
+
+  revalidatePath('/app/starting-inventory')
+  redirect('/app/starting-inventory?updated=1')
+}
+
+export async function archiveStartingInventoryItemAction(formData: FormData) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const startingInventoryItemId = String(formData.get('starting_inventory_item_id') ?? '').trim()
+
+  if (!startingInventoryItemId) {
+    redirect('/app/starting-inventory?error=Missing starting inventory item id')
+  }
+
+  const updateResponse = await supabase
+    .from('starting_inventory_items')
+    .update({ status: 'archived' })
+    .eq('id', startingInventoryItemId)
+    .eq('user_id', user.id)
+
+  if (updateResponse.error) {
+    redirect(
+      `/app/starting-inventory?error=${encodeURIComponent(updateResponse.error.message)}`
+    )
+  }
+
+  revalidatePath('/app/starting-inventory')
+  redirect('/app/starting-inventory?archived=1')
+}
+
 export async function importStartingInventoryItemAction(formData: FormData) {
   const supabase = await createClient()
 
@@ -158,6 +329,10 @@ export async function importStartingInventoryItemAction(formData: FormData) {
   }
 
   const item = itemResponse.data
+
+  if (item.status === 'archived') {
+    redirect('/app/starting-inventory?error=Archived items cannot be imported')
+  }
 
   if (item.status === 'imported' && item.imported_inventory_item_id) {
     redirect(`/app/inventory/${item.imported_inventory_item_id}`)
@@ -230,7 +405,11 @@ export async function importStartingInventoryItemAction(formData: FormData) {
   })
 
   if (transactionInsert.error) {
-    await supabase.from('inventory_items').delete().eq('id', inventoryInsert.data.id).eq('user_id', user.id)
+    await supabase
+      .from('inventory_items')
+      .delete()
+      .eq('id', inventoryInsert.data.id)
+      .eq('user_id', user.id)
 
     redirect(
       `/app/starting-inventory?error=${encodeURIComponent(

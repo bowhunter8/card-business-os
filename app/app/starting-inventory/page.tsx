@@ -1,6 +1,9 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { importStartingInventoryItemAction } from '@/app/actions/starting-inventory'
+import {
+  archiveStartingInventoryItemAction,
+  importStartingInventoryItemAction,
+} from '@/app/actions/starting-inventory'
 
 type StartingInventoryRow = {
   id: string
@@ -35,14 +38,53 @@ function cleanSearchTerm(value: string) {
   return value.trim().replace(/,/g, ' ')
 }
 
+function formatLabel(value: string | null | undefined) {
+  return (value || '—').replaceAll('_', ' ')
+}
+
+function statusBadgeClass(status: string | null) {
+  switch (status) {
+    case 'draft':
+      return 'border-amber-900 bg-amber-950/40 text-amber-200'
+    case 'imported':
+      return 'border-emerald-900 bg-emerald-950/40 text-emerald-200'
+    case 'archived':
+      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
+    default:
+      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
+  }
+}
+
+function destinationBadgeClass(destination: string | null) {
+  switch (destination) {
+    case 'sell':
+      return 'border-blue-900 bg-blue-950/40 text-blue-200'
+    case 'personal':
+      return 'border-fuchsia-900 bg-fuchsia-950/40 text-fuchsia-200'
+    default:
+      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
+  }
+}
+
 export default async function StartingInventoryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; status?: string }>
+  searchParams?: Promise<{
+    q?: string
+    status?: string
+    error?: string
+    created?: string
+    updated?: string
+    archived?: string
+  }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const q = cleanSearchTerm(params?.q ?? '')
   const statusFilter = String(params?.status ?? '').trim()
+  const errorMessage = params?.error
+  const createdId = params?.created
+  const updated = params?.updated
+  const archived = params?.archived
 
   const supabase = await createClient()
 
@@ -118,6 +160,30 @@ export default async function StartingInventoryPage({
         </Link>
       </div>
 
+      {createdId ? (
+        <div className="mt-6 rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+          Starting inventory item created successfully.
+        </div>
+      ) : null}
+
+      {updated ? (
+        <div className="mt-6 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
+          Starting inventory item updated successfully.
+        </div>
+      ) : null}
+
+      {archived ? (
+        <div className="mt-6 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+          Starting inventory item archived.
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          {errorMessage}
+        </div>
+      ) : null}
+
       <form method="get" className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
         <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
           <input
@@ -146,7 +212,8 @@ export default async function StartingInventoryPage({
             >
               Search
             </button>
-            {(q || statusFilter) ? (
+
+            {q || statusFilter ? (
               <Link
                 href="/app/starting-inventory"
                 className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
@@ -180,6 +247,7 @@ export default async function StartingInventoryPage({
                 <th className="px-4 py-3 text-left font-medium">Actions</th>
               </tr>
             </thead>
+
             <tbody>
               {items.map((item) => {
                 const itemLine = [
@@ -194,64 +262,142 @@ export default async function StartingInventoryPage({
                   .join(' • ')
 
                 const isImported = item.status === 'imported' && !!item.imported_inventory_item_id
+                const isDraft = item.status === 'draft'
+                const isArchived = item.status === 'archived'
 
                 return (
-                  <tr key={item.id} className="border-t border-zinc-800">
+                  <tr key={item.id} className="border-t border-zinc-800 align-top">
                     <td className="px-4 py-3">
                       <div className="font-medium">
                         {item.title || item.player_name || 'Untitled item'}
                       </div>
                       <div className="text-zinc-400">{itemLine}</div>
+
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
+                        {item.item_type ? (
+                          <span className="rounded-full border border-zinc-800 px-2 py-1">
+                            {formatLabel(item.item_type)}
+                          </span>
+                        ) : null}
+
+                        {item.storage_location ? (
+                          <span className="rounded-full border border-zinc-800 px-2 py-1">
+                            {item.storage_location}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
 
-                    <td className="px-4 py-3 capitalize">
-                      {(item.status || '—').replaceAll('_', ' ')}
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${statusBadgeClass(
+                          item.status
+                        )}`}
+                      >
+                        {formatLabel(item.status)}
+                      </span>
                     </td>
 
-                    <td className="px-4 py-3 capitalize">
-                      {(item.destination || '—').replaceAll('_', ' ')}
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${destinationBadgeClass(
+                          item.destination
+                        )}`}
+                      >
+                        {formatLabel(item.destination)}
+                      </span>
                     </td>
 
                     <td className="px-4 py-3">{item.quantity ?? 0}</td>
                     <td className="px-4 py-3">{money(item.cost_basis_unit)}</td>
                     <td className="px-4 py-3">{money(item.cost_basis_total)}</td>
                     <td className="px-4 py-3">{money(item.estimated_value_total)}</td>
-
-                    <td className="px-4 py-3 capitalize">
-                      {(item.cost_basis_method || '—').replaceAll('_', ' ')}
+                    <td className="px-4 py-3 capitalize text-zinc-300">
+                      {formatLabel(item.cost_basis_method)}
                     </td>
 
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-3">
-                        {isImported ? (
-                          <Link
-                            href={`/app/inventory/${item.imported_inventory_item_id}`}
-                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
-                          >
-                            View Imported Item
-                          </Link>
-                        ) : (
-                          <form action={importStartingInventoryItemAction}>
-                            <input
-                              type="hidden"
-                              name="starting_inventory_item_id"
-                              value={item.id}
-                            />
-                            <button
-                              type="submit"
+                        {isDraft ? (
+                          <>
+                            <Link
+                              href={`/app/starting-inventory/${item.id}/edit`}
                               className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
                             >
-                              Import to Inventory
-                            </button>
-                          </form>
-                        )}
+                              Edit
+                            </Link>
+
+                            <form action={importStartingInventoryItemAction}>
+                              <input
+                                type="hidden"
+                                name="starting_inventory_item_id"
+                                value={item.id}
+                              />
+                              <button
+                                type="submit"
+                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                              >
+                                Import to Inventory
+                              </button>
+                            </form>
+
+                            <form action={archiveStartingInventoryItemAction}>
+                              <input
+                                type="hidden"
+                                name="starting_inventory_item_id"
+                                value={item.id}
+                              />
+                              <button
+                                type="submit"
+                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+                              >
+                                Archive
+                              </button>
+                            </form>
+                          </>
+                        ) : null}
+
+                        {isImported ? (
+                          <>
+                            <div className="inline-flex rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-1.5 text-xs font-medium text-emerald-200">
+                              Imported
+                            </div>
+
+                            <Link
+                              href={`/app/inventory/${item.imported_inventory_item_id}`}
+                              className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                            >
+                              View Imported Item
+                            </Link>
+
+                            <form action={archiveStartingInventoryItemAction}>
+                              <input
+                                type="hidden"
+                                name="starting_inventory_item_id"
+                                value={item.id}
+                              />
+                              <button
+                                type="submit"
+                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
+                              >
+                                Archive
+                              </button>
+                            </form>
+                          </>
+                        ) : null}
+
+                        {isArchived ? (
+                          <div className="inline-flex rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300">
+                            Archived
+                          </div>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
                 )
               })}
 
-              {items.length === 0 && (
+              {items.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-10 text-center text-zinc-400">
                     {q || statusFilter
@@ -259,7 +405,7 @@ export default async function StartingInventoryPage({
                       : 'No starting inventory items found.'}
                   </td>
                 </tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
