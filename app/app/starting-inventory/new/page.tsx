@@ -319,126 +319,139 @@ export default async function NewStartingInventoryPage({
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <h2 className="text-lg font-semibold">Cost Basis Help</h2>
-
-          <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
               <div>
-                <div className="text-sm font-semibold text-zinc-100">How to enter cost basis</div>
+                <div className="text-lg font-semibold text-zinc-100">Cost Basis Help</div>
                 <div className="mt-1 text-sm text-zinc-400">
-                  Enter your <span className="font-medium text-zinc-200">cost per card or item</span> in the
-                  Unit Cost field above. The app calculates total cost automatically using
-                  <span className="ml-1 font-medium text-zinc-200">Unit Cost × Quantity</span>.
+                  Guidance on what amounts to enter and when to use each costing method.
                 </div>
               </div>
 
-              <div className="rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
-                Usually best for older cards: <span className="font-semibold">Estimated Legacy</span>
+              <div className="text-sm text-zinc-400 transition group-open:rotate-180">
+                ▼
+              </div>
+            </summary>
+
+            <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-100">How to enter cost basis</div>
+                  <div className="mt-1 text-sm text-zinc-400">
+                    Enter your <span className="font-medium text-zinc-200">cost per card or item</span> in the
+                    Unit Cost field above. The app calculates total cost automatically using
+                    <span className="ml-1 font-medium text-zinc-200">Unit Cost × Quantity</span>.
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+                  Usually best for older cards: <span className="font-semibold">Estimated Legacy</span>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <div className="text-sm font-semibold text-zinc-100">Quick amount rules</div>
+
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="text-sm text-zinc-300">
+                    <div className="font-medium text-zinc-200">If quantity is 1</div>
+                    Enter the full cost of that single card in <span className="font-medium">Unit Cost</span>.
+                  </div>
+
+                  <div className="text-sm text-zinc-300">
+                    <div className="font-medium text-zinc-200">If quantity is more than 1</div>
+                    Enter the <span className="font-medium">per-card / per-item amount</span>, not the whole total.
+                  </div>
+
+                  <div className="text-sm text-zinc-300">
+                    <div className="font-medium text-zinc-200">If you only know a group total</div>
+                    Divide the total by quantity first, then enter that result as <span className="font-medium">Unit Cost</span>.
+                  </div>
+
+                  <div className="text-sm text-zinc-300">
+                    <div className="font-medium text-zinc-200">When unsure</div>
+                    Use a reasonable, conservative amount and explain it in <span className="font-medium">Tax Notes</span>.
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                  <div className="text-sm font-semibold text-zinc-100">Exact Known</div>
+                  <div className="mt-2 text-sm text-zinc-400">
+                    Use this when you know the real cost.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">What amount to enter</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Enter the actual amount paid <span className="font-medium">per card/item</span>.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">Examples</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    One card bought for $18 → enter <span className="font-medium">$18.00</span>
+                    <br />
+                    Four identical cards bought for $20 total → enter <span className="font-medium">$5.00</span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-blue-900/60 bg-blue-950/20 p-4">
+                  <div className="text-sm font-semibold text-blue-100">Estimated Legacy</div>
+                  <div className="mt-2 text-sm text-zinc-300">
+                    Use this for older cards you already owned before you started tracking everything.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">What amount to enter</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Enter your best reasonable <span className="font-medium">per-card estimate</span>, not current market value.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">Examples</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Childhood base card you think effectively cost about $0.25 → enter <span className="font-medium">$0.25</span>
+                    <br />
+                    Older insert you reasonably estimate cost you about $3 → enter <span className="font-medium">$3.00</span>
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">Good practice</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Be conservative and explain your reasoning in Tax Notes.
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                  <div className="text-sm font-semibold text-zinc-100">Bulk Allocated</div>
+                  <div className="mt-2 text-sm text-zinc-400">
+                    Use this when one total purchase cost was spread across a group of cards or items.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">What amount to enter</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Take the total group cost and divide by quantity. Enter that <span className="font-medium">per-item result</span>.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">Examples</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Lot cost $50 for 100 cards → enter <span className="font-medium">$0.50</span>
+                    <br />
+                    Break allocation $24 across 8 cards → enter <span className="font-medium">$3.00</span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-red-900/60 bg-red-950/20 p-4">
+                  <div className="text-sm font-semibold text-red-100">Zero Basis</div>
+                  <div className="mt-2 text-sm text-zinc-300">
+                    Use this only when the item truly had no cost basis.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">What amount to enter</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Enter <span className="font-medium">$0.00</span>.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">Examples</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    True free giveaway, free promo item, or other no-cost acquisition.
+                  </div>
+                  <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">Warning</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    This makes the full sale amount taxable profit later, so only use it when it is truly correct.
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <div className="text-sm font-semibold text-zinc-100">Quick amount rules</div>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <div className="text-sm text-zinc-300">
-                  <div className="font-medium text-zinc-200">If quantity is 1</div>
-                  Enter the full cost of that single card in <span className="font-medium">Unit Cost</span>.
-                </div>
-
-                <div className="text-sm text-zinc-300">
-                  <div className="font-medium text-zinc-200">If quantity is more than 1</div>
-                  Enter the <span className="font-medium">per-card / per-item amount</span>, not the whole total.
-                </div>
-
-                <div className="text-sm text-zinc-300">
-                  <div className="font-medium text-zinc-200">If you only know a group total</div>
-                  Divide the total by quantity first, then enter that result as <span className="font-medium">Unit Cost</span>.
-                </div>
-
-                <div className="text-sm text-zinc-300">
-                  <div className="font-medium text-zinc-200">When unsure</div>
-                  Use a reasonable, conservative amount and explain it in <span className="font-medium">Tax Notes</span>.
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <div className="text-sm font-semibold text-zinc-100">Exact Known</div>
-                <div className="mt-2 text-sm text-zinc-400">
-                  Use this when you know the real cost.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">What amount to enter</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Enter the actual amount paid <span className="font-medium">per card/item</span>.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">Examples</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  One card bought for $18 → enter <span className="font-medium">$18.00</span>
-                  <br />
-                  Four identical cards bought for $20 total → enter <span className="font-medium">$5.00</span>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-blue-900/60 bg-blue-950/20 p-4">
-                <div className="text-sm font-semibold text-blue-100">Estimated Legacy</div>
-                <div className="mt-2 text-sm text-zinc-300">
-                  Use this for older cards you already owned before you started tracking everything.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">What amount to enter</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Enter your best reasonable <span className="font-medium">per-card estimate</span>, not current market value.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">Examples</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Childhood base card you think effectively cost about $0.25 → enter <span className="font-medium">$0.25</span>
-                  <br />
-                  Older insert you reasonably estimate cost you about $3 → enter <span className="font-medium">$3.00</span>
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-blue-300/70">Good practice</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Be conservative and explain your reasoning in Tax Notes.
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <div className="text-sm font-semibold text-zinc-100">Bulk Allocated</div>
-                <div className="mt-2 text-sm text-zinc-400">
-                  Use this when one total purchase cost was spread across a group of cards or items.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">What amount to enter</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Take the total group cost and divide by quantity. Enter that <span className="font-medium">per-item result</span>.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-zinc-500">Examples</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Lot cost $50 for 100 cards → enter <span className="font-medium">$0.50</span>
-                  <br />
-                  Break allocation $24 across 8 cards → enter <span className="font-medium">$3.00</span>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-red-900/60 bg-red-950/20 p-4">
-                <div className="text-sm font-semibold text-red-100">Zero Basis</div>
-                <div className="mt-2 text-sm text-zinc-300">
-                  Use this only when the item truly had no cost basis.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">What amount to enter</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Enter <span className="font-medium">$0.00</span>.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">Examples</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  True free giveaway, free promo item, or other no-cost acquisition.
-                </div>
-                <div className="mt-3 text-xs uppercase tracking-wide text-red-300/70">Warning</div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  This makes the full sale amount taxable profit later, so only use it when it is truly correct.
-                </div>
-              </div>
-            </div>
-          </div>
+          </details>
         </section>
 
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
