@@ -546,32 +546,6 @@ export default function NewStartingInventoryPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-zinc-300">Unit Cost (per card / item)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.0001"
-                value={form.costBasisUnit}
-                onChange={(e) => update('costBasisUnit', e.target.value)}
-                placeholder="Enter per-card amount"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Estimated Value Unit</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.estimatedValueUnit}
-                onChange={(e) => update('estimatedValueUnit', e.target.value)}
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-                placeholder="Optional estimated value"
-              />
-            </div>
-
-            <div>
               <label className="mb-1 block text-sm text-zinc-300">OPG Low</label>
               <input
                 type="number"
@@ -597,7 +571,7 @@ export default function NewStartingInventoryPage() {
               />
             </div>
 
-            <div className="flex items-end">
+            <div className="md:col-span-3">
               <button
                 type="button"
                 onClick={autoFillFromOpg}
@@ -605,6 +579,32 @@ export default function NewStartingInventoryPage() {
               >
                 Auto-fill cost + value from OPG
               </button>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Unit Cost (per card / item)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={form.costBasisUnit}
+                onChange={(e) => update('costBasisUnit', e.target.value)}
+                placeholder="Enter per-card amount"
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Estimated Value Unit</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.estimatedValueUnit}
+                onChange={(e) => update('estimatedValueUnit', e.target.value)}
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Optional estimated value"
+              />
             </div>
 
             <div>
