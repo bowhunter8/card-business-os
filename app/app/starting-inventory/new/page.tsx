@@ -34,6 +34,8 @@ export default async function NewStartingInventoryPage({
       ) : null}
 
       <form action={createStartingInventoryItemAction} className="mt-6 space-y-6">
+        
+        {/* BASICS */}
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-lg font-semibold">Starting Inventory Basics</h2>
 
@@ -82,6 +84,7 @@ export default async function NewStartingInventoryPage({
           </div>
         </section>
 
+        {/* CARD DETAILS */}
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-lg font-semibold">Card Details</h2>
 
@@ -96,143 +99,25 @@ export default async function NewStartingInventoryPage({
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Player Name</label>
-              <input
-                type="text"
-                name="player_name"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Year</label>
-              <input
-                type="number"
-                name="year"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Brand</label>
-              <input
-                type="text"
-                name="brand"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Set Name</label>
-              <input
-                type="text"
-                name="set_name"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Card Number</label>
-              <input
-                type="text"
-                name="card_number"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Parallel</label>
-              <input
-                type="text"
-                name="parallel_name"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Variation</label>
-              <input
-                type="text"
-                name="variation"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Team</label>
-              <input
-                type="text"
-                name="team"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <label className="flex items-center gap-2 rounded-xl border border-zinc-700 p-3">
-              <input type="checkbox" name="rookie_flag" />
-              <span className="text-sm">Rookie</span>
-            </label>
-
-            <label className="flex items-center gap-2 rounded-xl border border-zinc-700 p-3">
-              <input type="checkbox" name="auto_flag" />
-              <span className="text-sm">Autograph</span>
-            </label>
-
-            <label className="flex items-center gap-2 rounded-xl border border-zinc-700 p-3">
-              <input type="checkbox" name="relic_flag" />
-              <span className="text-sm">Relic</span>
-            </label>
-          </div>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-4">
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Serial Number</label>
-              <input
-                type="text"
-                name="serial_number_text"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-                placeholder="e.g. 12/50"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Condition Note</label>
-              <input
-                type="text"
-                name="condition_note"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Grader</label>
-              <input
-                type="text"
-                name="grader"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-                placeholder="PSA, SGC, BGS..."
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Grade</label>
-              <input
-                type="text"
-                name="grade"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-                placeholder="10, 9.5, Raw..."
-              />
-            </div>
+            <input name="player_name" placeholder="Player Name" className="input" />
+            <input name="year" placeholder="Year" className="input" />
+            <input name="brand" placeholder="Brand" className="input" />
+            <input name="set_name" placeholder="Set Name" className="input" />
+            <input name="card_number" placeholder="Card #" className="input" />
+            <input name="parallel_name" placeholder="Parallel" className="input" />
+            <input name="variation" placeholder="Variation" className="input" />
+            <input name="team" placeholder="Team" className="input" />
           </div>
         </section>
 
+        {/* COST + TAX */}
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-lg font-semibold">Cost Basis and Tax Notes</h2>
 
           <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div>
+
+            {/* COST METHOD WITH GUIDE */}
+            <div className="md:col-span-3">
               <label className="mb-1 block text-sm text-zinc-300">Cost Basis Method</label>
               <select
                 name="cost_basis_method"
@@ -244,97 +129,58 @@ export default async function NewStartingInventoryPage({
                 <option value="bulk_allocated">Bulk Allocated</option>
                 <option value="zero_basis">Zero Basis</option>
               </select>
+
+              <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 text-sm text-zinc-300">
+                <div className="font-medium text-zinc-100">Cost basis method guide</div>
+
+                <div className="mt-2 text-amber-300">
+                  For most pre-existing collection items, <span className="font-medium">Estimated Legacy</span> is usually the best starting choice.
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <div className="font-medium text-zinc-200">Exact Known</div>
+                    <div className="text-zinc-400">
+                      Use when you know exactly what you paid.
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="font-medium text-zinc-200">Estimated Legacy</div>
+                    <div className="text-zinc-400">
+                      Best for childhood or pre-tracked cards.
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="font-medium text-zinc-200">Bulk Allocated</div>
+                    <div className="text-zinc-400">
+                      Use for lots and bulk purchases.
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="font-medium text-zinc-200">Zero Basis</div>
+                    <div className="text-zinc-400">
+                      Only use if truly free.
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Unit Cost</label>
-              <input
-                type="number"
-                name="cost_basis_unit"
-                min="0"
-                step="0.0001"
-                defaultValue="0"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Estimated Value Unit</label>
-              <input
-                type="number"
-                name="estimated_value_unit"
-                min="0"
-                step="0.01"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Acquisition Source</label>
-              <input
-                type="text"
-                name="acquisition_source"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-                placeholder="Childhood collection, old purchase, trade..."
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Acquired Date</label>
-              <input
-                type="date"
-                name="acquired_date"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm text-zinc-300">Storage Location</label>
-              <input
-                type="text"
-                name="storage_location"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <label className="mb-1 block text-sm text-zinc-300">Tax Notes</label>
-            <textarea
-              name="tax_notes"
-              rows={4}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              placeholder="Explain how you arrived at cost basis if needed."
-            />
+            <input name="cost_basis_unit" placeholder="Unit Cost" className="input" />
+            <input name="estimated_value_unit" placeholder="Est Value" className="input" />
+            <input name="acquisition_source" placeholder="Source" className="input" />
           </div>
         </section>
 
-        <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <h2 className="text-lg font-semibold">General Notes</h2>
-
-          <div className="mt-4">
-            <label className="mb-1 block text-sm text-zinc-300">Notes</label>
-            <textarea
-              name="notes"
-              rows={4}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              placeholder="Any extra notes for this item"
-            />
-          </div>
-        </section>
-
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-          >
-            Save Starting Inventory Item
+        <div className="flex gap-3">
+          <button className="rounded-xl bg-white px-4 py-2 text-black">
+            Save
           </button>
 
-          <Link
-            href="/app/starting-inventory"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href="/app/starting-inventory" className="btn">
             Cancel
           </Link>
         </div>
