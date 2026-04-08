@@ -40,6 +40,9 @@ type FormState = {
   notes: string
 
   bulkDescription: string
+
+  opgLow: string
+  opgHigh: string
 }
 
 function asNumber(value: string) {
@@ -86,6 +89,9 @@ export default function NewStartingInventoryPage() {
     notes: '',
 
     bulkDescription: '',
+
+    opgLow: '',
+    opgHigh: '',
   })
 
   const quantityNumber = useMemo(
@@ -115,6 +121,20 @@ export default function NewStartingInventoryPage() {
             ? 'single_card'
             : prev.itemType,
     }))
+  }
+
+  function autoFillFromOpg() {
+    const low = asNumber(form.opgLow)
+    const high = asNumber(form.opgHigh)
+
+    if (low > 0) {
+      update('costBasisUnit', low.toFixed(2))
+    }
+
+    if (low > 0 && high > 0) {
+      const midpoint = ((low + high) / 2).toFixed(2)
+      update('estimatedValueUnit', midpoint)
+    }
   }
 
   const isBulk = form.entryMode === 'bulk'
@@ -547,7 +567,44 @@ export default function NewStartingInventoryPage() {
                 value={form.estimatedValueUnit}
                 onChange={(e) => update('estimatedValueUnit', e.target.value)}
                 className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Optional estimated value"
               />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">OPG Low</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.opgLow}
+                onChange={(e) => update('opgLow', e.target.value)}
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Online price guide low"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">OPG High</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.opgHigh}
+                onChange={(e) => update('opgHigh', e.target.value)}
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                placeholder="Online price guide high"
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={autoFillFromOpg}
+                className="w-full rounded-xl border border-emerald-700 px-3 py-2 text-sm text-emerald-200 hover:bg-emerald-900/20"
+              >
+                Auto-fill cost + value from OPG
+              </button>
             </div>
 
             <div>
@@ -637,6 +694,24 @@ export default function NewStartingInventoryPage() {
 
                 <div className="rounded-xl border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
                   Usually best for older cards: <span className="font-semibold">Estimated Legacy</span>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+                <div className="text-sm font-semibold text-zinc-100">Using an online price guide</div>
+                <div className="mt-2 text-sm text-zinc-300">
+                  For legacy cards that were not purchased recently, you can use Beckett or another online price guide.
+                </div>
+                <div className="mt-2 text-sm text-zinc-400">
+                  A good conservative method is:
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-300">
+                    <span className="font-medium text-zinc-100">Cost Basis:</span> use OPG Low
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-300">
+                    <span className="font-medium text-zinc-100">Estimated Value:</span> use the midpoint of OPG Low and OPG High
+                  </div>
                 </div>
               </div>
 
