@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createWorker } from "tesseract.js";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 type IdentifyRequestBody = {
   imageBase64?: string | null;
   imageText?: string | null;
@@ -67,16 +70,18 @@ type ScoredCandidate = ChecklistCardRow & {
   reasons: string[];
 };
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+function getSupabaseAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error(
-    "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in environment variables."
-  );
+  if (!url || !serviceRoleKey) {
+    throw new Error(
+      "Missing Supabase environment variables for checklist identify."
+    );
+  }
+
+  return createClient(url, serviceRoleKey);
 }
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 function normalizeText(value: string | null | undefined): string {
   if (!value) return "";
@@ -121,7 +126,6 @@ function extractYear(text: string): number | null {
   const matches = text.match(/\b(19[5-9]\d|20[0-4]\d|2050)\b/g);
   if (!matches?.length) return null;
 
-  // Prefer most recent realistic card year seen in text
   const years = matches
     .map((m) => Number(m))
     .filter((n) => n >= 1950 && n <= 2050);
@@ -133,7 +137,7 @@ function extractYear(text: string): number | null {
 function extractCardNumber(text: string): string | null {
   const patterns = [
     /(?:card\s*#|no\.?\s*|number\s*|#)\s*([A-Z0-9\-\/]{1,12})\b/i,
-    /\b([A-Z]{0,4}\d{1,4}[A-Z]{0,4})\b/, // CHR44, US250, etc.
+    /\b([A-Z]{0,4}\d{1,4}[A-Z]{0,4})\b/,
   ];
 
   for (const pattern of patterns) {
@@ -238,9 +242,9 @@ function buildClues(params: {
 }
 
 async function fetchCandidatePool(clues: IdentifyClues): Promise<ChecklistCardRow[]> {
+  const supabase = getSupabaseAdminClient();
   const pools: ChecklistCardRow[] = [];
 
-  // Pass 1: narrower search
   let query1 = supabase
     .from("checklist_cards")
     .select("*")
@@ -262,19 +266,18 @@ async function fetchCandidatePool(clues: IdentifyClues): Promise<ChecklistCardRo
   if (error1) {
     console.error("Checklist query1 error:", error1);
   } else if (data1?.length) {
-    pools.push(...data1);
+    pools.push(...(data1 as ChecklistCardRow[]));
   }
 
-  // Pass 2: broader fallback if not enough results
   if (pools.length < 25) {
-    let query2 = supabase
+    const supabase2 = getSupabaseAdminClient();
+    let query2 = supabase2
       .from("checklist_cards")
       .select("*")
       .limit(250);
 
     if (clues.year) query2 = query2.eq("year", clues.year);
 
-    // If player present, lean on player strongly
     if (clues.playerName) {
       query2 = query2.ilike(
         "normalized_player_name",
@@ -288,13 +291,13 @@ async function fetchCandidatePool(clues: IdentifyClues): Promise<ChecklistCardRo
     if (error2) {
       console.error("Checklist query2 error:", error2);
     } else if (data2?.length) {
-      pools.push(...data2);
+      pools.push(...(data2 as ChecklistCardRow[]));
     }
   }
 
-  // Pass 3: set-only fallback if user typed year+set and wants all cards for player/year/set
   if (pools.length < 25 && clues.year && clues.set) {
-    let query3 = supabase
+    const supabase3 = getSupabaseAdminClient();
+    let query3 = supabase3
       .from("checklist_cards")
       .select("*")
       .eq("year", clues.year)
@@ -312,11 +315,10 @@ async function fetchCandidatePool(clues: IdentifyClues): Promise<ChecklistCardRo
     if (error3) {
       console.error("Checklist query3 error:", error3);
     } else if (data3?.length) {
-      pools.push(...data3);
+      pools.push(...(data3 as ChecklistCardRow[]));
     }
   }
 
-  // Deduplicate by id
   const map = new Map<string, ChecklistCardRow>();
   for (const row of pools) {
     if (!row?.id) continue;
@@ -409,7 +411,6 @@ function scoreCandidate(card: ChecklistCardRow, clues: IdentifyClues): ScoredCan
     reasons.push("Serial-numbered indicator match");
   }
 
-  // Token overlap
   const searchable = normalizeText(
     [
       card.player_name,
@@ -437,7 +438,6 @@ function scoreCandidate(card: ChecklistCardRow, clues: IdentifyClues): ScoredCan
     reasons.push(`Token overlap (${tokenHits})`);
   }
 
-  // Slight bump for source quality
   if ((card.source_name ?? "").toLowerCase().includes("topps")) {
     score += 3;
   } else if ((card.source_name ?? "").toLowerCase().includes("beckett")) {
@@ -459,7 +459,6 @@ export async function POST(req: NextRequest) {
 
     let ocrText = (body.imageText ?? "").trim();
 
-    // OCR from image if no imageText already provided
     if (!ocrText && looksLikeBase64Image(body.imageBase64 ?? null)) {
       try {
         ocrText = await runOcrFromBase64Image(body.imageBase64!);

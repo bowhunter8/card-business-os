@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+function getSupabaseAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceRoleKey) {
+    throw new Error(
+      "Missing Supabase environment variables for checklist search."
+    );
+  }
+
+  return createClient(url, serviceRoleKey);
+}
 
 function normalizeText(value: string | null | undefined): string {
   if (!value) return "";
@@ -99,32 +110,41 @@ type CardRow = {
   normalized_team: string | null;
 };
 
-function scoreCard(card: CardRow, params: {
-  q: string;
-  year: number | null;
-  set: string;
-  playerName: string;
-  cardNumber: string;
-  team: string;
-}) {
+function scoreCard(
+  card: CardRow,
+  params: {
+    q: string;
+    year: number | null;
+    set: string;
+    playerName: string;
+    cardNumber: string;
+    team: string;
+  }
+) {
   let score = 0;
   const reasons: string[] = [];
 
-  const searchBlob = normalizeText([
-    card.player_name,
-    card.brand,
-    card.set_name,
-    card.subset,
-    card.team,
-    card.card_number,
-    card.parallel,
-    card.variation,
-    ...(card.aliases ?? []),
-  ].filter(Boolean).join(" "));
+  const searchBlob = normalizeText(
+    [
+      card.player_name,
+      card.brand,
+      card.set_name,
+      card.subset,
+      card.team,
+      card.card_number,
+      card.parallel,
+      card.variation,
+      ...(card.aliases ?? []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
 
   const tokens = tokenize(params.q);
   const cardPlayer = normalizeText(card.player_name);
-  const cardSet = normalizeText([card.brand, card.set_name, card.subset].filter(Boolean).join(" "));
+  const cardSet = normalizeText(
+    [card.brand, card.set_name, card.subset].filter(Boolean).join(" ")
+  );
   const cardTeam = normalizeText(card.team);
   const cardNumber = cleanCardNumber(card.card_number);
 
@@ -144,7 +164,10 @@ function scoreCard(card: CardRow, params: {
     if (cardPlayer === params.playerName) {
       score += 100;
       reasons.push("exact player");
-    } else if (cardPlayer.includes(params.playerName) || params.playerName.includes(cardPlayer)) {
+    } else if (
+      cardPlayer.includes(params.playerName) ||
+      params.playerName.includes(cardPlayer)
+    ) {
       score += 65;
       reasons.push("player");
     }
@@ -188,22 +211,22 @@ function scoreCard(card: CardRow, params: {
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = getSupabaseAdminClient();
     const body = (await req.json()) as SearchRequest;
 
     const q = (body.q ?? "").trim();
     const explicitYear = body.year ? Number(body.year) : null;
     const parsedYear = explicitYear ?? extractYear(q);
-    const parsedCardNumber = cleanCardNumber(body.cardNumber || extractCardNumber(q) || "");
+    const parsedCardNumber = cleanCardNumber(
+      body.cardNumber || extractCardNumber(q) || ""
+    );
     const parsedSet = normalizeText(body.set || "");
     const parsedPlayer = normalizeText(body.playerName || "");
     const parsedTeam = normalizeText(body.team || "");
     const parsedSport = normalizeText(body.sport || "baseball");
     const limit = Math.max(1, Math.min(Number(body.limit ?? 20), 50));
 
-    let query = supabase
-      .from("checklist_cards")
-      .select("*")
-      .limit(300);
+    let query = supabase.from("checklist_cards").select("*").limit(300);
 
     if (parsedSport) {
       query = query.eq("normalized_sport", parsedSport);
@@ -235,21 +258,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
     }
 
-    let pool = data ?? [];
+    let pool = (data ?? []) as CardRow[];
 
     if (pool.length < 10) {
-      let fallback = supabase
-        .from("checklist_cards")
-        .select("*")
-        .limit(400);
+      let fallback = supabase.from("checklist_cards").select("*").limit(400);
 
       if (parsedSport) fallback = fallback.eq("normalized_sport", parsedSport);
       if (parsedYear) fallback = fallback.eq("year", parsedYear);
 
       const { data: fallbackData } = await fallback;
+
       if (fallbackData?.length) {
         const map = new Map<string, CardRow>();
-        [...pool, ...fallbackData].forEach((row) => map.set(row.id, row));
+        [...pool, ...(fallbackData as CardRow[])].forEach((row) =>
+          map.set(row.id, row)
+        );
         pool = [...map.values()];
       }
     }
@@ -287,7 +310,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error:
+          error instanceof Error ? error.message : "Unknown checklist search error",
       },
       { status: 500 }
     );
