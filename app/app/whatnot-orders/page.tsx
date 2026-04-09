@@ -89,6 +89,16 @@ function buildSuggestedGroups(orders: WhatnotOrderRow[]) {
     })
 }
 
+function buildFocusHref(order: WhatnotOrderRow) {
+  const params = new URLSearchParams()
+
+  if (order.id) params.set('row_id', order.id)
+  if (order.order_numeric_id) params.set('order_numeric_id', order.order_numeric_id)
+  if (order.order_id) params.set('order_id', order.order_id)
+
+  return `/app/whatnot-orders/focus?${params.toString()}`
+}
+
 export default async function WhatnotOrdersPage({
   searchParams,
 }: {
@@ -227,9 +237,9 @@ export default async function WhatnotOrdersPage({
         </div>
       </div>
 
-      {matched && focus ? (
+      {matched && (focus || focusOrderNumericId || focusOrderId || focusRowId) ? (
         <div className="rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-300">
-          Highlighted the matched imported Whatnot order below.
+          Matched order found. You can also open the dedicated focus page for a cleaner view.
         </div>
       ) : null}
 
@@ -351,6 +361,7 @@ export default async function WhatnotOrdersPage({
                         <th className="px-3 py-2 text-right">Shipping</th>
                         <th className="px-3 py-2 text-right">Taxes</th>
                         <th className="px-3 py-2 text-right">Total</th>
+                        <th className="px-3 py-2 text-left">Focus</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -376,6 +387,14 @@ export default async function WhatnotOrdersPage({
                           <td className="px-3 py-2 text-right">{money(order.shipping_price)}</td>
                           <td className="px-3 py-2 text-right">{money(order.taxes)}</td>
                           <td className="px-3 py-2 text-right">{money(order.total)}</td>
+                          <td className="px-3 py-2">
+                            <Link
+                              href={buildFocusHref(order)}
+                              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                            >
+                              Open Focus
+                            </Link>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -428,6 +447,7 @@ export default async function WhatnotOrdersPage({
                   <th className="px-3 py-2 text-right">Taxes</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2 text-left">Break Link</th>
+                  <th className="px-3 py-2 text-left">Focus</th>
                 </tr>
               </thead>
               <tbody>
@@ -507,10 +527,24 @@ export default async function WhatnotOrdersPage({
 
                       <td className="px-3 py-2">
                         {order.break_id ? (
-                          <span className="text-emerald-300">Linked</span>
+                          <Link
+                            href={`/app/breaks/${order.break_id}`}
+                            className="text-emerald-300 hover:text-emerald-200"
+                          >
+                            Open Linked Break
+                          </Link>
                         ) : (
                           <span className="text-zinc-500">Not linked yet</span>
                         )}
+                      </td>
+
+                      <td className="px-3 py-2">
+                        <Link
+                          href={buildFocusHref(order)}
+                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                        >
+                          Open Focus
+                        </Link>
                       </td>
                     </tr>
                   )

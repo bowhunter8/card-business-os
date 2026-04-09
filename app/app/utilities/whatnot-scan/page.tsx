@@ -94,33 +94,37 @@ function confidenceBadge(confidence: ScanResponse['confidence']) {
 }
 
 function buildWhatnotOrderHref(order: NonNullable<ScanResponse['matchedOrder']>) {
-  const exact = order.order_numeric_id || order.order_id || order.id
-
   const params = new URLSearchParams()
-  params.set('focus', exact)
-  params.set('matched', '1')
 
-  if (order.order_numeric_id) params.set('order_numeric_id', order.order_numeric_id)
-  if (order.order_id) params.set('order_id', order.order_id)
   params.set('row_id', order.id)
 
-  return `/app/whatnot-orders?${params.toString()}`
+  if (order.order_numeric_id) {
+    params.set('order_numeric_id', order.order_numeric_id)
+  }
+
+  if (order.order_id) {
+    params.set('order_id', order.order_id)
+  }
+
+  return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
 function buildCandidateWhatnotOrderHref(
   item: NonNullable<ScanResponse['candidates']>['whatnotOrders'][number]
 ) {
-  const exact = item.order_numeric_id || item.order_id || item.id
-
   const params = new URLSearchParams()
-  params.set('focus', exact)
-  params.set('matched', '1')
 
-  if (item.order_numeric_id) params.set('order_numeric_id', item.order_numeric_id)
-  if (item.order_id) params.set('order_id', item.order_id)
   params.set('row_id', item.id)
 
-  return `/app/whatnot-orders?${params.toString()}`
+  if (item.order_numeric_id) {
+    params.set('order_numeric_id', item.order_numeric_id)
+  }
+
+  if (item.order_id) {
+    params.set('order_id', item.order_id)
+  }
+
+  return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
 export default function WhatnotScanPage() {
