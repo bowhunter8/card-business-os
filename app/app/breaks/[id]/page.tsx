@@ -341,6 +341,12 @@ export default async function BreakDetailPage({
           {!item.reversed_at ? (
             <>
               <Link
+                href={`/app/breaks/${item.id}/edit`}
+                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+              >
+                Edit Break
+              </Link>
+              <Link
                 href={`/app/breaks/${item.id}/add-cards`}
                 className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
               >
@@ -389,9 +395,7 @@ export default async function BreakDetailPage({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm text-zinc-400">Safety</div>
-              <div className="mt-2 text-lg font-semibold">
-                Roll back this break
-              </div>
+              <div className="mt-2 text-lg font-semibold">Roll back this break</div>
               <div className="mt-2 max-w-2xl text-sm text-zinc-400">
                 This removes inventory created from this break, unlinks related Whatnot orders, and marks the break as reversed.
                 Rollback is blocked if any active sale exists from an item in this break.
@@ -484,9 +488,7 @@ export default async function BreakDetailPage({
       <div className="mt-6 grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <div className="text-sm text-zinc-400">Total Cost</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {money(item.total_cost)}
-          </div>
+          <div className="mt-2 text-3xl font-semibold">{money(item.total_cost)}</div>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">

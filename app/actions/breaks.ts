@@ -88,7 +88,11 @@ export async function createBreakAction(formData: FormData) {
       .eq('user_id', user.id)
       .in('id', selectedWhatnotOrderIds)
 
-    if (selectedOrdersError || !selectedOrders || selectedOrders.length !== selectedWhatnotOrderIds.length) {
+    if (
+      selectedOrdersError ||
+      !selectedOrders ||
+      selectedOrders.length !== selectedWhatnotOrderIds.length
+    ) {
       redirect(
         `/app/breaks/new?error=${encodeURIComponent(
           selectedOrdersError?.message || 'Could not load selected Whatnot orders'
@@ -182,6 +186,103 @@ export async function createBreakAction(formData: FormData) {
   redirect(`/app/breaks/${data.id}`)
 }
 
+export async function updateBreakAction(formData: FormData) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const breakId = safeText(formData.get('break_id'))
+  const breakDate = safeText(formData.get('break_date'))
+  const sourceName = safeText(formData.get('source_name'))
+  const productName = safeText(formData.get('product_name'))
+  const formatType = safeText(formData.get('format_type'))
+  const teamsRaw = safeText(formData.get('teams'))
+  const orderNumber = safeText(formData.get('order_number'))
+  const notes = safeText(formData.get('notes'))
+
+  const purchasePrice = safeNumber(formData.get('purchase_price'))
+  const salesTax = safeNumber(formData.get('sales_tax'))
+  const shippingCost = safeNumber(formData.get('shipping_cost'))
+  const otherFees = safeNumber(formData.get('other_fees'))
+  const cardsReceived = safeNumber(formData.get('cards_received'))
+
+  const allocationMethod =
+    safeText(formData.get('allocation_method')) || 'equal_per_item'
+
+  if (!breakId) {
+    redirect('/app/breaks?error=Missing break id')
+  }
+
+  if (!breakDate || !sourceName || !productName) {
+    redirect(
+      `/app/breaks/${breakId}/edit?error=Break date, source, and product name are required`
+    )
+  }
+
+  const { data: existingBreak, error: existingBreakError } = await supabase
+    .from('breaks')
+    .select('id, user_id, reversed_at')
+    .eq('id', breakId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (existingBreakError || !existingBreak) {
+    redirect('/app/breaks?error=Break not found')
+  }
+
+  if (existingBreak.reversed_at) {
+    redirect(`/app/breaks/${breakId}?error=Reversed breaks cannot be edited`)
+  }
+
+  const teams = teamsRaw
+    ? teamsRaw
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : []
+
+  const totalCost = Number(
+    (purchasePrice + salesTax + shippingCost + otherFees).toFixed(2)
+  )
+
+  const { error: updateError } = await supabase
+    .from('breaks')
+    .update({
+      break_date: breakDate,
+      source_name: sourceName,
+      product_name: productName,
+      format_type: formatType || null,
+      teams,
+      order_number: orderNumber || null,
+      purchase_price: purchasePrice,
+      sales_tax: salesTax,
+      shipping_cost: shippingCost,
+      other_fees: otherFees,
+      total_cost: totalCost,
+      allocation_method: allocationMethod,
+      cards_received: cardsReceived > 0 ? cardsReceived : 0,
+      notes: notes || null,
+    })
+    .eq('id', breakId)
+    .eq('user_id', user.id)
+
+  if (updateError) {
+    redirect(
+      `/app/breaks/${breakId}/edit?error=${encodeURIComponent(
+        updateError.message || 'Could not update break'
+      )}`
+    )
+  }
+
+  redirect(`/app/breaks/${breakId}?success=Break updated`)
+}
+
 export async function addBreakCardsAction(formData: FormData) {
   const supabase = await createClient()
 
@@ -258,8 +359,7 @@ export async function addBreakCardsAction(formData: FormData) {
     const cardNumber = safeText(formData.get(`card_number_${i}`))
     const notes = safeText(formData.get(`notes_${i}`))
 
-    const rowHasMeaningfulCardData =
-      playerName || cardNumber || notes
+    const rowHasMeaningfulCardData = playerName || cardNumber || notes
 
     if (!rowHasMeaningfulCardData) continue
 
@@ -304,7 +404,6 @@ export async function addBreakCardsAction(formData: FormData) {
   }
 
   const blankRemainderCount = cardsReceived - individualRows.length
-
   const totalUnits = cardsReceived
 
   const totalCost = Number(breakRow.total_cost ?? 0)

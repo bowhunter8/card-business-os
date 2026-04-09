@@ -253,7 +253,7 @@ export default async function BreaksPage({
                   <td className="px-4 py-3">{item.remaining}</td>
                   <td className="px-4 py-3">{money(item.total_cost)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                       <Link
                         href={`/app/breaks/${item.id}`}
                         className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
@@ -261,12 +261,20 @@ export default async function BreaksPage({
                         Details
                       </Link>
                       {!item.reversed_at ? (
-                        <Link
-                          href={`/app/breaks/${item.id}/add-cards`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
-                        >
-                          Add Cards
-                        </Link>
+                        <>
+                          <Link
+                            href={`/app/breaks/${item.id}/edit`}
+                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                          >
+                            Edit
+                          </Link>
+                          <Link
+                            href={`/app/breaks/${item.id}/add-cards`}
+                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                          >
+                            Add Cards
+                          </Link>
+                        </>
                       ) : null}
                     </div>
                   </td>
