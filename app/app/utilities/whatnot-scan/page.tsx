@@ -361,21 +361,25 @@ export default function WhatnotScanPage() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-3">
+                  <Link
+                    href={
+                      result.matchedOrder.break_id
+                        ? `/app/breaks/${result.matchedOrder.break_id}`
+                        : buildWhatnotOrderHref(result.matchedOrder)
+                    }
+                    className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                  >
+                    {result.matchedOrder.break_id ? 'Open Linked Break' : 'Open Exact Whatnot Order'}
+                  </Link>
+
                   {result.matchedOrder.break_id ? (
                     <Link
-                      href={`/app/breaks/${result.matchedOrder.break_id}`}
-                      className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                      href={buildWhatnotOrderHref(result.matchedOrder)}
+                      className="inline-flex rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
                     >
-                      Open Linked Break
+                      Open Exact Whatnot Order
                     </Link>
                   ) : null}
-
-                  <Link
-                    href={buildWhatnotOrderHref(result.matchedOrder)}
-                    className="inline-flex rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-                  >
-                    Open Exact Whatnot Order
-                  </Link>
                 </div>
               </div>
             ) : (
@@ -416,9 +420,9 @@ export default function WhatnotScanPage() {
                 <div className="mt-4">
                   <Link
                     href={`/app/breaks/${result.matchedBreak.id}`}
-                    className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                    className="inline-flex rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
                   >
-                    Open Break
+                    Open Break Details
                   </Link>
                 </div>
               </div>
@@ -499,21 +503,25 @@ export default function WhatnotScanPage() {
                           : 'No scoring notes available'}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <Link
+                          href={
+                            item.break_id
+                              ? `/app/breaks/${item.break_id}`
+                              : buildCandidateWhatnotOrderHref(item)
+                          }
+                          className="inline-flex rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-black hover:bg-zinc-200"
+                        >
+                          {item.break_id ? 'Open Linked Break' : 'Open Exact Whatnot Order'}
+                        </Link>
+
                         {item.break_id ? (
                           <Link
-                            href={`/app/breaks/${item.break_id}`}
-                            className="inline-flex rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-black hover:bg-zinc-200"
+                            href={buildCandidateWhatnotOrderHref(item)}
+                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
                           >
-                            Open Linked Break
+                            Open Exact Whatnot Order
                           </Link>
                         ) : null}
-
-                        <Link
-                          href={buildCandidateWhatnotOrderHref(item)}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                        >
-                          Open Exact Whatnot Order
-                        </Link>
                       </div>
                     </div>
                   ))
