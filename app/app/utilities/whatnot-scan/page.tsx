@@ -107,7 +107,9 @@ function buildWhatnotOrderHref(order: NonNullable<ScanResponse['matchedOrder']>)
   return `/app/whatnot-orders?${params.toString()}`
 }
 
-function buildCandidateWhatnotOrderHref(item: NonNullable<ScanResponse['candidates']>['whatnotOrders'][number]) {
+function buildCandidateWhatnotOrderHref(
+  item: NonNullable<ScanResponse['candidates']>['whatnotOrders'][number]
+) {
   const exact = item.order_numeric_id || item.order_id || item.id
 
   const params = new URLSearchParams()
