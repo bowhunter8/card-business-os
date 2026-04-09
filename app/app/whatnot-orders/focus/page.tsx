@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { combineWhatnotOrdersIntoBreakAction } from '@/app/actions/whatnot'
 
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
@@ -68,6 +67,15 @@ function sortOrders(orders: WhatnotOrderRow[]) {
 
     return a.id.localeCompare(b.id)
   })
+}
+
+function buildAllOrdersHref(order: WhatnotOrderRow) {
+  const params = new URLSearchParams()
+  params.set('matched', '1')
+  params.set('row_id', order.id)
+  if (order.order_numeric_id) params.set('order_numeric_id', order.order_numeric_id)
+  if (order.order_id) params.set('order_id', order.order_id)
+  return `/app/whatnot-orders?${params.toString()}`
 }
 
 export default async function WhatnotOrderFocusPage({
@@ -200,7 +208,8 @@ export default async function WhatnotOrderFocusPage({
       if (relatedOrders.some((related) => related.id === order.id)) return false
       return (
         order.seller === primaryOrder.seller &&
-        order.processed_date === primaryOrder.processed_date
+        order.processed_date === primaryOrder.processed_date &&
+        !order.break_id
       )
     })
   )
@@ -232,6 +241,13 @@ export default async function WhatnotOrderFocusPage({
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
             Back to All Orders
+          </Link>
+
+          <Link
+            href={buildAllOrdersHref(primaryOrder)}
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Open in All Orders
           </Link>
 
           {primaryOrder.break_id ? (
@@ -355,28 +371,6 @@ export default async function WhatnotOrderFocusPage({
               Exact matches based on row id, Whatnot order id, or Whatnot numeric order number.
             </p>
           </div>
-
-          {!primaryOrder.break_id && relatedOrders.length > 1 ? (
-            <form action={combineWhatnotOrdersIntoBreakAction}>
-              {relatedOrders
-                .filter((order) => !order.break_id)
-                .map((order) => (
-                  <input
-                    key={order.id}
-                    type="hidden"
-                    name="whatnot_order_ids"
-                    value={order.id}
-                  />
-                ))}
-
-              <button
-                type="submit"
-                className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-              >
-                Combine Matching Rows Into Break
-              </button>
-            </form>
-          ) : null}
         </div>
 
         <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
@@ -459,6 +453,96 @@ export default async function WhatnotOrderFocusPage({
           </table>
         </div>
       </div>
+
+      {!primaryOrder.break_id ? (
+        <form
+          method="get"
+          action="/app/breaks/new"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Build New Break From This Order</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                This opens the normal Add Break page with selected Whatnot orders prefilled, so you can edit everything before saving.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+            >
+              Open In New Break Form
+            </button>
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  name="whatnot_order_ids"
+                  value={primaryOrder.id}
+                  defaultChecked
+                  className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                />
+                <span>
+                  <span className="block font-medium">
+                    Include matched order {primaryOrder.order_numeric_id ? `#${primaryOrder.order_numeric_id}` : ''}
+                  </span>
+                  <span className="block text-sm text-zinc-400">
+                    {primaryOrder.product_name || 'Untitled order'}
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {sameSellerSameDate.length > 0 ? (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                <div className="text-sm font-medium text-zinc-200">
+                  Recommended nearby orders from same seller and date
+                </div>
+                <div className="mt-1 text-sm text-zinc-400">
+                  Check any orders you want bundled into the same new break draft.
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {sameSellerSameDate.map((order) => (
+                    <label
+                      key={order.id}
+                      className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3"
+                    >
+                      <input
+                        type="checkbox"
+                        name="whatnot_order_ids"
+                        value={order.id}
+                        className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium">
+                          {order.order_numeric_id ? `#${order.order_numeric_id}` : 'No order #'} —{' '}
+                          {money(order.total)}
+                        </span>
+                        <span className="block text-sm text-zinc-300">
+                          {order.product_name || 'Untitled order'}
+                        </span>
+                        <span className="block text-xs text-zinc-500">
+                          {order.seller || '—'} •{' '}
+                          {order.processed_date_display || dateDisplay(order.processed_date)}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
+                No same-seller same-date staging orders were found to recommend for bundling.
+              </div>
+            )}
+          </div>
+        </form>
+      ) : null}
 
       {sameSellerSameDate.length > 0 ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">

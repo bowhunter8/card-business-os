@@ -58,8 +58,20 @@ export async function createBreakAction(formData: FormData) {
   const allocationMethod =
     safeText(formData.get('allocation_method')) || 'equal_per_item'
 
+  const selectedWhatnotOrderIds = formData
+    .getAll('whatnot_order_ids')
+    .map((value) => safeText(value))
+    .filter(Boolean)
+
   if (!breakDate || !sourceName || !productName) {
-    redirect('/app/breaks/new?error=Break date, source, and product name are required')
+    const whatnotQuery =
+      selectedWhatnotOrderIds.length > 0
+        ? `&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
+        : ''
+
+    redirect(
+      `/app/breaks/new?error=Break date, source, and product name are required${whatnotQuery}`
+    )
   }
 
   const teams = teamsRaw
@@ -68,6 +80,47 @@ export async function createBreakAction(formData: FormData) {
         .map((t) => t.trim())
         .filter(Boolean)
     : []
+
+  if (selectedWhatnotOrderIds.length > 0) {
+    const { data: selectedOrders, error: selectedOrdersError } = await supabase
+      .from('whatnot_orders')
+      .select('id, break_id, seller')
+      .eq('user_id', user.id)
+      .in('id', selectedWhatnotOrderIds)
+
+    if (selectedOrdersError || !selectedOrders || selectedOrders.length !== selectedWhatnotOrderIds.length) {
+      redirect(
+        `/app/breaks/new?error=${encodeURIComponent(
+          selectedOrdersError?.message || 'Could not load selected Whatnot orders'
+        )}&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
+      )
+    }
+
+    const alreadyLinked = selectedOrders.filter((order) => !!order.break_id)
+    if (alreadyLinked.length > 0) {
+      redirect(
+        `/app/breaks/new?error=One or more selected Whatnot orders are already linked to a break&whatnot_order_ids=${encodeURIComponent(
+          selectedWhatnotOrderIds.join(',')
+        )}`
+      )
+    }
+
+    const distinctSellers = Array.from(
+      new Set(
+        selectedOrders
+          .map((order) => String(order.seller ?? '').trim())
+          .filter(Boolean)
+      )
+    )
+
+    if (distinctSellers.length > 1) {
+      redirect(
+        `/app/breaks/new?error=Please select orders from only one seller at a time&whatnot_order_ids=${encodeURIComponent(
+          selectedWhatnotOrderIds.join(',')
+        )}`
+      )
+    }
+  }
 
   const totalCost = Number(
     (purchasePrice + salesTax + shippingCost + otherFees).toFixed(2)
@@ -96,11 +149,34 @@ export async function createBreakAction(formData: FormData) {
     .single()
 
   if (error || !data) {
+    const whatnotQuery =
+      selectedWhatnotOrderIds.length > 0
+        ? `&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
+        : ''
+
     redirect(
       `/app/breaks/new?error=${encodeURIComponent(
         error?.message ?? 'Could not save break'
-      )}`
+      )}${whatnotQuery}`
     )
+  }
+
+  if (selectedWhatnotOrderIds.length > 0) {
+    const { error: linkError } = await supabase
+      .from('whatnot_orders')
+      .update({
+        break_id: data.id,
+      })
+      .eq('user_id', user.id)
+      .in('id', selectedWhatnotOrderIds)
+
+    if (linkError) {
+      redirect(
+        `/app/breaks/new?error=${encodeURIComponent(
+          linkError.message || 'Break was created but Whatnot orders could not be linked'
+        )}&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
+      )
+    }
   }
 
   redirect(`/app/breaks/${data.id}`)
