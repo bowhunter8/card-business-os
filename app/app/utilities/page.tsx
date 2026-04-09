@@ -50,6 +50,16 @@ export default function UtilitiesPage() {
           </Link>
 
           <Link
+            href="/app/utilities/whatnot-scan"
+            className="rounded-2xl border border-amber-900 bg-amber-950/30 p-6 transition hover:bg-amber-900/30"
+          >
+            <h3 className="text-xl font-semibold">Scan Whatnot Screenshot / Email</h3>
+            <p className="mt-2 text-sm text-zinc-300">
+              Upload a Whatnot desktop screenshot, mobile screenshot, or delivery email and try to match it to an imported order or existing break.
+            </p>
+          </Link>
+
+          <Link
             href="/app/utilities/export"
             className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 transition hover:bg-zinc-800"
           >
