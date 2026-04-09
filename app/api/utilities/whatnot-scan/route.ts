@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createWorker } from 'tesseract.js'
 import { createClient } from '@/lib/supabase/server'
-import {
-  extractWhatnotData,
-  scoreBreakMatch,
-  scoreWhatnotOrderMatch,
-} from '@/lib/whatnot-scan'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-type WhatnotOrderRow = {
+type ExtractedData = {
+  detectedFormat: 'desktop_order' | 'mobile_order' | 'delivery_email' | 'unknown'
+  orderId: string | null
+  trackingNumber: string | null
+  seller: string | null
+  orderDate: string | null
+  total: number | null
+  titles: string[]
+  normalizedText: string
+}
+
+type MatchedOrder = {
   id: string
   break_id: string | null
   order_id: string | null
@@ -20,9 +25,11 @@ type WhatnotOrderRow = {
   processed_date: string | null
   processed_date_display: string | null
   total: number | null
+  score?: number
+  reasons?: string[]
 }
 
-type BreakRow = {
+type MatchedBreak = {
   id: string
   break_date: string | null
   source_name: string | null
@@ -32,22 +39,162 @@ type BreakRow = {
   total_cost: number | null
 }
 
-async function runOcr(file: File) {
-  const arrayBuffer = await file.arrayBuffer()
-  const imageBuffer = Buffer.from(arrayBuffer)
+function cleanDigits(value: string | null | undefined) {
+  return String(value ?? '').replace(/\D/g, '')
+}
 
-  const worker = await createWorker('eng')
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+}
 
-  try {
-    const result = await worker.recognize(imageBuffer)
-    return result.data.text ?? ''
-  } finally {
-    await worker.terminate()
+function extractData(rawText: string): ExtractedData {
+  const lines = rawText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  let orderId: string | null = null
+  let trackingNumber: string | null = null
+  let seller: string | null = null
+  let orderDate: string | null = null
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    const nextLine = lines[i + 1] ?? ''
+
+    const orderInline =
+      line.match(/order\s*id\s*[:#]?\s*([0-9]{6,20})/i) ||
+      line.match(/order\s*number\s*[:#]?\s*([0-9]{6,20})/i)
+
+    if (!orderId && orderInline?.[1]) {
+      orderId = orderInline[1]
+    }
+
+    if (!orderId && /^order\s*id\b/i.test(line)) {
+      const nextMatch = nextLine.match(/([0-9]{6,20})/)
+      if (nextMatch?.[1]) {
+        orderId = nextMatch[1]
+      }
+    }
+
+    const trackingInline =
+      line.match(/tracking(?:\s*number|\s*id|\s*your purchase)?\s*[:#]?\s*(9[0-9]{15,29})/i)
+
+    if (!trackingNumber && trackingInline?.[1]) {
+      trackingNumber = trackingInline[1]
+    }
+
+    if (!trackingNumber && /track\s*your\s*purchase/i.test(line)) {
+      const nextMatch = nextLine.match(/\b(9[0-9]{15,29})\b/)
+      if (nextMatch?.[1]) {
+        trackingNumber = nextMatch[1]
+      }
+    }
+
+    const sellerInline = line.match(/sold\s*by\s*([a-z0-9._-]+)/i)
+    if (!seller && sellerInline?.[1]) {
+      seller = sellerInline[1]
+    }
+
+    if (!seller && /^sold\s*by\b/i.test(line)) {
+      const nextMatch = nextLine.match(/([a-z0-9._-]{3,})/i)
+      if (nextMatch?.[1]) {
+        seller = nextMatch[1]
+      }
+    }
+
+    const dateInline =
+      line.match(/order\s*date\s*[:#]?\s*([a-z]{3,9}\s+\d{1,2},\s+\d{4})/i) ||
+      line.match(/order\s*date\s*[:#]?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i)
+
+    if (!orderDate && dateInline?.[1]) {
+      orderDate = dateInline[1]
+    }
+
+    if (!orderDate && /^order\s*date\b/i.test(line)) {
+      const nextMatch =
+        nextLine.match(/([a-z]{3,9}\s+\d{1,2},\s+\d{4})/i) ||
+        nextLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/)
+      if (nextMatch?.[1]) {
+        orderDate = nextMatch[1]
+      }
+    }
+  }
+
+  if (!orderId) {
+    const fallbackIds = rawText.match(/\b([0-9]{8,10})\b/g)
+    if (fallbackIds?.length) {
+      orderId = fallbackIds[0]
+    }
+  }
+
+  const totalMatch = rawText.match(/\$([0-9]+\.[0-9]{2})/)
+
+  const titles = lines
+    .filter((line) => {
+      const lower = line.toLowerCase()
+      return (
+        (lower.includes('topps') ||
+          lower.includes('heritage') ||
+          lower.includes('baseball') ||
+          lower.includes('blue jays') ||
+          lower.includes('brewers') ||
+          lower.includes('guardians') ||
+          lower.includes('mariners')) &&
+        !lower.startsWith('order details') &&
+        !lower.startsWith('category') &&
+        !lower.startsWith('sold by')
+      )
+    })
+    .slice(0, 5)
+
+  let detectedFormat: ExtractedData['detectedFormat'] = 'unknown'
+  const normalized = normalizeText(rawText)
+
+  if (
+    normalized.includes('your whatnot order has arrived') ||
+    normalized.includes('items in this shipment')
+  ) {
+    detectedFormat = 'delivery_email'
+  } else if (
+    normalized.includes('track your purchase') &&
+    normalized.includes('order details')
+  ) {
+    detectedFormat = 'mobile_order'
+  } else if (
+    normalized.includes('shipment details') &&
+    normalized.includes('order details')
+  ) {
+    detectedFormat = 'desktop_order'
+  }
+
+  return {
+    detectedFormat,
+    orderId,
+    trackingNumber,
+    seller,
+    orderDate,
+    total: totalMatch ? Number(totalMatch[1]) : null,
+    titles,
+    normalizedText: rawText,
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
+    const body = await req.json()
+    const rawText = body.text
+
+    if (!rawText || typeof rawText !== 'string') {
+      return NextResponse.json({ error: 'OCR text is required.' }, { status: 400 })
+    }
+
+    const extracted = extractData(rawText)
     const supabase = await createClient()
 
     const {
@@ -58,98 +205,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const formData = await request.formData()
-    const file = formData.get('file')
+    let matchedOrder: MatchedOrder | null = null
+    let matchedBreak: MatchedBreak | null = null
 
-    if (!(file instanceof File)) {
-      return NextResponse.json(
-        { error: 'Image file is required.' },
-        { status: 400 }
-      )
-    }
+    const cleanedOrderId = cleanDigits(extracted.orderId)
 
-    if (!file.type.startsWith('image/')) {
-      return NextResponse.json(
-        { error: 'Please upload an image file.' },
-        { status: 400 }
-      )
-    }
-
-    const rawText = await runOcr(file)
-    const extracted = extractWhatnotData(rawText)
-    const exactOrderId = extracted.orderId
-
-    let exactOrder: WhatnotOrderRow | null = null
-    let linkedBreakFromOrder: BreakRow | null = null
-    let exactBreak: BreakRow | null = null
-
-    if (exactOrderId) {
-      const [{ data: orderByOrderId }, { data: breakByOrderNumber }] =
-        await Promise.all([
-          supabase
-            .from('whatnot_orders')
-            .select(
-              `
-              id,
-              break_id,
-              order_id,
-              order_numeric_id,
-              seller,
-              product_name,
-              processed_date,
-              processed_date_display,
-              total
-            `
-            )
-            .eq('user_id', user.id)
-            .or(`order_id.eq.${exactOrderId},order_numeric_id.eq.${exactOrderId}`)
-            .maybeSingle(),
-
-          supabase
-            .from('breaks')
-            .select(
-              `
-              id,
-              break_date,
-              source_name,
-              product_name,
-              order_number,
-              notes,
-              total_cost
-            `
-            )
-            .eq('user_id', user.id)
-            .eq('order_number', exactOrderId)
-            .maybeSingle(),
-        ])
-
-      exactOrder = (orderByOrderId as WhatnotOrderRow | null) ?? null
-      exactBreak = (breakByOrderNumber as BreakRow | null) ?? null
-
-      if (exactOrder?.break_id) {
-        const { data: linkedBreak } = await supabase
-          .from('breaks')
-          .select(
-            `
-            id,
-            break_date,
-            source_name,
-            product_name,
-            order_number,
-            notes,
-            total_cost
-          `
-          )
-          .eq('user_id', user.id)
-          .eq('id', exactOrder.break_id)
-          .maybeSingle()
-
-        linkedBreakFromOrder = (linkedBreak as BreakRow | null) ?? null
-      }
-    }
-
-    const [recentOrdersResponse, recentBreaksResponse] = await Promise.all([
-      supabase
+    if (cleanedOrderId) {
+      const { data: exactMatch } = await supabase
         .from('whatnot_orders')
         .select(
           `
@@ -165,10 +227,20 @@ export async function POST(request: NextRequest) {
         `
         )
         .eq('user_id', user.id)
-        .order('processed_date', { ascending: false })
-        .limit(300),
+        .or(`order_id.eq.${cleanedOrderId},order_numeric_id.eq.${cleanedOrderId}`)
+        .maybeSingle()
 
-      supabase
+      if (exactMatch) {
+        matchedOrder = {
+          ...(exactMatch as MatchedOrder),
+          score: 100,
+          reasons: ['exact order id match'],
+        }
+      }
+    }
+
+    if (matchedOrder?.break_id) {
+      const { data: linkedBreak } = await supabase
         .from('breaks')
         .select(
           `
@@ -182,114 +254,34 @@ export async function POST(request: NextRequest) {
         `
         )
         .eq('user_id', user.id)
-        .order('break_date', { ascending: false })
-        .limit(300),
-    ])
+        .eq('id', matchedOrder.break_id)
+        .maybeSingle()
 
-    const recentOrders = (recentOrdersResponse.data ?? []) as WhatnotOrderRow[]
-    const recentBreaks = (recentBreaksResponse.data ?? []) as BreakRow[]
-
-    const scoredOrders = recentOrders
-      .map((row) => {
-        const match = scoreWhatnotOrderMatch(extracted, row)
-        return {
-          ...row,
-          score: match.score,
-          reasons: match.reasons,
-        }
-      })
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-
-    const scoredBreaks = recentBreaks
-      .map((row) => {
-        const match = scoreBreakMatch(extracted, row)
-        return {
-          ...row,
-          score: match.score,
-          reasons: match.reasons,
-        }
-      })
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-
-    let matchedBy: string[] = []
-    let matchedBreak: BreakRow | null = null
-    let matchedOrder: WhatnotOrderRow | null = null
-    let confidence: 'exact' | 'high' | 'medium' | 'low' | 'none' = 'none'
-
-    if (linkedBreakFromOrder) {
-      matchedBreak = linkedBreakFromOrder
-      matchedOrder = exactOrder
-      matchedBy = ['exact_order_match', 'linked_whatnot_order_to_break']
-      confidence = 'exact'
-    } else if (exactBreak) {
-      matchedBreak = exactBreak
-      matchedBy = ['exact_break_order_number_match']
-      confidence = 'exact'
-    } else if (exactOrder) {
-      matchedOrder = exactOrder
-      matchedBy = ['exact_whatnot_order_match']
-      confidence = 'high'
-    } else if (scoredBreaks[0] && scoredBreaks[0].score >= 30) {
-      matchedBreak = scoredBreaks[0]
-      matchedBy = scoredBreaks[0].reasons
-      confidence = scoredBreaks[0].score >= 60 ? 'high' : 'medium'
-    } else if (scoredOrders[0] && scoredOrders[0].score >= 30) {
-      matchedOrder = scoredOrders[0]
-      matchedBy = scoredOrders[0].reasons
-      confidence = scoredOrders[0].score >= 60 ? 'high' : 'medium'
-
-      if (matchedOrder.break_id) {
-        const { data: linkedBreak } = await supabase
-          .from('breaks')
-          .select(
-            `
-            id,
-            break_date,
-            source_name,
-            product_name,
-            order_number,
-            notes,
-            total_cost
-          `
-          )
-          .eq('user_id', user.id)
-          .eq('id', matchedOrder.break_id)
-          .maybeSingle()
-
-        matchedBreak = (linkedBreak as BreakRow | null) ?? null
-      }
-    } else if (scoredBreaks[0] || scoredOrders[0]) {
-      if ((scoredBreaks[0]?.score ?? 0) >= (scoredOrders[0]?.score ?? 0)) {
-        matchedBreak = scoredBreaks[0] ?? null
-        matchedBy = scoredBreaks[0]?.reasons ?? []
-        confidence = 'low'
-      } else {
-        matchedOrder = scoredOrders[0] ?? null
-        matchedBy = scoredOrders[0]?.reasons ?? []
-        confidence = 'low'
+      if (linkedBreak) {
+        matchedBreak = linkedBreak as MatchedBreak
       }
     }
 
     return NextResponse.json({
       success: true,
       extracted,
-      matchedBreak,
       matchedOrder,
-      matchedBy,
-      confidence,
+      matchedBreak,
+      matchedBy: matchedOrder ? ['order id'] : [],
+      confidence: matchedOrder ? 'exact' : 'low',
       candidates: {
-        breaks: scoredBreaks,
-        whatnotOrders: scoredOrders,
+        breaks: matchedBreak ? [matchedBreak] : [],
+        whatnotOrders: matchedOrder ? [matchedOrder] : [],
       },
     })
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Scanner route failed.'
+    console.error('Scanner route error:', error)
 
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'Scanner route failed.',
+      },
+      { status: 500 }
+    )
   }
 }
