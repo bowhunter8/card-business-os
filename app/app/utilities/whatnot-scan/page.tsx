@@ -94,10 +94,7 @@ function confidenceBadge(confidence: ScanResponse['confidence']) {
 }
 
 function buildWhatnotOrderHref(order: NonNullable<ScanResponse['matchedOrder']>) {
-  const exact =
-    order.order_numeric_id ||
-    order.order_id ||
-    order.id
+  const exact = order.order_numeric_id || order.order_id || order.id
 
   const params = new URLSearchParams()
   params.set('focus', exact)
@@ -106,6 +103,20 @@ function buildWhatnotOrderHref(order: NonNullable<ScanResponse['matchedOrder']>)
   if (order.order_numeric_id) params.set('order_numeric_id', order.order_numeric_id)
   if (order.order_id) params.set('order_id', order.order_id)
   params.set('row_id', order.id)
+
+  return `/app/whatnot-orders?${params.toString()}`
+}
+
+function buildCandidateWhatnotOrderHref(item: NonNullable<ScanResponse['candidates']>['whatnotOrders'][number]) {
+  const exact = item.order_numeric_id || item.order_id || item.id
+
+  const params = new URLSearchParams()
+  params.set('focus', exact)
+  params.set('matched', '1')
+
+  if (item.order_numeric_id) params.set('order_numeric_id', item.order_numeric_id)
+  if (item.order_id) params.set('order_id', item.order_id)
+  params.set('row_id', item.id)
 
   return `/app/whatnot-orders?${params.toString()}`
 }
@@ -347,7 +358,16 @@ export default function WhatnotScanPage() {
                   </div>
                 </div>
 
-                <div className="mt-4">
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {result.matchedOrder.break_id ? (
+                    <Link
+                      href={`/app/breaks/${result.matchedOrder.break_id}`}
+                      className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                    >
+                      Open Linked Break
+                    </Link>
+                  ) : null}
+
                   <Link
                     href={buildWhatnotOrderHref(result.matchedOrder)}
                     className="inline-flex rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
@@ -439,7 +459,7 @@ export default function WhatnotScanPage() {
                           href={`/app/breaks/${item.id}`}
                           className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
                         >
-                          Open
+                          Open Break
                         </Link>
                       </div>
                     </div>
@@ -476,17 +496,18 @@ export default function WhatnotScanPage() {
                           ? item.reasons.join(' • ')
                           : 'No scoring notes available'}
                       </div>
-                      <div className="mt-3">
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {item.break_id ? (
+                          <Link
+                            href={`/app/breaks/${item.break_id}`}
+                            className="inline-flex rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-black hover:bg-zinc-200"
+                          >
+                            Open Linked Break
+                          </Link>
+                        ) : null}
+
                         <Link
-                          href={
-                            item.order_numeric_id || item.order_id || item.id
-                              ? `/app/whatnot-orders?focus=${encodeURIComponent(
-                                  item.order_numeric_id || item.order_id || item.id
-                                )}&matched=1&order_numeric_id=${encodeURIComponent(
-                                  item.order_numeric_id || ''
-                                )}&order_id=${encodeURIComponent(item.order_id || '')}&row_id=${encodeURIComponent(item.id)}`
-                              : '/app/whatnot-orders'
-                          }
+                          href={buildCandidateWhatnotOrderHref(item)}
                           className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
                         >
                           Open Exact Whatnot Order
