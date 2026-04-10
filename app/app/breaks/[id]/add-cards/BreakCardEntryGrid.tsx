@@ -67,6 +67,7 @@ export default function BreakCardEntryGrid({
             <th className="px-3 py-3 text-left font-medium">Set</th>
             <th className="px-3 py-3 text-left font-medium">Player</th>
             <th className="px-3 py-3 text-left font-medium">Card #</th>
+            <th className="px-3 py-3 text-left font-medium">Status</th>
             <th className="px-3 py-3 text-left font-medium">Notes</th>
           </tr>
         </thead>
@@ -110,6 +111,17 @@ export default function BreakCardEntryGrid({
                   placeholder="24"
                   className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                 />
+              </td>
+
+              <td className="px-3 py-2">
+                <select
+                  name={`status_${index}`}
+                  defaultValue="available"
+                  className="w-44 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
+                >
+                  <option value="available">For Sale</option>
+                  <option value="personal">Personal Collection</option>
+                </select>
               </td>
 
               <td className="px-3 py-2">

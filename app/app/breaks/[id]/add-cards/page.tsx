@@ -90,7 +90,7 @@ export default async function AddBreakCardsPage({
         <div>
           <h1 className="text-3xl font-semibold">Add Cards From Break</h1>
           <p className="mt-2 text-zinc-400">
-            Enter the cards you want tracked individually. Blank rows will be grouped into one common lot automatically.
+            Enter the cards you want tracked individually and choose whether each card is for sale or personal collection.
           </p>
         </div>
 
@@ -152,6 +152,7 @@ export default async function AddBreakCardsPage({
         <div className="text-sm font-medium text-zinc-200">How this works</div>
         <div className="mt-2 space-y-1 text-sm text-zinc-400">
           <p>Only enter the cards you want tracked individually.</p>
+          <p>Choose each card as For Sale or Personal Collection during entry.</p>
           <p>Leave the rest blank.</p>
           <p>Any unfilled rows from this break will be grouped into one common / bulk lot automatically.</p>
           <p>Total cards recorded from this break cannot exceed the Cards Received count.</p>

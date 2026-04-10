@@ -12,6 +12,11 @@ function safeNumber(value: FormDataEntryValue | null) {
   return Number.isFinite(num) ? num : 0
 }
 
+function normalizeInventoryStatus(value: string) {
+  if (value === 'personal') return 'personal'
+  return 'available'
+}
+
 function buildCardTitle(input: {
   year: string
   setName: string
@@ -357,6 +362,7 @@ export async function addBreakCardsAction(formData: FormData) {
     const setName = safeText(formData.get(`set_name_${i}`))
     const playerName = safeText(formData.get(`player_name_${i}`))
     const cardNumber = safeText(formData.get(`card_number_${i}`))
+    const statusRaw = safeText(formData.get(`status_${i}`))
     const notes = safeText(formData.get(`notes_${i}`))
 
     const rowHasMeaningfulCardData = playerName || cardNumber || notes
@@ -364,15 +370,16 @@ export async function addBreakCardsAction(formData: FormData) {
     if (!rowHasMeaningfulCardData) continue
 
     const year = yearRaw ? Number(yearRaw) : null
+    const normalizedStatus = normalizeInventoryStatus(statusRaw)
 
     individualRows.push({
       user_id: user.id,
       source_type: 'break',
       source_break_id: breakId,
       item_type: 'single_card',
-      status: 'available',
+      status: normalizedStatus,
       quantity: 1,
-      available_quantity: 1,
+      available_quantity: normalizedStatus === 'personal' ? 0 : 1,
       title:
         buildCardTitle({
           year: yearRaw,
