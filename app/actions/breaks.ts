@@ -3,6 +3,17 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
+type RestorableEntryRow = {
+  year: string
+  set_name: string
+  player_name: string
+  card_number: string
+  item_type: string
+  quantity: string
+  status: string
+  notes: string
+}
+
 function safeText(value: FormDataEntryValue | null) {
   return String(value ?? '').trim()
 }
@@ -17,14 +28,21 @@ function normalizeInventoryStatus(value: string) {
   return 'available'
 }
 
+function normalizeItemType(value: string) {
+  if (value === 'lot') return 'lot'
+  return 'single_card'
+}
+
 function buildCardTitle(input: {
   year: string
   setName: string
   playerName: string
   cardNumber: string
   notes: string
+  itemType: string
+  quantity: number
 }) {
-  return [
+  const base = [
     input.year,
     input.setName,
     input.playerName,
@@ -33,6 +51,46 @@ function buildCardTitle(input: {
   ]
     .filter(Boolean)
     .join(' • ')
+
+  if (input.itemType === 'lot' && input.quantity > 1) {
+    return `${base || 'Lot'} • Qty ${input.quantity}`
+  }
+
+  return base
+}
+
+function buildRestoreRows(formData: FormData, rowCount: number): RestorableEntryRow[] {
+  const rows: RestorableEntryRow[] = []
+
+  for (let i = 0; i < rowCount; i++) {
+    rows.push({
+      year: safeText(formData.get(`year_${i}`)),
+      set_name: safeText(formData.get(`set_name_${i}`)),
+      player_name: safeText(formData.get(`player_name_${i}`)),
+      card_number: safeText(formData.get(`card_number_${i}`)),
+      item_type: safeText(formData.get(`item_type_${i}`)) || 'single_card',
+      quantity: String(Math.max(1, safeNumber(formData.get(`quantity_${i}`)) || 1)),
+      status: safeText(formData.get(`status_${i}`)) || 'available',
+      notes: safeText(formData.get(`notes_${i}`)),
+    })
+  }
+
+  return rows
+}
+
+function redirectBackToAddCardsWithRestore(args: {
+  breakId: string
+  error: string
+  rowCount: number
+  cardsReceived: number
+  restoreRows: RestorableEntryRow[]
+}) {
+  const params = new URLSearchParams()
+  params.set('error', args.error)
+  params.set('row_count', String(args.rowCount))
+  params.set('cards_received', String(args.cardsReceived))
+  params.set('restore', JSON.stringify(args.restoreRows))
+  redirect(`/app/breaks/${args.breakId}/add-cards?${params.toString()}`)
 }
 
 export async function createBreakAction(formData: FormData) {
@@ -329,6 +387,8 @@ export async function addBreakCardsAction(formData: FormData) {
     )
   }
 
+  const restoreRows = buildRestoreRows(formData, cardCount)
+
   type InsertRow = {
     user_id: string
     source_type: string
@@ -353,33 +413,38 @@ export async function addBreakCardsAction(formData: FormData) {
     notes: string | null
   }
 
-  const individualRows: InsertRow[] = []
+  const enteredRows: InsertRow[] = []
 
-  const maxRows = Math.min(cardCount, cardsReceived, 100)
+  const maxRows = Math.min(cardCount, 100)
 
   for (let i = 0; i < maxRows; i++) {
     const yearRaw = safeText(formData.get(`year_${i}`))
     const setName = safeText(formData.get(`set_name_${i}`))
     const playerName = safeText(formData.get(`player_name_${i}`))
     const cardNumber = safeText(formData.get(`card_number_${i}`))
+    const itemTypeRaw = safeText(formData.get(`item_type_${i}`))
+    const quantityRaw = safeNumber(formData.get(`quantity_${i}`))
     const statusRaw = safeText(formData.get(`status_${i}`))
     const notes = safeText(formData.get(`notes_${i}`))
 
-    const rowHasMeaningfulCardData = playerName || cardNumber || notes
+    const rowHasMeaningfulData =
+      playerName || cardNumber || notes || setName || yearRaw
 
-    if (!rowHasMeaningfulCardData) continue
+    if (!rowHasMeaningfulData) continue
 
     const year = yearRaw ? Number(yearRaw) : null
     const normalizedStatus = normalizeInventoryStatus(statusRaw)
+    const normalizedItemType = normalizeItemType(itemTypeRaw)
+    const quantity = Math.max(1, quantityRaw || 1)
 
-    individualRows.push({
+    enteredRows.push({
       user_id: user.id,
       source_type: 'break',
       source_break_id: breakId,
-      item_type: 'single_card',
+      item_type: normalizedItemType,
       status: normalizedStatus,
-      quantity: 1,
-      available_quantity: normalizedStatus === 'personal' ? 0 : 1,
+      quantity,
+      available_quantity: normalizedStatus === 'personal' ? 0 : quantity,
       title:
         buildCardTitle({
           year: yearRaw,
@@ -387,6 +452,8 @@ export async function addBreakCardsAction(formData: FormData) {
           playerName,
           cardNumber,
           notes,
+          itemType: normalizedItemType,
+          quantity,
         }) || null,
       player_name: playerName || null,
       year: year && !Number.isNaN(year) ? year : null,
@@ -404,13 +471,22 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
-  if (individualRows.length > cardsReceived) {
-    redirect(
-      `/app/breaks/${breakId}/add-cards?error=You entered more individual cards than the break received`
-    )
+  const enteredUnitCount = enteredRows.reduce(
+    (sum, row) => sum + Number(row.quantity ?? 0),
+    0
+  )
+
+  if (enteredUnitCount > cardsReceived) {
+    redirectBackToAddCardsWithRestore({
+      breakId,
+      error: `You entered ${enteredUnitCount} total cards but this break only has ${cardsReceived} cards received`,
+      rowCount: cardCount,
+      cardsReceived,
+      restoreRows,
+    })
   }
 
-  const blankRemainderCount = cardsReceived - individualRows.length
+  const blankRemainderCount = cardsReceived - enteredUnitCount
   const totalUnits = cardsReceived
 
   const totalCost = Number(breakRow.total_cost ?? 0)
@@ -420,15 +496,23 @@ export async function addBreakCardsAction(formData: FormData) {
 
   let runningIndex = 0
 
-  for (const row of individualRows) {
-    const cents = runningIndex < remainder ? baseCents + 1 : baseCents
-    const value = cents / 100
-    row.cost_basis_unit = value
-    row.cost_basis_total = value
-    runningIndex += 1
+  for (const row of enteredRows) {
+    let rowTotalCents = 0
+
+    for (let i = 0; i < row.quantity; i++) {
+      const cents = runningIndex < remainder ? baseCents + 1 : baseCents
+      rowTotalCents += cents
+      runningIndex += 1
+    }
+
+    const rowTotal = rowTotalCents / 100
+    const rowUnit = row.quantity > 0 ? rowTotal / row.quantity : 0
+
+    row.cost_basis_unit = Number(rowUnit.toFixed(4))
+    row.cost_basis_total = Number(rowTotal.toFixed(2))
   }
 
-  const rowsToInsert: InsertRow[] = [...individualRows]
+  const rowsToInsert: InsertRow[] = [...enteredRows]
 
   if (blankRemainderCount > 0) {
     let bulkTotalCents = 0
@@ -446,11 +530,11 @@ export async function addBreakCardsAction(formData: FormData) {
       user_id: user.id,
       source_type: 'break',
       source_break_id: breakId,
-      item_type: 'single_card',
+      item_type: 'lot',
       status: 'available',
       quantity: blankRemainderCount,
       available_quantity: blankRemainderCount,
-      title: 'Bulk / Common Lot',
+      title: `Bulk / Common Lot • Qty ${blankRemainderCount}`,
       player_name: 'Bulk / Common Lot',
       year: null,
       brand: null,
@@ -458,7 +542,7 @@ export async function addBreakCardsAction(formData: FormData) {
       card_number: null,
       parallel_name: null,
       team: null,
-      cost_basis_unit: Number(bulkUnitCost.toFixed(2)),
+      cost_basis_unit: Number(bulkUnitCost.toFixed(4)),
       cost_basis_total: Number(bulkTotalCost.toFixed(2)),
       estimated_value_unit: null,
       estimated_value_total: null,
@@ -473,11 +557,13 @@ export async function addBreakCardsAction(formData: FormData) {
     .select('id, cost_basis_total, quantity, status')
 
   if (insertError || !insertedRows) {
-    redirect(
-      `/app/breaks/${breakId}/add-cards?error=${encodeURIComponent(
-        insertError?.message ?? 'Could not add cards'
-      )}`
-    )
+    redirectBackToAddCardsWithRestore({
+      breakId,
+      error: insertError?.message ?? 'Could not add cards',
+      rowCount: cardCount,
+      cardsReceived,
+      restoreRows,
+    })
   }
 
   const txRows = insertedRows.map((item) => ({

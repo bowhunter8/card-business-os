@@ -17,6 +17,22 @@ type BreakRow = {
   cards_received?: number | null
 }
 
+type LinkedWhatnotOrderRow = {
+  id: string
+  product_name: string | null
+}
+
+type EntryRow = {
+  year: string
+  set_name: string
+  player_name: string
+  card_number: string
+  item_type: string
+  quantity: string
+  status: string
+  notes: string
+}
+
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -24,16 +40,73 @@ function money(value: number | null) {
   }).format(Number(value ?? 0))
 }
 
-function extractYear(productName: string | null) {
-  if (!productName) return ''
-  const match = productName.match(/\b(19|20)\d{2}\b/)
+function getCurrentYear() {
+  return String(new Date().getFullYear())
+}
+
+function extractYearFromText(text: string | null | undefined) {
+  if (!text) return ''
+  const match = String(text).match(/\b(19|20)\d{2}\b/)
   return match ? match[0] : ''
 }
 
-function extractSet(productName: string | null) {
-  if (!productName) return ''
-  const year = extractYear(productName)
-  return productName.replace(year, '').trim()
+function extractSetFromText(text: string | null | undefined, year: string) {
+  if (!text) return ''
+  if (!year) return String(text).trim()
+  return String(text).replace(year, '').replace(/\s+/g, ' ').trim()
+}
+
+function resolveDefaultYear(
+  breakProductName: string | null,
+  linkedOrderProductNames: string[]
+) {
+  const fromBreak = extractYearFromText(breakProductName)
+  if (fromBreak) return fromBreak
+
+  for (const name of linkedOrderProductNames) {
+    const fromOrder = extractYearFromText(name)
+    if (fromOrder) return fromOrder
+  }
+
+  return getCurrentYear()
+}
+
+function resolveDefaultSet(
+  breakProductName: string | null,
+  linkedOrderProductNames: string[],
+  resolvedYear: string
+) {
+  const fromBreak = extractSetFromText(breakProductName, resolvedYear)
+  if (fromBreak) return fromBreak
+
+  for (const name of linkedOrderProductNames) {
+    const fromOrder = extractSetFromText(name, resolvedYear)
+    if (fromOrder) return fromOrder
+  }
+
+  return ''
+}
+
+function parseRestoreRows(value: string | undefined): EntryRow[] {
+  if (!value) return []
+
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+
+    return parsed.map((row) => ({
+      year: String(row?.year ?? ''),
+      set_name: String(row?.set_name ?? ''),
+      player_name: String(row?.player_name ?? ''),
+      card_number: String(row?.card_number ?? ''),
+      item_type: String(row?.item_type ?? 'single_card'),
+      quantity: String(row?.quantity ?? '1'),
+      status: String(row?.status ?? 'available'),
+      notes: String(row?.notes ?? ''),
+    }))
+  } catch {
+    return []
+  }
 }
 
 export default async function AddBreakCardsPage({
@@ -41,11 +114,17 @@ export default async function AddBreakCardsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string }>
+  searchParams?: Promise<{
+    error?: string
+    restore?: string
+    row_count?: string
+    cards_received?: string
+  }>
 }) {
   const { id } = await params
   const pageParams = searchParams ? await searchParams : undefined
   const pageError = pageParams?.error
+  const restoredRows = parseRestoreRows(pageParams?.restore)
 
   const supabase = await createClient()
 
@@ -55,34 +134,64 @@ export default async function AddBreakCardsPage({
 
   if (!user) return null
 
-  const response = await supabase
-    .from('breaks')
-    .select(`
-      id,
-      break_date,
-      source_name,
-      product_name,
-      format_type,
-      teams,
-      total_cost,
-      allocation_method,
-      order_number,
-      cards_received
-    `)
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+  const [breakResponse, linkedOrdersResponse] = await Promise.all([
+    supabase
+      .from('breaks')
+      .select(`
+        id,
+        break_date,
+        source_name,
+        product_name,
+        format_type,
+        teams,
+        total_cost,
+        allocation_method,
+        order_number,
+        cards_received
+      `)
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single(),
 
-  if (response.error || !response.data) {
+    supabase
+      .from('whatnot_orders')
+      .select(`
+        id,
+        product_name
+      `)
+      .eq('user_id', user.id)
+      .eq('break_id', id),
+  ])
+
+  if (breakResponse.error || !breakResponse.data) {
     notFound()
   }
 
-  const item = response.data as BreakRow
-  const defaultYear = extractYear(item.product_name)
-  const defaultSet = extractSet(item.product_name)
+  const item = breakResponse.data as BreakRow
+  const linkedOrders = (linkedOrdersResponse.data ?? []) as LinkedWhatnotOrderRow[]
 
-  const cardsReceived = Math.max(0, Number(item.cards_received ?? 0))
-  const rowCount = cardsReceived > 0 ? Math.min(cardsReceived, 50) : 1
+  const linkedOrderProductNames = linkedOrders
+    .map((row) => row.product_name || '')
+    .filter(Boolean)
+
+  const defaultYear = resolveDefaultYear(item.product_name, linkedOrderProductNames)
+  const defaultSet = resolveDefaultSet(
+    item.product_name,
+    linkedOrderProductNames,
+    defaultYear
+  )
+
+  const cardsReceived =
+    pageParams?.cards_received != null
+      ? Math.max(0, Number(pageParams.cards_received))
+      : Math.max(0, Number(item.cards_received ?? 0))
+
+  const rowCount =
+    pageParams?.row_count != null
+      ? Math.min(Math.max(1, Number(pageParams.row_count)), 100)
+      : cardsReceived > 0
+      ? Math.min(cardsReceived, 50)
+      : 1
 
   return (
     <div className="max-w-7xl">
@@ -90,7 +199,7 @@ export default async function AddBreakCardsPage({
         <div>
           <h1 className="text-3xl font-semibold">Add Cards From Break</h1>
           <p className="mt-2 text-zinc-400">
-            Enter the cards you want tracked individually and choose whether each card is for sale or personal collection.
+            Enter cards or lots from this break, choose for sale or personal, and quantity will count toward the total cards received.
           </p>
         </div>
 
@@ -151,13 +260,16 @@ export default async function AddBreakCardsPage({
       <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="text-sm font-medium text-zinc-200">How this works</div>
         <div className="mt-2 space-y-1 text-sm text-zinc-400">
-          <p>Only enter the cards you want tracked individually.</p>
-          <p>Choose each card as For Sale or Personal Collection during entry.</p>
-          <p>Leave the rest blank.</p>
-          <p>Any unfilled rows from this break will be grouped into one common / bulk lot automatically.</p>
-          <p>Total cards recorded from this break cannot exceed the Cards Received count.</p>
+          <p>Use Single Card for individual cards and Lot for grouped cards like team lots.</p>
+          <p>Defaults are Single Card, Qty 1, and For Sale.</p>
+          <p>Default year is pulled from the break title first, then linked Whatnot order titles, and falls back to the current year.</p>
+          <p>Quantity counts toward the total cards received for this break.</p>
+          <p>Choose each row as For Sale or Personal Collection during entry.</p>
+          <p>If total entered quantity is too high, your entries will stay on the page so you can fix them instead of starting over.</p>
+          <p>Any unfilled quantity from this break will be grouped into one common / bulk lot automatically.</p>
+          <p>Total entered card quantity cannot exceed the Cards Received count.</p>
           <p>Equal break cost is split across all received cards exactly.</p>
-          <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Player field.</p>
+          <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Player / Lot Name field.</p>
         </div>
       </div>
 
@@ -170,13 +282,14 @@ export default async function AddBreakCardsPage({
         <input type="hidden" name="cards_received" value={cardsReceived} />
 
         <div className="mb-5 text-sm text-zinc-400">
-          This break has <span className="font-medium text-zinc-200">{cardsReceived}</span> card(s) received, so this form is locked to that maximum.
+          This break has <span className="font-medium text-zinc-200">{cardsReceived}</span> card(s) received, so total entered quantity is locked to that maximum.
         </div>
 
         <BreakCardEntryGrid
           rowCount={rowCount}
           defaultYear={defaultYear}
           defaultSet={defaultSet}
+          initialRows={restoredRows}
         />
 
         <div className="mt-5 flex justify-end gap-3">

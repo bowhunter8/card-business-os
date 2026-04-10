@@ -65,8 +65,10 @@ export default function BreakCardEntryGrid({
           <tr>
             <th className="px-3 py-3 text-left font-medium">Year</th>
             <th className="px-3 py-3 text-left font-medium">Set</th>
-            <th className="px-3 py-3 text-left font-medium">Player</th>
+            <th className="px-3 py-3 text-left font-medium">Player / Lot Name</th>
             <th className="px-3 py-3 text-left font-medium">Card #</th>
+            <th className="px-3 py-3 text-left font-medium">Type</th>
+            <th className="px-3 py-3 text-left font-medium">Qty</th>
             <th className="px-3 py-3 text-left font-medium">Status</th>
             <th className="px-3 py-3 text-left font-medium">Notes</th>
           </tr>
@@ -99,8 +101,8 @@ export default function BreakCardEntryGrid({
                   name={`player_name_${index}`}
                   ref={(el) => setPlayerRef(index, el)}
                   onKeyDown={(e) => handlePlayerKeyDown(e, index)}
-                  placeholder="Player"
-                  className="w-48 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
+                  placeholder="Player or lot name"
+                  className="w-52 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                 />
               </td>
 
@@ -110,6 +112,27 @@ export default function BreakCardEntryGrid({
                   onKeyDown={(e) => handleCardNumberKeyDown(e, index)}
                   placeholder="24"
                   className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
+                />
+              </td>
+
+              <td className="px-3 py-2">
+                <select
+                  name={`item_type_${index}`}
+                  defaultValue="single_card"
+                  className="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
+                >
+                  <option value="single_card">Single Card</option>
+                  <option value="lot">Lot</option>
+                </select>
+              </td>
+
+              <td className="px-3 py-2">
+                <input
+                  name={`quantity_${index}`}
+                  type="number"
+                  min={1}
+                  defaultValue={1}
+                  className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                 />
               </td>
 
@@ -128,7 +151,7 @@ export default function BreakCardEntryGrid({
                 <input
                   name={`notes_${index}`}
                   onKeyDown={(e) => handleNotesKeyDown(e, index)}
-                  placeholder="RC / Auto / /50 / Refractor / remarks"
+                  placeholder="RC / Auto / /50 / Refractor / team lot / remarks"
                   className="w-72 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                 />
               </td>
