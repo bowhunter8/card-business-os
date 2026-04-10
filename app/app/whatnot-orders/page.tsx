@@ -266,6 +266,12 @@ export default async function WhatnotOrdersPage({
 
         <div className="flex gap-3">
           <Link
+            href="/app/search"
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Global Search
+          </Link>
+          <Link
             href="/app/imports/whatnot"
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
@@ -298,7 +304,7 @@ export default async function WhatnotOrdersPage({
             type="text"
             name="q"
             defaultValue={q}
-            placeholder='Search seller, order #, product, file name, break id... or use "linked" / "staging"'
+            placeholder='Search this staging area, or use Global Search to search breaks too'
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
           />
           <div className="flex gap-3">
@@ -321,7 +327,10 @@ export default async function WhatnotOrdersPage({
 
         {q ? (
           <div className="mt-3 text-sm text-zinc-400">
-            Showing results for <span className="text-zinc-200">"{q}"</span>
+            Showing staging results for <span className="text-zinc-200">"{q}"</span>. Need the whole app?{' '}
+            <Link href={`/app/search?q=${encodeURIComponent(q)}`} className="text-zinc-200 underline">
+              Search everywhere
+            </Link>
           </div>
         ) : null}
       </form>

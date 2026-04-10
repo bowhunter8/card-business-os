@@ -154,12 +154,20 @@ export default async function BreaksPage({
           </p>
         </div>
 
-        <Link
-          href="/app/breaks/new"
-          className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-        >
-          Add Break
-        </Link>
+        <div className="flex gap-3">
+          <Link
+            href="/app/search"
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Global Search
+          </Link>
+          <Link
+            href="/app/breaks/new"
+            className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+          >
+            Add Break
+          </Link>
+        </div>
       </div>
 
       <form method="get" className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
@@ -168,7 +176,7 @@ export default async function BreaksPage({
             type="text"
             name="q"
             defaultValue={q}
-            placeholder='Search order #, breaker, product, notes... or use "open", "complete", "reversed"'
+            placeholder='Search breaks here, or use Global Search to search staging too'
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
           />
           <div className="flex gap-3">
@@ -191,7 +199,10 @@ export default async function BreaksPage({
 
         {q ? (
           <div className="mt-3 text-sm text-zinc-400">
-            Showing results for <span className="text-zinc-200">"{q}"</span>
+            Showing break results for <span className="text-zinc-200">"{q}"</span>. Need the whole app?{' '}
+            <Link href={`/app/search?q=${encodeURIComponent(q)}`} className="text-zinc-200 underline">
+              Search everywhere
+            </Link>
           </div>
         ) : null}
       </form>
