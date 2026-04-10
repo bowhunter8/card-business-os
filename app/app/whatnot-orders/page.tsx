@@ -99,6 +99,10 @@ function buildFocusHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
+function cleanSearchTerm(value: string) {
+  return value.trim().toLowerCase()
+}
+
 export default async function WhatnotOrdersPage({
   searchParams,
 }: {
@@ -109,6 +113,7 @@ export default async function WhatnotOrdersPage({
     order_numeric_id?: string
     order_id?: string
     row_id?: string
+    q?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -118,6 +123,8 @@ export default async function WhatnotOrdersPage({
   const focusOrderNumericId = params?.order_numeric_id ?? ''
   const focusOrderId = params?.order_id ?? ''
   const focusRowId = params?.row_id ?? ''
+  const q = params?.q ?? ''
+  const normalizedQ = cleanSearchTerm(q)
 
   const supabase = await createClient()
 
@@ -174,7 +181,43 @@ export default async function WhatnotOrdersPage({
     )
   }
 
-  const safeOrders = (orders ?? []) as WhatnotOrderRow[]
+  const allOrders = (orders ?? []) as WhatnotOrderRow[]
+
+  const safeOrders = allOrders.filter((order) => {
+    if (!normalizedQ) return true
+
+    const haystack = [
+      order.id,
+      order.break_id,
+      order.order_id,
+      order.order_numeric_id,
+      order.buyer,
+      order.seller,
+      order.product_name,
+      order.processed_date,
+      order.processed_date_display,
+      order.order_status,
+      order.source_file_name,
+      order.break_id ? 'linked assigned' : 'staging unassigned not linked',
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    if (normalizedQ === 'linked' || normalizedQ === 'assigned') {
+      return !!order.break_id
+    }
+
+    if (
+      normalizedQ === 'staging' ||
+      normalizedQ === 'unlinked' ||
+      normalizedQ === 'unassigned'
+    ) {
+      return !order.break_id
+    }
+
+    return haystack.includes(normalizedQ)
+  })
 
   const unassignedOrders = safeOrders.filter((order) => !order.break_id)
   const assignedOrders = safeOrders.filter((order) => !!order.break_id)
@@ -249,9 +292,43 @@ export default async function WhatnotOrdersPage({
         </div>
       ) : null}
 
+      <form method="get" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+        <div className="flex flex-col gap-3 md:flex-row">
+          <input
+            type="text"
+            name="q"
+            defaultValue={q}
+            placeholder='Search seller, order #, product, file name, break id... or use "linked" / "staging"'
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
+          />
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+            >
+              Search
+            </button>
+            {q ? (
+              <Link
+                href="/app/whatnot-orders"
+                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+              >
+                Clear
+              </Link>
+            ) : null}
+          </div>
+        </div>
+
+        {q ? (
+          <div className="mt-3 text-sm text-zinc-400">
+            Showing results for <span className="text-zinc-200">"{q}"</span>
+          </div>
+        ) : null}
+      </form>
+
       <div className="grid gap-3 md:grid-cols-6">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Total Orders</div>
+          <div className="text-xs text-zinc-400">Shown Orders</div>
           <div className="mt-1 text-2xl font-semibold">{safeOrders.length}</div>
         </div>
 
@@ -428,7 +505,7 @@ export default async function WhatnotOrdersPage({
 
         {safeOrders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
-            No Whatnot orders found yet. Import a CSV first.
+            {q ? 'No Whatnot orders match your search.' : 'No Whatnot orders found yet. Import a CSV first.'}
           </div>
         ) : (
           <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
