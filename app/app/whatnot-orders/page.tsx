@@ -99,33 +99,7 @@ function buildFocusHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
-function cleanSearchTerm(value: string) {
-  return value.trim().toLowerCase()
-}
-
-export default async function WhatnotOrdersPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{
-    error?: string
-    focus?: string
-    matched?: string
-    order_numeric_id?: string
-    order_id?: string
-    row_id?: string
-    q?: string
-  }>
-}) {
-  const params = searchParams ? await searchParams : undefined
-  const errorMessage = params?.error
-  const focus = params?.focus ?? ''
-  const matched = params?.matched === '1'
-  const focusOrderNumericId = params?.order_numeric_id ?? ''
-  const focusOrderId = params?.order_id ?? ''
-  const focusRowId = params?.row_id ?? ''
-  const q = params?.q ?? ''
-  const normalizedQ = cleanSearchTerm(q)
-
+export default async function WhatnotOrdersPage() {
   const supabase = await createClient()
 
   const {
@@ -181,43 +155,7 @@ export default async function WhatnotOrdersPage({
     )
   }
 
-  const allOrders = (orders ?? []) as WhatnotOrderRow[]
-
-  const safeOrders = allOrders.filter((order) => {
-    if (!normalizedQ) return true
-
-    const haystack = [
-      order.id,
-      order.break_id,
-      order.order_id,
-      order.order_numeric_id,
-      order.buyer,
-      order.seller,
-      order.product_name,
-      order.processed_date,
-      order.processed_date_display,
-      order.order_status,
-      order.source_file_name,
-      order.break_id ? 'linked assigned' : 'staging unassigned not linked',
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-
-    if (normalizedQ === 'linked' || normalizedQ === 'assigned') {
-      return !!order.break_id
-    }
-
-    if (
-      normalizedQ === 'staging' ||
-      normalizedQ === 'unlinked' ||
-      normalizedQ === 'unassigned'
-    ) {
-      return !order.break_id
-    }
-
-    return haystack.includes(normalizedQ)
-  })
+  const safeOrders = (orders ?? []) as WhatnotOrderRow[]
 
   const unassignedOrders = safeOrders.filter((order) => !order.break_id)
   const assignedOrders = safeOrders.filter((order) => !!order.break_id)
@@ -239,20 +177,6 @@ export default async function WhatnotOrdersPage({
   )
 
   const suggestedGroups = buildSuggestedGroups(safeOrders)
-
-  function isFocusedOrder(order: WhatnotOrderRow) {
-    if (focusRowId && order.id === focusRowId) return true
-    if (focusOrderNumericId && order.order_numeric_id === focusOrderNumericId) return true
-    if (focusOrderId && order.order_id === focusOrderId) return true
-    if (focus) {
-      return (
-        order.id === focus ||
-        order.order_numeric_id === focus ||
-        order.order_id === focus
-      )
-    }
-    return false
-  }
 
   return (
     <div className="max-w-7xl space-y-6">
@@ -286,25 +210,16 @@ export default async function WhatnotOrdersPage({
         </div>
       </div>
 
-      {matched && (focus || focusOrderNumericId || focusOrderId || focusRowId) ? (
-        <div className="rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-300">
-          Matched order found. You can also open the dedicated focus page for a cleaner view.
-        </div>
-      ) : null}
-
-      {errorMessage ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      <form method="get" className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <form
+        method="get"
+        action="/app/search"
+        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
+      >
         <div className="flex flex-col gap-3 md:flex-row">
           <input
             type="text"
             name="q"
-            defaultValue={q}
-            placeholder='Search this staging area, or use Global Search to search breaks too'
+            placeholder="Search orders or breaks from here"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
           />
           <div className="flex gap-3">
@@ -312,32 +227,19 @@ export default async function WhatnotOrdersPage({
               type="submit"
               className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
             >
-              Search
+              Search Everywhere
             </button>
-            {q ? (
-              <Link
-                href="/app/whatnot-orders"
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-              >
-                Clear
-              </Link>
-            ) : null}
           </div>
         </div>
 
-        {q ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Showing staging results for <span className="text-zinc-200">"{q}"</span>. Need the whole app?{' '}
-            <Link href={`/app/search?q=${encodeURIComponent(q)}`} className="text-zinc-200 underline">
-              Search everywhere
-            </Link>
-          </div>
-        ) : null}
+        <div className="mt-3 text-sm text-zinc-500">
+          This opens a clean results page instead of filtering this big table.
+        </div>
       </form>
 
       <div className="grid gap-3 md:grid-cols-6">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Shown Orders</div>
+          <div className="text-xs text-zinc-400">Total Orders</div>
           <div className="mt-1 text-2xl font-semibold">{safeOrders.length}</div>
         </div>
 
@@ -514,7 +416,7 @@ export default async function WhatnotOrdersPage({
 
         {safeOrders.length === 0 ? (
           <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
-            {q ? 'No Whatnot orders match your search.' : 'No Whatnot orders found yet. Import a CSV first.'}
+            No Whatnot orders found yet. Import a CSV first.
           </div>
         ) : (
           <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
@@ -539,18 +441,9 @@ export default async function WhatnotOrdersPage({
               <tbody>
                 {safeOrders.map((order) => {
                   const assigned = !!order.break_id
-                  const focused = isFocusedOrder(order)
 
                   return (
-                    <tr
-                      key={order.id}
-                      id={`order-row-${order.id}`}
-                      className={`border-t ${
-                        focused
-                          ? 'border-blue-500 bg-blue-950/30 ring-1 ring-inset ring-blue-500'
-                          : 'border-zinc-800'
-                      }`}
-                    >
+                    <tr key={order.id} className="border-t border-zinc-800">
                       <td className="px-3 py-2">
                         {assigned ? (
                           <span className="text-zinc-500">—</span>
@@ -591,9 +484,6 @@ export default async function WhatnotOrdersPage({
                         ) : (
                           <div className="text-zinc-500">—</div>
                         )}
-                        {focused ? (
-                          <div className="mt-1 text-xs text-blue-300">Matched order</div>
-                        ) : null}
                       </td>
 
                       <td className="px-3 py-2 min-w-[320px]">
