@@ -29,7 +29,7 @@ function normalizeInventoryStatus(value: string) {
 }
 
 function normalizeItemType(value: string) {
-  if (value === 'lot') return 'lot'
+  if (value === 'lot') return 'team_lot_line'
   return 'single_card'
 }
 
@@ -52,7 +52,7 @@ function buildCardTitle(input: {
     .filter(Boolean)
     .join(' • ')
 
-  if (input.itemType === 'lot' && input.quantity > 1) {
+  if (input.itemType === 'team_lot_line' && input.quantity > 1) {
     return `${base || 'Lot'} • Qty ${input.quantity}`
   }
 
@@ -435,7 +435,7 @@ export async function addBreakCardsAction(formData: FormData) {
     const notes = safeText(formData.get(`notes_${i}`))
 
     const rowHasMeaningfulData =
-      playerName || cardNumber || notes || setName || yearRaw
+      playerName.length > 0 || cardNumber.length > 0 || notes.length > 0
 
     if (!rowHasMeaningfulData) continue
 
@@ -544,7 +544,8 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
-  const insertedRowsSafe: InsertedInventoryRow[] = insertedRows as InsertedInventoryRow[]
+  const insertedRowsSafe: InsertedInventoryRow[] =
+    insertedRows as InsertedInventoryRow[]
 
   const txRows = insertedRowsSafe.map((item) => ({
     user_id: user.id,
