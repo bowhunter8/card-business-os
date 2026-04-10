@@ -413,6 +413,13 @@ export async function addBreakCardsAction(formData: FormData) {
     notes: string | null
   }
 
+  type InsertedInventoryRow = {
+    id: string
+    cost_basis_total: number | null
+    quantity: number | null
+    status: string | null
+  }
+
   const enteredRows: InsertRow[] = []
 
   const maxRows = Math.min(cardCount, 100)
@@ -556,7 +563,7 @@ export async function addBreakCardsAction(formData: FormData) {
     .insert(rowsToInsert)
     .select('id, cost_basis_total, quantity, status')
 
-  if (insertError || !insertedRows) {
+  if (insertError || !insertedRows || insertedRows.length === 0) {
     redirectBackToAddCardsWithRestore({
       breakId,
       error: insertError?.message ?? 'Could not add cards',
@@ -566,7 +573,9 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
-  const txRows = insertedRows.map((item) => ({
+  const insertedRowsSafe: InsertedInventoryRow[] = insertedRows as InsertedInventoryRow[]
+
+  const txRows = insertedRowsSafe.map((item) => ({
     user_id: user.id,
     inventory_item_id: item.id,
     transaction_type: 'break_add',
@@ -579,7 +588,19 @@ export async function addBreakCardsAction(formData: FormData) {
     notes: 'Created from break import',
   }))
 
-  await supabase.from('inventory_transactions').insert(txRows)
+  const { error: txError } = await supabase
+    .from('inventory_transactions')
+    .insert(txRows)
+
+  if (txError) {
+    redirectBackToAddCardsWithRestore({
+      breakId,
+      error: txError.message || 'Cards were added but inventory transactions failed',
+      rowCount: cardCount,
+      cardsReceived,
+      restoreRows,
+    })
+  }
 
   redirect(`/app/breaks/${breakId}`)
 }
