@@ -493,9 +493,17 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
-  const blankRemainderCount = cardsReceived - enteredUnitCount
-  const totalUnits = cardsReceived
+  if (enteredUnitCount === 0) {
+    redirectBackToAddCardsWithRestore({
+      breakId,
+      error: 'Enter at least one card or lot before saving',
+      rowCount: cardCount,
+      cardsReceived,
+      restoreRows,
+    })
+  }
 
+  const totalUnits = enteredUnitCount
   const totalCost = Number(breakRow.total_cost ?? 0)
   const totalCents = Math.round(totalCost * 100)
   const baseCents = Math.floor(totalCents / totalUnits)
@@ -520,43 +528,6 @@ export async function addBreakCardsAction(formData: FormData) {
   }
 
   const rowsToInsert: InsertRow[] = [...enteredRows]
-
-  if (blankRemainderCount > 0) {
-    let bulkTotalCents = 0
-
-    for (let i = 0; i < blankRemainderCount; i++) {
-      const cents = runningIndex < remainder ? baseCents + 1 : baseCents
-      bulkTotalCents += cents
-      runningIndex += 1
-    }
-
-    const bulkUnitCost = bulkTotalCents / 100 / blankRemainderCount
-    const bulkTotalCost = bulkTotalCents / 100
-
-    rowsToInsert.push({
-      user_id: user.id,
-      source_type: 'break',
-      source_break_id: breakId,
-      item_type: 'lot',
-      status: 'available',
-      quantity: blankRemainderCount,
-      available_quantity: blankRemainderCount,
-      title: `Bulk / Common Lot • Qty ${blankRemainderCount}`,
-      player_name: 'Bulk / Common Lot',
-      year: null,
-      brand: null,
-      set_name: null,
-      card_number: null,
-      parallel_name: null,
-      team: null,
-      cost_basis_unit: Number(bulkUnitCost.toFixed(4)),
-      cost_basis_total: Number(bulkTotalCost.toFixed(2)),
-      estimated_value_unit: null,
-      estimated_value_total: null,
-      storage_location: null,
-      notes: 'Common / bulk cards grouped automatically from blank rows',
-    })
-  }
 
   const { data: insertedRows, error: insertError } = await supabase
     .from('inventory_items')

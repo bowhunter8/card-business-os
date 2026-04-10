@@ -263,12 +263,13 @@ export default async function AddBreakCardsPage({
           <p>Use Single Card for individual cards and Lot for grouped cards like team lots.</p>
           <p>Defaults are Single Card, Qty 1, and For Sale.</p>
           <p>Default year is pulled from the break title first, then linked Whatnot order titles, and falls back to the current year.</p>
+          <p>Blank rows are ignored completely.</p>
+          <p>Only rows you actually fill in count toward the total cards received.</p>
+          <p>If you want a lot, enter it explicitly, such as Blue Jays Lot with Qty 10.</p>
           <p>Quantity counts toward the total cards received for this break.</p>
           <p>Choose each row as For Sale or Personal Collection during entry.</p>
           <p>If total entered quantity is too high, your entries will stay on the page so you can fix them instead of starting over.</p>
-          <p>Any unfilled quantity from this break will be grouped into one common / bulk lot automatically.</p>
-          <p>Total entered card quantity cannot exceed the Cards Received count.</p>
-          <p>Equal break cost is split across all received cards exactly.</p>
+          <p>Equal break cost is split across the total quantity you entered.</p>
           <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Player / Lot Name field.</p>
         </div>
       </div>
@@ -282,7 +283,7 @@ export default async function AddBreakCardsPage({
         <input type="hidden" name="cards_received" value={cardsReceived} />
 
         <div className="mb-5 text-sm text-zinc-400">
-          This break has <span className="font-medium text-zinc-200">{cardsReceived}</span> card(s) received, so total entered quantity is locked to that maximum.
+          This break has <span className="font-medium text-zinc-200">{cardsReceived}</span> card(s) received, and only the quantities from filled rows will count toward that total.
         </div>
 
         <BreakCardEntryGrid
