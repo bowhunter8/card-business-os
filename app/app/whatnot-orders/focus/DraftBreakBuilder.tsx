@@ -60,6 +60,14 @@ export default function DraftBreakBuilder({
   const [selectedOrderIds, setSelectedOrderIds] =
     useState<string[]>(defaultSelectedIds)
 
+  const allSuggestedSelected =
+    uniqueRecommendedOrders.length > 0 &&
+    uniqueRecommendedOrders.every((order) => selectedOrderIds.includes(order.id))
+
+  const anySuggestedSelected =
+    uniqueRecommendedOrders.length > 0 &&
+    uniqueRecommendedOrders.some((order) => selectedOrderIds.includes(order.id))
+
   function toggleOrder(orderId: string) {
     setSelectedOrderIds((current) => {
       if (orderId === primaryOrder.id) {
@@ -72,6 +80,34 @@ export default function DraftBreakBuilder({
 
       return [...current, orderId]
     })
+  }
+
+  function selectAllSuggested() {
+    setSelectedOrderIds((current) => {
+      const next = new Set(current)
+      next.add(primaryOrder.id)
+
+      for (const order of uniqueRecommendedOrders) {
+        next.add(order.id)
+      }
+
+      return Array.from(next)
+    })
+  }
+
+  function unselectAllSuggested() {
+    setSelectedOrderIds((current) =>
+      current.filter((id) => id === primaryOrder.id)
+    )
+  }
+
+  function toggleAllSuggested() {
+    if (allSuggestedSelected) {
+      unselectAllSuggested()
+      return
+    }
+
+    selectAllSuggested()
   }
 
   function openBreakForm() {
@@ -98,8 +134,8 @@ export default function DraftBreakBuilder({
             prefilled, so you can edit everything before saving.
           </p>
           <p className="mt-2 text-sm text-zinc-500">
-            The matched order is always included. Suggested associated orders are
-            checked by default.
+            The matched order is always included. Suggested associated orders can
+            be selected or cleared in one click.
           </p>
         </div>
 
@@ -146,8 +182,40 @@ export default function DraftBreakBuilder({
 
         {uniqueRecommendedOrders.length > 0 ? (
           <div className="space-y-3">
-            <div className="pt-2 text-sm font-medium text-zinc-300">
-              Suggested Associated Orders
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-sm font-medium text-zinc-300">
+                Suggested Associated Orders
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllSuggested}
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                >
+                  Select All Suggested
+                </button>
+
+                <button
+                  type="button"
+                  onClick={unselectAllSuggested}
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                >
+                  Unselect All Suggested
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleAllSuggested}
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                >
+                  {allSuggestedSelected
+                    ? 'Toggle All Off'
+                    : anySuggestedSelected
+                    ? 'Toggle All On'
+                    : 'Toggle All On'}
+                </button>
+              </div>
             </div>
 
             {uniqueRecommendedOrders.map((order) => {
@@ -182,7 +250,7 @@ export default function DraftBreakBuilder({
                         order.processed_date,
                         order.processed_date_display
                       )}{' '}
-                      • {money(order.total)} • same seller / same date
+                      • {money(order.total)}
                     </div>
                   </div>
                 </label>
@@ -191,8 +259,7 @@ export default function DraftBreakBuilder({
           </div>
         ) : (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
-            No same-seller same-date staging orders were found to recommend for
-            bundling.
+            No suggested staging orders were found to recommend for bundling.
           </div>
         )}
       </div>

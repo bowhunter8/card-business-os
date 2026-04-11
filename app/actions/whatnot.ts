@@ -53,21 +53,60 @@ export async function combineWhatnotOrdersIntoBreakAction(formData: FormData) {
     .in('id', selectedOrderIds)
 
   if (ordersError || !orders || orders.length === 0) {
-    redirect(
-      `/app/whatnot-orders?error=${encodeURIComponent(
-        ordersError?.message || 'Could not load selected Whatnot orders'
-      )}`
+    redirect(`/app/whatnot-orders?error=Could not load selected orders`)
+  }
+
+  // ---------------------------------------
+  // 🔥 NEW LOGIC STARTS HERE
+  // ---------------------------------------
+
+  const assignedOrders = orders.filter((o) => o.break_id)
+  const unassignedOrders = orders.filter((o) => !o.break_id)
+
+  // If we selected assigned orders, make sure they are ALL from the same break
+  let targetBreakId: string | null = null
+
+  if (assignedOrders.length > 0) {
+    const uniqueBreakIds = Array.from(
+      new Set(assignedOrders.map((o) => o.break_id))
     )
+
+    if (uniqueBreakIds.length > 1) {
+      redirect(
+        '/app/whatnot-orders?error=Selected orders belong to multiple different breaks'
+      )
+    }
+
+    targetBreakId = uniqueBreakIds[0] as string
   }
 
-  if (orders.length !== selectedOrderIds.length) {
-    redirect('/app/whatnot-orders?error=One or more selected orders could not be found')
+  // ---------------------------------------
+  // 🔁 CASE 1: ADD TO EXISTING BREAK
+  // ---------------------------------------
+  if (targetBreakId) {
+    if (unassignedOrders.length === 0) {
+      redirect(`/app/breaks/${targetBreakId}`)
+    }
+
+    const { error: updateError } = await supabase
+      .from('whatnot_orders')
+      .update({ break_id: targetBreakId })
+      .eq('user_id', user.id)
+      .in(
+        'id',
+        unassignedOrders.map((o) => o.id)
+      )
+
+    if (updateError) {
+      redirect(`/app/whatnot-orders?error=Failed to add orders to existing break`)
+    }
+
+    redirect(`/app/breaks/${targetBreakId}`)
   }
 
-  const alreadyAssigned = orders.filter((order) => !!order.break_id)
-  if (alreadyAssigned.length > 0) {
-    redirect('/app/whatnot-orders?error=One or more selected orders are already linked to a break')
-  }
+  // ---------------------------------------
+  // 🆕 CASE 2: CREATE NEW BREAK (original flow)
+  // ---------------------------------------
 
   const distinctSellers = Array.from(
     new Set(
@@ -78,7 +117,7 @@ export async function combineWhatnotOrdersIntoBreakAction(formData: FormData) {
   )
 
   if (distinctSellers.length > 1) {
-    redirect('/app/whatnot-orders?error=Please combine orders from only one seller at a time')
+    redirect('/app/whatnot-orders?error=Please combine orders from only one seller')
   }
 
   const sellerName = distinctSellers[0] || 'Whatnot'
@@ -88,71 +127,29 @@ export async function combineWhatnotOrdersIntoBreakAction(formData: FormData) {
     const bDate = b.processed_date ?? ''
     if (aDate < bDate) return -1
     if (aDate > bDate) return 1
-    return String(a.order_numeric_id ?? a.order_id ?? '').localeCompare(
-      String(b.order_numeric_id ?? b.order_id ?? '')
-    )
+    return 0
   })
 
   const breakDate =
-    sortedOrders.find((order) => order.processed_date)?.processed_date ??
+    sortedOrders.find((o) => o.processed_date)?.processed_date ??
     new Date().toISOString().slice(0, 10)
 
-  const purchasePrice = Number(
-    sortedOrders
-      .reduce((sum, order) => sum + safeNumber(order.subtotal), 0)
-      .toFixed(2)
+  const purchasePrice = sortedOrders.reduce(
+    (sum, o) => sum + safeNumber(o.subtotal),
+    0
   )
 
-  const salesTax = Number(
-    sortedOrders
-      .reduce((sum, order) => sum + safeNumber(order.taxes), 0)
-      .toFixed(2)
+  const salesTax = sortedOrders.reduce(
+    (sum, o) => sum + safeNumber(o.taxes),
+    0
   )
 
-  const shippingCost = Number(
-    sortedOrders
-      .reduce((sum, order) => sum + safeNumber(order.shipping_price), 0)
-      .toFixed(2)
+  const shippingCost = sortedOrders.reduce(
+    (sum, o) => sum + safeNumber(o.shipping_price),
+    0
   )
 
-  const otherFees = 0
-  const totalCost = Number((purchasePrice + salesTax + shippingCost + otherFees).toFixed(2))
-
-  const uniqueProducts = Array.from(
-    new Set(
-      sortedOrders
-        .map((order) => String(order.product_name ?? '').trim())
-        .filter(Boolean)
-    )
-  )
-
-  const productName =
-    uniqueProducts.length === 1
-      ? uniqueProducts[0]
-      : `Combined Whatnot Orders (${sortedOrders.length} orders)`
-
-  const displayOrderNumbers = sortedOrders.map(
-    (order) => order.order_numeric_id || order.order_id
-  )
-
-  const orderNumber =
-    sortedOrders.length === 1
-      ? String(displayOrderNumbers[0] ?? '')
-      : `MULTI: ${displayOrderNumbers.join(', ')}`
-
-  const notes = [
-    'Created from selected Whatnot orders',
-    `Seller: ${sellerName}`,
-    `Order Numeric IDs: ${sortedOrders
-      .map((order) => order.order_numeric_id || order.order_id)
-      .join(', ')}`,
-    `Internal Order IDs: ${sortedOrders.map((order) => order.order_id).join(', ')}`,
-    uniqueProducts.length
-      ? `Products: ${uniqueProducts.join(' | ')}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join('\n')
+  const totalCost = purchasePrice + salesTax + shippingCost
 
   const { data: breakRow, error: breakError } = await supabase
     .from('breaks')
@@ -160,45 +157,27 @@ export async function combineWhatnotOrdersIntoBreakAction(formData: FormData) {
       user_id: user.id,
       break_date: breakDate,
       source_name: sellerName,
-      product_name: productName,
+      product_name: `Combined Whatnot Orders (${orders.length})`,
       format_type: 'Whatnot import group',
-      teams: [],
-      order_number: orderNumber || null,
       purchase_price: purchasePrice,
       sales_tax: salesTax,
       shipping_cost: shippingCost,
-      other_fees: otherFees,
       total_cost: totalCost,
       allocation_method: 'equal_per_item',
       cards_received: 0,
-      notes,
     })
     .select('id')
     .single()
 
   if (breakError || !breakRow) {
-    redirect(
-      `/app/whatnot-orders?error=${encodeURIComponent(
-        breakError?.message || 'Could not create break'
-      )}`
-    )
+    redirect('/app/whatnot-orders?error=Could not create break')
   }
 
-  const { error: updateError } = await supabase
+  await supabase
     .from('whatnot_orders')
-    .update({
-      break_id: breakRow.id,
-    })
+    .update({ break_id: breakRow.id })
     .eq('user_id', user.id)
     .in('id', selectedOrderIds)
-
-  if (updateError) {
-    redirect(
-      `/app/whatnot-orders?error=${encodeURIComponent(
-        updateError.message || 'Break was created but orders could not be linked'
-      )}`
-    )
-  }
 
   redirect(`/app/breaks/${breakRow.id}`)
 }
