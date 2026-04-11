@@ -99,7 +99,24 @@ function buildFocusHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
-export default async function WhatnotOrdersPage() {
+function extractOrderNumbers(input: string): string[] {
+  if (!input) return []
+
+  const matches = input.match(/\d{6,}/g) || []
+  return Array.from(new Set(matches))
+}
+
+export default async function WhatnotOrdersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{
+    q?: string
+    multi_order_input?: string
+  }>
+}) {
+  const params = searchParams ? await searchParams : undefined
+  const multiOrderInput = String(params?.multi_order_input ?? '').trim()
+
   const supabase = await createClient()
 
   const {
@@ -178,6 +195,25 @@ export default async function WhatnotOrdersPage() {
 
   const suggestedGroups = buildSuggestedGroups(safeOrders)
 
+  const extractedOrderNumbers = extractOrderNumbers(multiOrderInput)
+
+  const multiOrderResults =
+    extractedOrderNumbers.length > 0
+      ? safeOrders.filter((order) =>
+          extractedOrderNumbers.includes(String(order.order_numeric_id ?? ''))
+        )
+      : []
+
+  const foundOrderNumberSet = new Set(
+    multiOrderResults
+      .map((order) => String(order.order_numeric_id ?? ''))
+      .filter(Boolean)
+  )
+
+  const missingOrderNumbers = extractedOrderNumbers.filter(
+    (orderNumber) => !foundOrderNumberSet.has(orderNumber)
+  )
+
   return (
     <div className="max-w-7xl space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -236,6 +272,182 @@ export default async function WhatnotOrdersPage() {
           This opens a clean results page instead of filtering this big table.
         </div>
       </form>
+
+      <form
+        method="get"
+        action="/app/whatnot-orders"
+        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
+      >
+        <div>
+          <h2 className="text-xl font-semibold">Multi-Order Paste Search</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Paste multiple Whatnot order numbers, a copied email, or mixed text. The page will extract order numbers and return only matching orders.
+          </p>
+        </div>
+
+        <div className="mt-4">
+          <textarea
+            name="multi_order_input"
+            defaultValue={multiOrderInput}
+            placeholder={`Example:\n945919708\n942422693\n\nor paste messy text from an email`}
+            className="min-h-[140px] w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"
+          />
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="submit"
+            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+          >
+            Find Orders From Paste
+          </button>
+
+          <Link
+            href="/app/whatnot-orders"
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Clear
+          </Link>
+        </div>
+
+        <div className="mt-3 text-sm text-zinc-500">
+          Supports one-per-line, commas, and copied email text. This version is paste search only.
+        </div>
+      </form>
+
+      {multiOrderInput ? (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Multi-Order Results</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Found {multiOrderResults.length} matching order(s) from {extractedOrderNumbers.length} extracted number(s).
+              </p>
+            </div>
+
+            {multiOrderResults.length > 0 ? (
+              <form action={combineWhatnotOrdersIntoBreakAction}>
+                {multiOrderResults
+                  .filter((order) => !order.break_id)
+                  .map((order) => (
+                    <input
+                      key={order.id}
+                      type="hidden"
+                      name="whatnot_order_ids"
+                      value={order.id}
+                    />
+                  ))}
+
+                <button
+                  type="submit"
+                  className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                >
+                  Create Break From Found Unassigned Orders
+                </button>
+              </form>
+            ) : null}
+          </div>
+
+          {missingOrderNumbers.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-300">
+              These order number(s) were not found in imported Whatnot orders yet:{' '}
+              {missingOrderNumbers.join(', ')}
+            </div>
+          ) : null}
+
+          {multiOrderResults.length === 0 ? (
+            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
+              No matching imported orders were found for the pasted input.
+            </div>
+          ) : (
+            <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
+              <table className="min-w-full text-sm">
+                <thead className="bg-zinc-950 text-zinc-300">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Status</th>
+                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-left">Seller</th>
+                    <th className="px-3 py-2 text-left">Order #</th>
+                    <th className="px-3 py-2 text-left">Product</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2 text-left">Break Link</th>
+                    <th className="px-3 py-2 text-left">Focus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {multiOrderResults.map((order) => (
+                    <tr key={order.id} className="border-t border-zinc-800">
+                      <td className="px-3 py-2">
+                        {order.break_id ? (
+                          <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+                            Assigned
+                          </span>
+                        ) : (
+                          <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
+                            Unassigned
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {order.processed_date_display ||
+                          (order.processed_date
+                            ? new Date(order.processed_date).toLocaleDateString('en-US')
+                            : '—')}
+                      </td>
+
+                      <td className="px-3 py-2">{order.seller || '—'}</td>
+
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {order.order_numeric_id ? (
+                          <div>#{order.order_numeric_id}</div>
+                        ) : (
+                          <div className="text-zinc-500">—</div>
+                        )}
+                      </td>
+
+                      <td className="px-3 py-2 min-w-[320px]">
+                        <div>{order.product_name || '—'}</div>
+                        {order.order_status ? (
+                          <div className="text-xs text-zinc-500">
+                            {order.order_status}
+                          </div>
+                        ) : null}
+                      </td>
+
+                      <td className="px-3 py-2 text-right">{order.quantity ?? 0}</td>
+                      <td className="px-3 py-2 text-right">{money(order.total)}</td>
+
+                      <td className="px-3 py-2">
+                        {order.break_id ? (
+                          <Link
+                            href={`/app/breaks/${order.break_id}`}
+                            className="text-emerald-300 hover:text-emerald-200"
+                          >
+                            Open Linked Break
+                          </Link>
+                        ) : (
+                          <span className="text-zinc-500">Not linked yet</span>
+                        )}
+                      </td>
+
+                      <td className="px-3 py-2">
+                        <Link
+                          href={buildFocusHref(order)}
+                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                        >
+                          Open Focus
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 md:grid-cols-6">
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">

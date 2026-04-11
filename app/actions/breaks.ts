@@ -550,7 +550,7 @@ export async function addBreakCardsAction(formData: FormData) {
   const txRows = insertedRowsSafe.map((item) => ({
     user_id: user.id,
     inventory_item_id: item.id,
-    transaction_type: 'break_add',
+    transaction_type: 'break_receive',
     quantity_change: Number(item.quantity ?? 1),
     to_status: String(item.status ?? 'available'),
     linked_entity_type: 'break',

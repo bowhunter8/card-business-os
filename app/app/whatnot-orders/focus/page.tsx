@@ -79,6 +79,133 @@ function buildAllOrdersHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders?${params.toString()}`
 }
 
+function normalizeText(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function tokenizeProduct(value: string | null | undefined) {
+  const stopWords = new Set([
+    'the',
+    'and',
+    'for',
+    'with',
+    'only',
+    'from',
+    'into',
+    'mega',
+    'hobby',
+    'break',
+    'cards',
+    'card',
+    'x',
+  ])
+
+  return normalizeText(value)
+    .split(' ')
+    .filter((token) => token.length >= 3 && !stopWords.has(token))
+}
+
+function productOverlapScore(a: string | null | undefined, b: string | null | undefined) {
+  const aTokens = tokenizeProduct(a)
+  const bTokens = tokenizeProduct(b)
+
+  if (aTokens.length === 0 || bTokens.length === 0) return 0
+
+  const bSet = new Set(bTokens)
+  let matches = 0
+
+  for (const token of aTokens) {
+    if (bSet.has(token)) matches += 1
+  }
+
+  return matches
+}
+
+function buildRecommendedAssociatedOrders(
+  allOrders: WhatnotOrderRow[],
+  primaryOrder: WhatnotOrderRow,
+  relatedOrders: WhatnotOrderRow[]
+) {
+  const relatedIds = new Set(relatedOrders.map((order) => order.id))
+  const results: Array<
+    WhatnotOrderRow & {
+      recommendation_reason: string
+      recommendation_score: number
+    }
+  > = []
+
+  const primarySeller = normalizeText(primaryOrder.seller)
+  const primaryProcessedDate = primaryOrder.processed_date ?? ''
+  const primarySourceFile = normalizeText(primaryOrder.source_file_name)
+
+  for (const order of allOrders) {
+    if (relatedIds.has(order.id)) continue
+    if (order.break_id) continue
+
+    const sameSeller = normalizeText(order.seller) === primarySeller
+    if (!sameSeller) continue
+
+    const sameSourceFile =
+      primarySourceFile.length > 0 &&
+      normalizeText(order.source_file_name) === primarySourceFile
+
+    const sameProcessedDate =
+      primaryProcessedDate.length > 0 &&
+      order.processed_date === primaryProcessedDate
+
+    const overlap = productOverlapScore(primaryOrder.product_name, order.product_name)
+
+    let score = 0
+    const reasons: string[] = []
+
+    if (sameSourceFile && sameProcessedDate) {
+      score += 100
+      reasons.push('same seller + same source file + same date')
+    }
+
+    if (sameSourceFile && overlap >= 2) {
+      score += 80
+      reasons.push('same seller + same source file + similar product')
+    }
+
+    if (!sameSourceFile && sameProcessedDate && overlap >= 2) {
+      score += 40
+      reasons.push('same seller + same date + similar product')
+    }
+
+    // Tight filter: require a meaningful score to include
+    if (score < 80) continue
+
+    results.push({
+      ...order,
+      recommendation_reason: reasons.join(' • '),
+      recommendation_score: score,
+    })
+  }
+
+  return [...results].sort((a, b) => {
+    if (b.recommendation_score !== a.recommendation_score) {
+      return b.recommendation_score - a.recommendation_score
+    }
+
+    const aDate = a.processed_date ?? ''
+    const bDate = b.processed_date ?? ''
+    if (aDate > bDate) return -1
+    if (aDate < bDate) return 1
+
+    const aCreated = a.created_at ?? ''
+    const bCreated = b.created_at ?? ''
+    if (aCreated > bCreated) return -1
+    if (aCreated < bCreated) return 1
+
+    return a.id.localeCompare(b.id)
+  })
+}
+
 export default async function WhatnotOrderFocusPage({
   searchParams,
 }: {
@@ -149,6 +276,7 @@ export default async function WhatnotOrderFocusPage({
   }
 
   const safeOrders = (orders ?? []) as WhatnotOrderRow[]
+
   const directMatches = sortOrders(
     safeOrders.filter((order) =>
       matchesFocus(order, rowId, orderNumericId, orderId, focus)
@@ -204,15 +332,10 @@ export default async function WhatnotOrderFocusPage({
     })
   )
 
-  const sameSellerSameDate = sortOrders(
-    safeOrders.filter((order) => {
-      if (relatedOrders.some((related) => related.id === order.id)) return false
-      return (
-        order.seller === primaryOrder.seller &&
-        order.processed_date === primaryOrder.processed_date &&
-        !order.break_id
-      )
-    })
+  const recommendedAssociatedOrders = buildRecommendedAssociatedOrders(
+    safeOrders,
+    primaryOrder,
+    relatedOrders
   )
 
   const relatedTotals = relatedOrders.reduce(
@@ -466,7 +589,7 @@ export default async function WhatnotOrderFocusPage({
             processed_date_display: primaryOrder.processed_date_display,
             total: primaryOrder.total,
           }}
-          recommendedOrders={sameSellerSameDate.map((order) => ({
+          recommendedOrders={recommendedAssociatedOrders.map((order) => ({
             id: order.id,
             order_numeric_id: order.order_numeric_id,
             product_name: order.product_name,
@@ -478,12 +601,12 @@ export default async function WhatnotOrderFocusPage({
         />
       ) : null}
 
-      {sameSellerSameDate.length > 0 ? (
+      {recommendedAssociatedOrders.length > 0 ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <div>
-            <h2 className="text-xl font-semibold">Same Seller / Same Date Nearby Orders</h2>
+            <h2 className="text-xl font-semibold">Suggested Associated Orders</h2>
             <p className="mt-1 text-sm text-zinc-400">
-              Helpful when the scanner matched one order and you want to see likely neighboring orders from the same break session.
+              Narrowed to likely companion orders based on same seller, same source file, and tighter product/date similarity.
             </p>
           </div>
 
@@ -495,19 +618,20 @@ export default async function WhatnotOrderFocusPage({
                   <th className="px-3 py-2 text-left">Seller</th>
                   <th className="px-3 py-2 text-left">Order #</th>
                   <th className="px-3 py-2 text-left">Product</th>
+                  <th className="px-3 py-2 text-left">Why Suggested</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2 text-left">Focus</th>
                 </tr>
               </thead>
               <tbody>
-                {sameSellerSameDate.map((order) => {
-                  const params = new URLSearchParams()
-                  params.set('row_id', order.id)
+                {recommendedAssociatedOrders.map((order) => {
+                  const focusParams = new URLSearchParams()
+                  focusParams.set('row_id', order.id)
                   if (order.order_numeric_id) {
-                    params.set('order_numeric_id', order.order_numeric_id)
+                    focusParams.set('order_numeric_id', order.order_numeric_id)
                   }
                   if (order.order_id) {
-                    params.set('order_id', order.order_id)
+                    focusParams.set('order_id', order.order_id)
                   }
 
                   return (
@@ -519,11 +643,21 @@ export default async function WhatnotOrderFocusPage({
                       <td className="px-3 py-2 whitespace-nowrap">
                         {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
                       </td>
-                      <td className="px-3 py-2 min-w-[320px]">{order.product_name || '—'}</td>
+                      <td className="px-3 py-2 min-w-[320px]">
+                        <div>{order.product_name || '—'}</div>
+                        <div className="text-xs text-zinc-500">
+                          {order.source_file_name || 'No source file'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-zinc-300">
+                          {order.recommendation_reason}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-right">{money(order.total)}</td>
                       <td className="px-3 py-2">
                         <Link
-                          href={`/app/whatnot-orders/focus?${params.toString()}`}
+                          href={`/app/whatnot-orders/focus?${focusParams.toString()}`}
                           className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
                         >
                           Open Focus

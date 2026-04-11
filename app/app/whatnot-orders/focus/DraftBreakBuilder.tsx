@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-type OrderOption = {
+type DraftOrder = {
   id: string
   order_numeric_id: string | null
   product_name: string | null
@@ -13,21 +13,22 @@ type OrderOption = {
   total: number | null
 }
 
-function money(value: number | null | undefined) {
+type Props = {
+  primaryOrder: DraftOrder
+  recommendedOrders: DraftOrder[]
+}
+
+function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
   }).format(Number(value ?? 0))
 }
 
-function dateDisplay(value: string | null | undefined) {
+function dateDisplay(value: string | null | undefined, fallback?: string | null) {
+  if (fallback) return fallback
   if (!value) return '—'
   return new Date(value).toLocaleDateString('en-US')
-}
-
-type Props = {
-  primaryOrder: OrderOption
-  recommendedOrders: OrderOption[]
 }
 
 export default function DraftBreakBuilder({
@@ -35,139 +36,170 @@ export default function DraftBreakBuilder({
   recommendedOrders,
 }: Props) {
   const router = useRouter()
-  const [selectedIds, setSelectedIds] = useState<string[]>([primaryOrder.id])
-  const [submitting, setSubmitting] = useState(false)
 
-  const recommendedSelectedCount = useMemo(
-    () => selectedIds.filter((id) => id !== primaryOrder.id).length,
-    [selectedIds, primaryOrder.id]
+  const uniqueRecommendedOrders = useMemo(() => {
+    const seen = new Set<string>()
+    const rows: DraftOrder[] = []
+
+    for (const order of recommendedOrders) {
+      if (!order?.id) continue
+      if (order.id === primaryOrder.id) continue
+      if (seen.has(order.id)) continue
+      seen.add(order.id)
+      rows.push(order)
+    }
+
+    return rows
+  }, [primaryOrder.id, recommendedOrders])
+
+  const defaultSelectedIds = useMemo(
+    () => [primaryOrder.id, ...uniqueRecommendedOrders.map((order) => order.id)],
+    [primaryOrder.id, uniqueRecommendedOrders]
   )
 
-  function toggleOrder(id: string, forceChecked?: boolean) {
-    setSelectedIds((current) => {
-      const isSelected = current.includes(id)
-      const shouldCheck = forceChecked ?? !isSelected
+  const [selectedOrderIds, setSelectedOrderIds] =
+    useState<string[]>(defaultSelectedIds)
 
-      if (shouldCheck) {
-        if (isSelected) return current
-        return [...current, id]
+  function toggleOrder(orderId: string) {
+    setSelectedOrderIds((current) => {
+      if (orderId === primaryOrder.id) {
+        return current.includes(orderId) ? current : [...current, orderId]
       }
 
-      if (id === primaryOrder.id) {
-        return current
+      if (current.includes(orderId)) {
+        return current.filter((id) => id !== orderId)
       }
 
-      return current.filter((value) => value !== id)
+      return [...current, orderId]
     })
   }
 
-  function openDraftBreak() {
-    if (!selectedIds.includes(primaryOrder.id)) {
-      return
+  function openBreakForm() {
+    const uniqueIds = Array.from(new Set(selectedOrderIds)).filter(Boolean)
+
+    if (!uniqueIds.includes(primaryOrder.id)) {
+      uniqueIds.unshift(primaryOrder.id)
     }
 
-    setSubmitting(true)
-
     const params = new URLSearchParams()
-    params.set('whatnot_order_ids', selectedIds.join(','))
-
+    params.set('whatnot_order_ids', uniqueIds.join(','))
     router.push(`/app/breaks/new?${params.toString()}`)
   }
 
+  const selectedCount = Array.from(new Set(selectedOrderIds)).length
+
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-xl font-semibold">Build New Break From This Order</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            This opens the normal Add Break page with selected Whatnot orders prefilled, so you can edit everything before saving.
+            This opens the normal Add Break page with selected Whatnot orders
+            prefilled, so you can edit everything before saving.
+          </p>
+          <p className="mt-2 text-sm text-zinc-500">
+            The matched order is always included. Suggested associated orders are
+            checked by default.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={openDraftBreak}
-          disabled={submitting || !selectedIds.includes(primaryOrder.id)}
-          className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={openBreakForm}
+          className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
         >
-          {submitting ? 'Opening...' : 'Open In New Break Form'}
+          Open In New Break Form
         </button>
       </div>
 
-      <div className="mt-5 space-y-4">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(primaryOrder.id)}
-              onChange={(e) => toggleOrder(primaryOrder.id, e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-            />
-            <span>
-              <span className="block font-medium">
-                Include matched order{' '}
-                {primaryOrder.order_numeric_id ? `#${primaryOrder.order_numeric_id}` : ''}
-              </span>
-              <span className="block text-sm text-zinc-400">
-                {primaryOrder.product_name || 'Untitled order'}
-              </span>
-            </span>
-          </label>
-        </div>
+      <div className="mt-6 space-y-3">
+        <label className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+          <input
+            type="checkbox"
+            checked
+            disabled
+            className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+          />
 
-        {recommendedOrders.length > 0 ? (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-            <div className="text-sm font-medium text-zinc-200">
-              Recommended nearby orders from same seller and date
-            </div>
-            <div className="mt-1 text-sm text-zinc-400">
-              Check any orders you want bundled into the same new break draft.
+          <div className="min-w-0">
+            <div className="font-medium">
+              Include matched order{' '}
+              {primaryOrder.order_numeric_id
+                ? `#${primaryOrder.order_numeric_id}`
+                : '(no order #)'}
             </div>
 
-            <div className="mt-4 space-y-3">
-              {recommendedOrders.map((order) => (
+            <div className="mt-1 text-sm text-zinc-300">
+              {primaryOrder.product_name || 'Untitled order'}
+            </div>
+
+            <div className="mt-1 text-xs text-zinc-500">
+              {primaryOrder.seller || '—'} •{' '}
+              {dateDisplay(
+                primaryOrder.processed_date,
+                primaryOrder.processed_date_display
+              )}{' '}
+              • {money(primaryOrder.total)}
+            </div>
+          </div>
+        </label>
+
+        {uniqueRecommendedOrders.length > 0 ? (
+          <div className="space-y-3">
+            <div className="pt-2 text-sm font-medium text-zinc-300">
+              Suggested Associated Orders
+            </div>
+
+            {uniqueRecommendedOrders.map((order) => {
+              const checked = selectedOrderIds.includes(order.id)
+
+              return (
                 <label
                   key={order.id}
-                  className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-3"
+                  className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4"
                 >
                   <input
                     type="checkbox"
-                    checked={selectedIds.includes(order.id)}
-                    onChange={(e) => toggleOrder(order.id, e.target.checked)}
+                    checked={checked}
+                    onChange={() => toggleOrder(order.id)}
                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                   />
-                  <span className="min-w-0">
-                    <span className="block font-medium">
-                      {order.order_numeric_id ? `#${order.order_numeric_id}` : 'No order #'} —{' '}
-                      {money(order.total)}
-                    </span>
-                    <span className="block text-sm text-zinc-300">
+
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {order.order_numeric_id
+                        ? `Suggested order #${order.order_numeric_id}`
+                        : 'Suggested order'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
                       {order.product_name || 'Untitled order'}
-                    </span>
-                    <span className="block text-xs text-zinc-500">
+                    </div>
+
+                    <div className="mt-1 text-xs text-zinc-500">
                       {order.seller || '—'} •{' '}
-                      {order.processed_date_display || dateDisplay(order.processed_date)}
-                    </span>
-                  </span>
+                      {dateDisplay(
+                        order.processed_date,
+                        order.processed_date_display
+                      )}{' '}
+                      • {money(order.total)} • same seller / same date
+                    </div>
+                  </div>
                 </label>
-              ))}
-            </div>
+              )
+            })}
           </div>
         ) : (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
-            No same-seller same-date staging orders were found to recommend for bundling.
+            No same-seller same-date staging orders were found to recommend for
+            bundling.
           </div>
         )}
+      </div>
 
-        <div className="text-sm text-zinc-400">
-          Selected for draft: <span className="text-zinc-200">{selectedIds.length}</span>
-          {recommendedOrders.length > 0 ? (
-            <>
-              {' '}
-              <span className="text-zinc-500">({recommendedSelectedCount} recommended)</span>
-            </>
-          ) : null}
-        </div>
+      <div className="mt-5 text-sm text-zinc-400">
+        Selected orders to send into the new break form:{' '}
+        <span className="font-medium text-zinc-200">{selectedCount}</span>
       </div>
     </div>
   )
