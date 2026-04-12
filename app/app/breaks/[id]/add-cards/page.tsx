@@ -181,7 +181,7 @@ export default async function AddBreakCardsPage({
     defaultYear
   )
 
-  const cardsReceived =
+  const itemsReceived =
     pageParams?.cards_received != null
       ? Math.max(0, Number(pageParams.cards_received))
       : Math.max(0, Number(item.cards_received ?? 0))
@@ -189,17 +189,17 @@ export default async function AddBreakCardsPage({
   const rowCount =
     pageParams?.row_count != null
       ? Math.min(Math.max(1, Number(pageParams.row_count)), 100)
-      : cardsReceived > 0
-      ? Math.min(cardsReceived, 50)
+      : itemsReceived > 0
+      ? Math.min(itemsReceived, 50)
       : 1
 
   return (
     <div className="max-w-7xl">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Add Cards From Break</h1>
+          <h1 className="text-3xl font-semibold">Add Items From Break</h1>
           <p className="mt-2 text-zinc-400">
-            Enter cards or lots from this break, choose for sale or personal, and quantity will count toward the total cards received.
+            Enter items or lots from this break, choose for sale or personal, and quantity will count toward the total items received.
           </p>
         </div>
 
@@ -252,25 +252,25 @@ export default async function AddBreakCardsPage({
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Cards Received</div>
-          <div className="mt-2 text-lg font-semibold">{cardsReceived}</div>
+          <div className="text-sm text-zinc-400">Items Received</div>
+          <div className="mt-2 text-lg font-semibold">{itemsReceived}</div>
         </div>
       </div>
 
       <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="text-sm font-medium text-zinc-200">How this works</div>
         <div className="mt-2 space-y-1 text-sm text-zinc-400">
-          <p>Use Single Card for individual cards and Lot for grouped cards like team lots.</p>
-          <p>Defaults are Single Card, Qty 1, and For Sale.</p>
+          <p>Use Single Item for individual items and Lot for grouped items like team lots.</p>
+          <p>Defaults are Single Item, Qty 1, and For Sale.</p>
           <p>Default year is pulled from the break title first, then linked Whatnot order titles, and falls back to the current year.</p>
           <p>Blank rows are ignored completely.</p>
-          <p>Only rows you actually fill in count toward the total cards received.</p>
+          <p>Only rows you actually fill in count toward the total items received.</p>
           <p>If you want a lot, enter it explicitly, such as Blue Jays Lot with Qty 10.</p>
-          <p>Quantity counts toward the total cards received for this break.</p>
+          <p>Quantity counts toward the total items received for this break.</p>
           <p>Choose each row as For Sale or Personal Collection during entry.</p>
           <p>If total entered quantity is too high, your entries will stay on the page so you can fix them instead of starting over.</p>
           <p>Equal break cost is split across the total quantity you entered.</p>
-          <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Player / Lot Name field.</p>
+          <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Item / Player / Lot Name field.</p>
         </div>
       </div>
 
@@ -280,10 +280,10 @@ export default async function AddBreakCardsPage({
       >
         <input type="hidden" name="break_id" value={item.id} />
         <input type="hidden" name="card_count" value={rowCount} />
-        <input type="hidden" name="cards_received" value={cardsReceived} />
+        <input type="hidden" name="cards_received" value={itemsReceived} />
 
         <div className="mb-5 text-sm text-zinc-400">
-          This break has <span className="font-medium text-zinc-200">{cardsReceived}</span> card(s) received, and only the quantities from filled rows will count toward that total.
+          This break has <span className="font-medium text-zinc-200">{itemsReceived}</span> item(s) received, and only the quantities from filled rows will count toward that total.
         </div>
 
         <BreakCardEntryGrid
@@ -304,7 +304,7 @@ export default async function AddBreakCardsPage({
             type="submit"
             className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
           >
-            Add Cards To Inventory
+            Add Items To Inventory
           </button>
         </div>
       </form>

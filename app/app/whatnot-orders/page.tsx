@@ -1,5 +1,9 @@
+'use client'
+
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { combineWhatnotOrdersIntoBreakAction } from '@/app/actions/whatnot'
 
 function money(value: number | string | null | undefined) {
@@ -106,56 +110,213 @@ function extractOrderNumbers(input: string): string[] {
   return Array.from(new Set(matches))
 }
 
-export default async function WhatnotOrdersPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{
-    q?: string
-    multi_order_input?: string
-  }>
-}) {
-  const params = searchParams ? await searchParams : undefined
-  const multiOrderInput = String(params?.multi_order_input ?? '').trim()
+export default function WhatnotOrdersPage() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
 
-  const supabase = await createClient()
+  const [orders, setOrders] = useState<WhatnotOrderRow[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [isLoadingOrders, setIsLoadingOrders] = useState(true)
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const [multiOrderInput, setMultiOrderInput] = useState(
+    searchParams.get('multi_order_input') ?? ''
+  )
+  const [globalQuery, setGlobalQuery] = useState(searchParams.get('q') ?? '')
 
-  if (!user) {
-    return null
+  useEffect(() => {
+    setMultiOrderInput(searchParams.get('multi_order_input') ?? '')
+    setGlobalQuery(searchParams.get('q') ?? '')
+  }, [searchParams])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadOrders() {
+      setIsLoadingOrders(true)
+      setLoadError(null)
+
+      const supabase = createClient()
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        if (!cancelled) {
+          setOrders([])
+          setIsLoadingOrders(false)
+        }
+        return
+      }
+
+      const { data, error } = await supabase
+        .from('whatnot_orders')
+        .select(
+          `
+          id,
+          break_id,
+          order_id,
+          order_numeric_id,
+          buyer,
+          seller,
+          product_name,
+          processed_date,
+          processed_date_display,
+          order_status,
+          quantity,
+          subtotal,
+          shipping_price,
+          taxes,
+          total,
+          source_file_name,
+          created_at
+        `
+        )
+        .eq('user_id', user.id)
+        .order('processed_date', { ascending: false })
+        .order('seller', { ascending: true })
+        .order('created_at', { ascending: false })
+
+      if (cancelled) return
+
+      if (error) {
+        setLoadError(error.message)
+        setOrders([])
+      } else {
+        setOrders((data ?? []) as WhatnotOrderRow[])
+      }
+
+      setIsLoadingOrders(false)
+    }
+
+    loadOrders()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const safeOrders = orders
+  const unassignedOrders = safeOrders.filter((order) => !order.break_id)
+  const assignedOrders = safeOrders.filter((order) => !!order.break_id)
+
+  const totals = useMemo(
+    () =>
+      safeOrders.reduce(
+        (acc, order) => {
+          acc.subtotal += Number(order.subtotal ?? 0)
+          acc.shipping += Number(order.shipping_price ?? 0)
+          acc.taxes += Number(order.taxes ?? 0)
+          acc.total += Number(order.total ?? 0)
+          return acc
+        },
+        {
+          subtotal: 0,
+          shipping: 0,
+          taxes: 0,
+          total: 0,
+        }
+      ),
+    [safeOrders]
+  )
+
+  const suggestedGroups = useMemo(() => buildSuggestedGroups(safeOrders), [safeOrders])
+
+  const extractedOrderNumbers = useMemo(
+    () => extractOrderNumbers((searchParams.get('multi_order_input') ?? '').trim()),
+    [searchParams]
+  )
+
+  const multiOrderResults = useMemo(
+    () =>
+      extractedOrderNumbers.length > 0
+        ? safeOrders.filter((order) =>
+            extractedOrderNumbers.includes(String(order.order_numeric_id ?? ''))
+          )
+        : [],
+    [extractedOrderNumbers, safeOrders]
+  )
+
+  const foundOrderNumberSet = useMemo(
+    () =>
+      new Set(
+        multiOrderResults
+          .map((order) => String(order.order_numeric_id ?? ''))
+          .filter(Boolean)
+      ),
+    [multiOrderResults]
+  )
+
+  const missingOrderNumbers = useMemo(
+    () =>
+      extractedOrderNumbers.filter(
+        (orderNumber) => !foundOrderNumberSet.has(orderNumber)
+      ),
+    [extractedOrderNumbers, foundOrderNumberSet]
+  )
+
+  const multiOrderAssignedCount = multiOrderResults.filter(
+    (order) => !!order.break_id
+  ).length
+  const multiOrderUnassignedCount = multiOrderResults.filter(
+    (order) => !order.break_id
+  ).length
+
+  useEffect(() => {
+    if ((searchParams.get('multi_order_input') ?? '').trim() && !isLoadingOrders) {
+      const el = document.getElementById('results-anchor')
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+  }, [searchParams, isLoadingOrders])
+
+  function handlePasteSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+
+    const trimmed = multiOrderInput.trim()
+    const params = new URLSearchParams(searchParams.toString())
+
+    if (trimmed) {
+      params.set('multi_order_input', trimmed)
+    } else {
+      params.delete('multi_order_input')
+    }
+
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}#results-anchor`)
+    })
   }
 
-  const { data: orders, error } = await supabase
-    .from('whatnot_orders')
-    .select(
-      `
-      id,
-      break_id,
-      order_id,
-      order_numeric_id,
-      buyer,
-      seller,
-      product_name,
-      processed_date,
-      processed_date_display,
-      order_status,
-      quantity,
-      subtotal,
-      shipping_price,
-      taxes,
-      total,
-      source_file_name,
-      created_at
-    `
-    )
-    .eq('user_id', user.id)
-    .order('processed_date', { ascending: false })
-    .order('seller', { ascending: true })
-    .order('created_at', { ascending: false })
+  function handleGlobalSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
 
-  if (error) {
+    const trimmed = globalQuery.trim()
+    const params = new URLSearchParams()
+
+    if (trimmed) {
+      params.set('q', trimmed)
+    }
+
+    startTransition(() => {
+      router.push(`/app/search?${params.toString()}`)
+    })
+  }
+
+  if (isLoadingOrders) {
+    return (
+      <div className="max-w-7xl space-y-6">
+        <div>
+          <h1 className="text-3xl font-semibold">Whatnot Orders</h1>
+          <p className="mt-2 text-zinc-400">Loading imported Whatnot orders…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (loadError) {
     return (
       <div className="max-w-6xl space-y-6">
         <div>
@@ -166,56 +327,11 @@ export default async function WhatnotOrdersPage({
         </div>
 
         <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Failed to load Whatnot orders: {error.message}
+          Failed to load Whatnot orders: {loadError}
         </div>
       </div>
     )
   }
-
-  const safeOrders = (orders ?? []) as WhatnotOrderRow[]
-
-  const unassignedOrders = safeOrders.filter((order) => !order.break_id)
-  const assignedOrders = safeOrders.filter((order) => !!order.break_id)
-
-  const totals = safeOrders.reduce(
-    (acc, order) => {
-      acc.subtotal += Number(order.subtotal ?? 0)
-      acc.shipping += Number(order.shipping_price ?? 0)
-      acc.taxes += Number(order.taxes ?? 0)
-      acc.total += Number(order.total ?? 0)
-      return acc
-    },
-    {
-      subtotal: 0,
-      shipping: 0,
-      taxes: 0,
-      total: 0,
-    }
-  )
-
-  const suggestedGroups = buildSuggestedGroups(safeOrders)
-
-  const extractedOrderNumbers = extractOrderNumbers(multiOrderInput)
-
-  const multiOrderResults =
-    extractedOrderNumbers.length > 0
-      ? safeOrders.filter((order) =>
-          extractedOrderNumbers.includes(String(order.order_numeric_id ?? ''))
-        )
-      : []
-
-  const foundOrderNumberSet = new Set(
-    multiOrderResults
-      .map((order) => String(order.order_numeric_id ?? ''))
-      .filter(Boolean)
-  )
-
-  const missingOrderNumbers = extractedOrderNumbers.filter(
-    (orderNumber) => !foundOrderNumberSet.has(orderNumber)
-  )
-
-  const multiOrderAssignedCount = multiOrderResults.filter((order) => !!order.break_id).length
-  const multiOrderUnassignedCount = multiOrderResults.filter((order) => !order.break_id).length
 
   return (
     <div className="max-w-7xl space-y-6">
@@ -250,23 +366,25 @@ export default async function WhatnotOrdersPage({
       </div>
 
       <form
-        method="get"
-        action="/app/search"
+        onSubmit={handleGlobalSearchSubmit}
         className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
       >
         <div className="flex flex-col gap-3 md:flex-row">
           <input
             type="text"
             name="q"
+            value={globalQuery}
+            onChange={(e) => setGlobalQuery(e.target.value)}
             placeholder="Search orders or breaks from here"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
           />
           <div className="flex gap-3">
             <button
               type="submit"
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+              disabled={isPending}
+              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200 disabled:opacity-50"
             >
-              Search Everywhere
+              {isPending ? 'Searching…' : 'Search Everywhere'}
             </button>
           </div>
         </div>
@@ -277,8 +395,7 @@ export default async function WhatnotOrdersPage({
       </form>
 
       <form
-        method="get"
-        action="/app/whatnot-orders"
+        onSubmit={handlePasteSearchSubmit}
         className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
       >
         <div>
@@ -291,7 +408,8 @@ export default async function WhatnotOrdersPage({
         <div className="mt-4">
           <textarea
             name="multi_order_input"
-            defaultValue={multiOrderInput}
+            value={multiOrderInput}
+            onChange={(e) => setMultiOrderInput(e.target.value)}
             placeholder={`Example:\n945919708\n942422693\n\nor paste messy text from an email`}
             className="min-h-[140px] w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"
           />
@@ -300,9 +418,10 @@ export default async function WhatnotOrdersPage({
         <div className="mt-4 flex flex-wrap gap-3">
           <button
             type="submit"
-            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+            disabled={isPending}
+            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200 disabled:opacity-50"
           >
-            Find Orders From Paste
+            {isPending ? 'Searching…' : 'Find Orders From Paste'}
           </button>
 
           <Link
@@ -318,7 +437,9 @@ export default async function WhatnotOrdersPage({
         </div>
       </form>
 
-      {multiOrderInput ? (
+      <div id="results-anchor" />
+
+      {(searchParams.get('multi_order_input') ?? '').trim() ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>

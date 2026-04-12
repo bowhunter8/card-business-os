@@ -98,8 +98,8 @@ export default function BreakCardEntryGrid({
           <tr>
             <th className="px-3 py-3 text-left font-medium">Year</th>
             <th className="px-3 py-3 text-left font-medium">Set</th>
-            <th className="px-3 py-3 text-left font-medium">Player / Lot Name</th>
-            <th className="px-3 py-3 text-left font-medium">Card #</th>
+            <th className="px-3 py-3 text-left font-medium">Item / Player / Lot Name</th>
+            <th className="px-3 py-3 text-left font-medium">Item #</th>
             <th className="px-3 py-3 text-left font-medium">Type</th>
             <th className="px-3 py-3 text-left font-medium">Qty</th>
             <th className="px-3 py-3 text-left font-medium">Status</th>
@@ -138,7 +138,7 @@ export default function BreakCardEntryGrid({
                     ref={(el) => setPlayerRef(index, el)}
                     onKeyDown={(e) => handlePlayerKeyDown(e, index)}
                     defaultValue={row.player_name}
-                    placeholder="Player or lot name"
+                    placeholder="Item, player, or lot name"
                     className="w-52 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                   />
                 </td>
@@ -159,7 +159,7 @@ export default function BreakCardEntryGrid({
                     defaultValue={row.item_type}
                     className="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
                   >
-                    <option value="single_card">Single Card</option>
+                    <option value="single_card">Single Item</option>
                     <option value="lot">Lot</option>
                   </select>
                 </td>
