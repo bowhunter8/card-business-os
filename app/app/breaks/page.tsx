@@ -21,6 +21,13 @@ type BreakInventoryRow = {
   quantity: number | null
 }
 
+type BreakViewRow = BreakRow & {
+  received: number
+  entered: number
+  remaining: number
+  completionStatus: 'Open' | 'In Progress' | 'Complete' | 'Reversed'
+}
+
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -32,7 +39,7 @@ function getCompletionStatus(
   received: number,
   entered: number,
   reversedAt?: string | null
-) {
+): 'Open' | 'In Progress' | 'Complete' | 'Reversed' {
   if (reversedAt) return 'Reversed'
   if (received <= 0) return 'Open'
   if (entered <= 0) return 'Open'
@@ -40,7 +47,14 @@ function getCompletionStatus(
   return 'Complete'
 }
 
-export default async function BreaksPage() {
+export default async function BreaksPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string }>
+}) {
+  const params = searchParams ? await searchParams : undefined
+  const qRaw = String(params?.q ?? '').trim().toLowerCase()
+
   const supabase = await createClient()
 
   const {
@@ -76,48 +90,79 @@ export default async function BreaksPage() {
       .eq('source_type', 'break'),
   ])
 
-  const allBreaks: BreakRow[] = (breaksResponse.data ?? []) as BreakRow[]
-  const breakInventoryRows: BreakInventoryRow[] = (breakInventoryResponse.data ??
-    []) as BreakInventoryRow[]
+  const allBreaks = (breaksResponse.data ?? []) as BreakRow[]
+  const breakInventoryRows = (breakInventoryResponse.data ?? []) as BreakInventoryRow[]
   const error = breaksResponse.error || breakInventoryResponse.error
 
   const enteredMap = new Map<string, number>()
   for (const row of breakInventoryRows) {
-    const breakId = row.source_break_id
-    if (!breakId) continue
+    if (!row.source_break_id) continue
     enteredMap.set(
-      breakId,
-      (enteredMap.get(breakId) ?? 0) + Number(row.quantity ?? 0)
+      row.source_break_id,
+      (enteredMap.get(row.source_break_id) ?? 0) + Number(row.quantity ?? 0)
     )
   }
 
-  const breaks = allBreaks.map((item) => {
+  const allRows: BreakViewRow[] = []
+  let activeCount = 0
+  let openCount = 0
+
+  for (const item of allBreaks) {
     const received = Number(item.cards_received ?? 0)
     const entered = enteredMap.get(item.id) ?? 0
     const remaining = Math.max(0, received - entered)
-    const completionStatus = getCompletionStatus(
-      received,
-      entered,
-      item.reversed_at
-    )
+    const completionStatus = getCompletionStatus(received, entered, item.reversed_at)
 
-    return {
+    const row: BreakViewRow = {
       ...item,
       received,
       entered,
       remaining,
       completionStatus,
     }
-  })
+
+    allRows.push(row)
+
+    if (!item.reversed_at) {
+      activeCount += 1
+      if (completionStatus === 'Open' || completionStatus === 'In Progress') {
+        openCount += 1
+      }
+    }
+  }
+
+  const breaks =
+    qRaw === 'active'
+      ? allRows.filter((item) => !item.reversed_at)
+      : qRaw === 'open'
+        ? allRows.filter(
+            (item) =>
+              !item.reversed_at &&
+              (item.completionStatus === 'Open' ||
+                item.completionStatus === 'In Progress')
+          )
+        : allRows
+
+  const pageTitle =
+    qRaw === 'active'
+      ? 'Breaks — Active'
+      : qRaw === 'open'
+        ? 'Breaks — Open'
+        : 'Breaks'
+
+  const pageDescription =
+    qRaw === 'active'
+      ? 'Showing active breaks that have not been reversed.'
+      : qRaw === 'open'
+        ? 'Showing breaks that still need card entry.'
+        : 'View and manage your recorded breaks.'
 
   return (
-    <div>
+    <div className="max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Breaks</h1>
-          <p className="mt-2 text-zinc-400">
-            View and manage your recorded breaks.
-          </p>
+          <h1 className="text-3xl font-semibold">{pageTitle}</h1>
+          <p className="mt-2 text-zinc-400">{pageDescription}</p>
         </div>
 
         <div className="flex gap-3">
@@ -130,10 +175,43 @@ export default async function BreaksPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/app/breaks"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === ''
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          All
+        </Link>
+        <Link
+          href="/app/breaks?q=active"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === 'active'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Active
+        </Link>
+        <Link
+          href="/app/breaks?q=open"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === 'open'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Open
+        </Link>
+      </div>
+
       <form
         method="get"
         action="/app/search"
-        className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
+        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
       >
         <div className="flex flex-col gap-3 md:flex-row">
           <input
@@ -158,12 +236,35 @@ export default async function BreaksPage() {
       </form>
 
       {error ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           Error loading breaks: {error.message}
         </div>
       ) : null}
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">All Breaks</div>
+          <div className="mt-2 text-3xl font-semibold">{allRows.length}</div>
+        </div>
+
+        <Link
+          href="/app/breaks?q=active"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
+          <div className="text-sm text-zinc-400">Active</div>
+          <div className="mt-2 text-3xl font-semibold">{activeCount}</div>
+        </Link>
+
+        <Link
+          href="/app/breaks?q=open"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
+          <div className="text-sm text-zinc-400">Open</div>
+          <div className="mt-2 text-3xl font-semibold">{openCount}</div>
+        </Link>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
@@ -247,7 +348,7 @@ export default async function BreaksPage() {
               {breaks.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-4 py-10 text-center text-zinc-400">
-                    No breaks recorded yet.
+                    No breaks found for this view.
                   </td>
                 </tr>
               )}
