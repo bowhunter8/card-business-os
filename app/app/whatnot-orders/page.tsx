@@ -133,8 +133,26 @@ export default async function WhatnotOrdersPage({
 
   const allOrders = (data ?? []) as WhatnotOrderRow[]
 
-  const unassignedOrders = allOrders.filter((order) => !order.break_id)
-  const assignedOrders = allOrders.filter((order) => !!order.break_id)
+  let totalOrders = 0
+  let subtotalTotal = 0
+  let shippingTotal = 0
+  let totalPaid = 0
+
+  const unassignedOrders: WhatnotOrderRow[] = []
+  const assignedOrders: WhatnotOrderRow[] = []
+
+  for (const order of allOrders) {
+    totalOrders += 1
+    subtotalTotal += Number(order.subtotal ?? 0)
+    shippingTotal += Number(order.shipping_price ?? 0)
+    totalPaid += Number(order.total ?? 0)
+
+    if (!order.break_id) {
+      unassignedOrders.push(order)
+    } else {
+      assignedOrders.push(order)
+    }
+  }
 
   const filteredOrders =
     qRaw === 'unassigned'
@@ -144,20 +162,6 @@ export default async function WhatnotOrdersPage({
         : allOrders
 
   const suggestedGroups = buildSuggestedGroups(unassignedOrders)
-
-  const totalOrders = allOrders.length
-  const subtotalTotal = allOrders.reduce(
-    (sum, order) => sum + Number(order.subtotal ?? 0),
-    0
-  )
-  const shippingTotal = allOrders.reduce(
-    (sum, order) => sum + Number(order.shipping_price ?? 0),
-    0
-  )
-  const totalPaid = allOrders.reduce(
-    (sum, order) => sum + Number(order.total ?? 0),
-    0
-  )
 
   const pageTitle =
     qRaw === 'unassigned'
@@ -433,7 +437,9 @@ export default async function WhatnotOrdersPage({
                       </>
                     ) : (
                       <Link
-                        href={`/app/search?q=${encodeURIComponent(order.order_numeric_id || order.order_id || order.seller || '')}`}
+                        href={`/app/search?q=${encodeURIComponent(
+                          order.order_numeric_id || order.order_id || order.seller || ''
+                        )}`}
                         className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
                       >
                         Search Related
