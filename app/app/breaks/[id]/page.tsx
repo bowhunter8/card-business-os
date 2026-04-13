@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { rollbackBreakAction } from '@/app/actions/break-safety'
@@ -104,112 +105,235 @@ function buildDisplay(card: BreakCardRow) {
   return parts.filter(Boolean).join(' • ')
 }
 
-export default async function BreakDetailPage({
-  params,
-  searchParams,
+function SectionLoading({
+  title,
+  rows = 3,
 }: {
-  params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string; success?: string }>
+  title: string
+  rows?: number
 }) {
-  const { id } = await params
-  const query = searchParams ? await searchParams : undefined
-  const errorMessage = query?.error
-  const successMessage = query?.success
+  return (
+    <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 animate-pulse">
+      <div className="h-7 w-56 rounded bg-zinc-800" />
+      <div className="mt-2 h-4 w-72 rounded bg-zinc-900" />
 
+      <div className="mt-6 grid gap-4">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div
+            key={`${title}-${i}`}
+            className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+          >
+            <div className="h-5 w-48 rounded bg-zinc-800" />
+            <div className="mt-3 h-4 w-64 rounded bg-zinc-900" />
+            <div className="mt-2 h-4 w-40 rounded bg-zinc-900" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MetricsLoading() {
+  return (
+    <div className="animate-pulse">
+      <div className="mt-8 grid gap-4 md:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={`metrics-a-${i}`}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+          >
+            <div className="h-4 w-28 rounded bg-zinc-800" />
+            <div className="mt-4 h-8 w-20 rounded bg-zinc-800" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={`metrics-b-${i}`}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+          >
+            <div className="h-4 w-28 rounded bg-zinc-800" />
+            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div
+            key={`metrics-c-${i}`}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+          >
+            <div className="h-4 w-28 rounded bg-zinc-800" />
+            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div
+            key={`metrics-d-${i}`}
+            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+          >
+            <div className="h-4 w-28 rounded bg-zinc-800" />
+            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="h-4 w-40 rounded bg-zinc-800" />
+        <div className="mt-4 h-6 w-72 rounded bg-zinc-800" />
+      </div>
+    </div>
+  )
+}
+
+async function LinkedWhatnotOrdersSection({
+  breakId,
+  userId,
+}: {
+  breakId: string
+  userId: string
+}) {
   const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) return null
-
-  const response = await supabase
-    .from('breaks')
+  const linkedWhatnotResponse = await supabase
+    .from('whatnot_orders')
     .select(`
       id,
-      break_date,
-      source_name,
+      order_id,
+      order_numeric_id,
+      seller,
       product_name,
-      format_type,
-      teams,
-      purchase_price,
-      sales_tax,
-      shipping_cost,
-      other_fees,
-      total_cost,
-      allocation_method,
-      notes,
-      order_number,
-      cards_received,
-      created_at,
-      reversed_at,
-      reversal_reason
+      processed_date,
+      processed_date_display,
+      subtotal,
+      shipping_price,
+      taxes,
+      total
     `)
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+    .eq('user_id', userId)
+    .eq('break_id', breakId)
+    .order('processed_date', { ascending: false })
 
-  if (response.error || !response.data) {
-    notFound()
-  }
-
-  const item = response.data as BreakRow
-
-  const [cardsResponse, linkedWhatnotResponse] = await Promise.all([
-    supabase
-      .from('inventory_items')
-      .select(`
-        id,
-        title,
-        player_name,
-        year,
-        brand,
-        set_name,
-        card_number,
-        parallel_name,
-        team,
-        quantity,
-        available_quantity,
-        cost_basis_unit,
-        cost_basis_total,
-        estimated_value_total,
-        status,
-        item_type,
-        notes,
-        created_at
-      `)
-      .eq('user_id', user.id)
-      .eq('source_type', 'break')
-      .eq('source_break_id', item.id)
-      .order('created_at', { ascending: false }),
-
-    supabase
-      .from('whatnot_orders')
-      .select(`
-        id,
-        order_id,
-        order_numeric_id,
-        seller,
-        product_name,
-        processed_date,
-        processed_date_display,
-        subtotal,
-        shipping_price,
-        taxes,
-        total
-      `)
-      .eq('user_id', user.id)
-      .eq('break_id', item.id)
-      .order('processed_date', { ascending: false }),
-  ])
-
-  const breakCards: BreakCardRow[] = (cardsResponse.data ?? []) as BreakCardRow[]
-  const cardsError = cardsResponse.error
-
-  const linkedWhatnotOrders: LinkedWhatnotOrderRow[] =
+  const linkedWhatnotOrders =
     (linkedWhatnotResponse.data ?? []) as LinkedWhatnotOrderRow[]
 
+  const linkedWhatnotTotal = linkedWhatnotOrders.reduce(
+    (sum, order) => sum + Number(order.total ?? 0),
+    0
+  )
+
+  return (
+    <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold">Linked Whatnot Orders</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Orders grouped into this break from Whatnot imports.
+          </p>
+        </div>
+
+        <div className="text-sm text-zinc-400">
+          {linkedWhatnotOrders.length} linked • {money(linkedWhatnotTotal)}
+        </div>
+      </div>
+
+      {linkedWhatnotOrders.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
+          No Whatnot orders linked to this break.
+        </div>
+      ) : (
+        <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="min-w-full text-sm">
+            <thead className="bg-zinc-950 text-zinc-400">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">Order #</th>
+                <th className="px-4 py-3 text-left font-medium">Date</th>
+                <th className="px-4 py-3 text-left font-medium">Seller</th>
+                <th className="px-4 py-3 text-left font-medium">Product</th>
+                <th className="px-4 py-3 text-left font-medium">Subtotal</th>
+                <th className="px-4 py-3 text-left font-medium">Shipping</th>
+                <th className="px-4 py-3 text-left font-medium">Taxes</th>
+                <th className="px-4 py-3 text-left font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {linkedWhatnotOrders.map((order) => (
+                <tr key={order.id} className="border-t border-zinc-800">
+                  <td className="px-4 py-3">
+                    {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {order.processed_date_display ||
+                      (order.processed_date
+                        ? new Date(order.processed_date).toLocaleDateString('en-US')
+                        : '—')}
+                  </td>
+                  <td className="px-4 py-3">{order.seller || '—'}</td>
+                  <td className="px-4 py-3">{order.product_name || '—'}</td>
+                  <td className="px-4 py-3">{money(order.subtotal)}</td>
+                  <td className="px-4 py-3">{money(order.shipping_price)}</td>
+                  <td className="px-4 py-3">{money(order.taxes)}</td>
+                  <td className="px-4 py-3">{money(order.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+async function BreakCardsAndMetricsSection({
+  breakId,
+  userId,
+  breakCost,
+  declaredCardsReceived,
+  reversedAt,
+}: {
+  breakId: string
+  userId: string
+  breakCost: number
+  declaredCardsReceived: number
+  reversedAt?: string | null
+}) {
+  const supabase = await createClient()
+
+  const cardsResponse = await supabase
+    .from('inventory_items')
+    .select(`
+      id,
+      title,
+      player_name,
+      year,
+      brand,
+      set_name,
+      card_number,
+      parallel_name,
+      team,
+      quantity,
+      available_quantity,
+      cost_basis_unit,
+      cost_basis_total,
+      estimated_value_total,
+      status,
+      item_type,
+      notes,
+      created_at
+    `)
+    .eq('user_id', userId)
+    .eq('source_type', 'break')
+    .eq('source_break_id', breakId)
+    .order('created_at', { ascending: false })
+
+  const breakCards = (cardsResponse.data ?? []) as BreakCardRow[]
+  const cardsError = cardsResponse.error
   const breakCardIds = breakCards.map((card) => card.id)
 
   let breakSales: SaleRow[] = []
@@ -230,15 +354,12 @@ export default async function BreakDetailPage({
         profit,
         reversed_at
       `)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .in('inventory_item_id', breakCardIds)
 
     breakSales = (salesResponse.data ?? []) as SaleRow[]
   }
 
-  const declaredCardsReceived = Number(item.cards_received ?? 0)
-
-  // Optimized single-pass card calculations
   let cardsEntered = 0
   let availableCards = 0
   let totalAllocatedCost = 0
@@ -264,19 +385,14 @@ export default async function BreakDetailPage({
 
   const remainingToEnter = Math.max(0, declaredCardsReceived - cardsEntered)
 
-  // Optimized single-pass sales calculations
   let totalSales = 0
   let totalFees = 0
   let totalNetProceeds = 0
   let realizedCOGS = 0
   let realizedProfit = 0
-  let hasAnySales = false
 
   for (const sale of breakSales) {
     if (sale.reversed_at) continue
-
-    const qtySold = Number(sale.quantity_sold ?? 0)
-    if (qtySold > 0) hasAnySales = true
 
     totalSales += Number(sale.gross_sale ?? 0)
     totalFees +=
@@ -288,275 +404,17 @@ export default async function BreakDetailPage({
     realizedProfit += Number(sale.profit ?? 0)
   }
 
-  const breakCost = Number(item.total_cost ?? 0)
   const breakROI = breakCost > 0 ? (realizedProfit / breakCost) * 100 : 0
   const cardsSold = cardsEntered - availableCards
-
   const projectedProfit = realizedProfit + remainingEstimatedValue
   const projectedROI = breakCost > 0 ? (projectedProfit / breakCost) * 100 : 0
-  const breakStatus = getBreakStatus(projectedROI, item.reversed_at)
-
-  const rollbackBlocked = !!item.reversed_at || hasAnySales
-
-  const linkedWhatnotTotal = linkedWhatnotOrders.reduce(
-    (sum, order) => sum + Number(order.total ?? 0),
-    0
-  )
+  const breakStatus = getBreakStatus(projectedROI, reversedAt)
 
   return (
-    <div>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Break Details</h1>
-          <p className="mt-2 text-zinc-400">
-            {item.product_name || 'Untitled break'}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <Link
-            href="/app/breaks"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            All Breaks
-          </Link>
-
-          {!item.reversed_at ? (
-            <>
-              <Link
-                href={`/app/breaks/${item.id}/edit`}
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-              >
-                Edit Break
-              </Link>
-              <Link
-                href={`/app/breaks/${item.id}/add-cards`}
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-              >
-                Add Cards
-              </Link>
-              <Link
-                href="/app/breaks/new"
-                className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-              >
-                Add Another Break
-              </Link>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      {errorMessage ? (
+    <>
+      {cardsError ? (
         <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      {successMessage ? (
-        <div className="mt-6 rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
-          {successMessage}
-        </div>
-      ) : null}
-
-      {item.reversed_at ? (
-        <div className="mt-6 rounded-2xl border border-yellow-900 bg-yellow-950/30 p-5">
-          <div className="text-sm text-yellow-300">Break Reversed</div>
-          <div className="mt-2 text-lg font-semibold text-yellow-100">
-            This break has been rolled back and should be treated as inactive.
-          </div>
-          <div className="mt-2 text-sm text-yellow-200">
-            Reversed at: {new Date(item.reversed_at).toLocaleString()}
-          </div>
-          {item.reversal_reason ? (
-            <div className="mt-2 whitespace-pre-wrap text-sm text-yellow-200">
-              Reason: {item.reversal_reason}
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="text-sm text-zinc-400">Safety</div>
-              <div className="mt-2 text-lg font-semibold">Roll back this break</div>
-              <div className="mt-2 max-w-2xl text-sm text-zinc-400">
-                This removes inventory created from this break, unlinks related Whatnot orders, and marks the break as reversed.
-                Rollback is blocked if any active sale exists from an item in this break.
-              </div>
-              {hasAnySales ? (
-                <div className="mt-3 text-sm text-red-300">
-                  Rollback blocked: one or more items from this break already have active sales.
-                </div>
-              ) : null}
-            </div>
-
-            <form action={rollbackBreakAction} className="w-full max-w-md space-y-3">
-              <input type="hidden" name="break_id" value={item.id} />
-              <textarea
-                name="reversal_reason"
-                rows={3}
-                placeholder="Optional rollback reason"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-              />
-              <button
-                type="submit"
-                disabled={rollbackBlocked}
-                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Roll Back Break
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Break Date</div>
-          <div className="mt-2 text-xl font-semibold">{item.break_date}</div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Source / Breaker</div>
-          <div className="mt-2 text-xl font-semibold">
-            {item.source_name || '—'}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Order #</div>
-          <div className="mt-2 text-xl font-semibold">
-            {item.order_number || '—'}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Format</div>
-          <div className="mt-2 text-xl font-semibold">
-            {item.format_type || '—'}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Purchase Price</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {money(item.purchase_price)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Sales Tax</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {money(item.sales_tax)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Shipping</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {money(item.shipping_cost)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Other Fees</div>
-          <div className="mt-2 text-2xl font-semibold">
-            {money(item.other_fees)}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Total Cost</div>
-          <div className="mt-2 text-3xl font-semibold">{money(item.total_cost)}</div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Allocation Method</div>
-          <div className="mt-2 text-xl font-semibold capitalize">
-            {(item.allocation_method || '—').replaceAll('_', ' ')}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Teams / Spots</div>
-          <div className="mt-2 text-xl font-semibold">
-            {item.teams && item.teams.length ? item.teams.join(', ') : '—'}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Break Status</div>
-          <div className="mt-2 text-xl font-semibold">{breakStatus}</div>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Linked Whatnot Orders</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Orders grouped into this break from Whatnot imports.
-            </p>
-          </div>
-
-          <div className="text-sm text-zinc-400">
-            {linkedWhatnotOrders.length} linked • {money(linkedWhatnotTotal)}
-          </div>
-        </div>
-
-        {linkedWhatnotOrders.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
-            No Whatnot orders linked to this break.
-          </div>
-        ) : (
-          <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-950 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">Order #</th>
-                  <th className="px-4 py-3 text-left font-medium">Date</th>
-                  <th className="px-4 py-3 text-left font-medium">Seller</th>
-                  <th className="px-4 py-3 text-left font-medium">Product</th>
-                  <th className="px-4 py-3 text-left font-medium">Subtotal</th>
-                  <th className="px-4 py-3 text-left font-medium">Shipping</th>
-                  <th className="px-4 py-3 text-left font-medium">Taxes</th>
-                  <th className="px-4 py-3 text-left font-medium">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {linkedWhatnotOrders.map((order) => (
-                  <tr key={order.id} className="border-t border-zinc-800">
-                    <td className="px-4 py-3">
-                      {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {order.processed_date_display ||
-                        (order.processed_date
-                          ? new Date(order.processed_date).toLocaleDateString('en-US')
-                          : '—')}
-                    </td>
-                    <td className="px-4 py-3">{order.seller || '—'}</td>
-                    <td className="px-4 py-3">{order.product_name || '—'}</td>
-                    <td className="px-4 py-3">{money(order.subtotal)}</td>
-                    <td className="px-4 py-3">{money(order.shipping_price)}</td>
-                    <td className="px-4 py-3">{money(order.taxes)}</td>
-                    <td className="px-4 py-3">{money(order.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {item.notes ? (
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Notes</div>
-          <div className="mt-2 whitespace-pre-wrap">{item.notes}</div>
+          Error loading break cards: {cardsError.message}
         </div>
       ) : null}
 
@@ -653,6 +511,11 @@ export default async function BreakDetailPage({
       </div>
 
       <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="text-sm text-zinc-400">Break Status</div>
+        <div className="mt-2 text-lg font-semibold">{breakStatus}</div>
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="text-sm text-zinc-400">Unsold Cards Outlook</div>
         <div className="mt-2 text-lg font-semibold">
           {availableCards > 0
@@ -661,18 +524,12 @@ export default async function BreakDetailPage({
         </div>
       </div>
 
-      {cardsError ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Error loading break cards: {cardsError.message}
-        </div>
-      ) : null}
-
       <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
           <h2 className="text-xl font-semibold">Cards From This Break</h2>
-          {!item.reversed_at ? (
+          {!reversedAt ? (
             <Link
-              href={`/app/breaks/${item.id}/add-cards`}
+              href={`/app/breaks/${breakId}/add-cards`}
               className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
             >
               Add More Cards
@@ -739,6 +596,275 @@ export default async function BreakDetailPage({
           </table>
         </div>
       </div>
+    </>
+  )
+}
+
+export default async function BreakDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams?: Promise<{ error?: string; success?: string }>
+}) {
+  const { id } = await params
+  const query = searchParams ? await searchParams : undefined
+  const errorMessage = query?.error
+  const successMessage = query?.success
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return null
+
+  const response = await supabase
+    .from('breaks')
+    .select(`
+      id,
+      break_date,
+      source_name,
+      product_name,
+      format_type,
+      teams,
+      purchase_price,
+      sales_tax,
+      shipping_cost,
+      other_fees,
+      total_cost,
+      allocation_method,
+      notes,
+      order_number,
+      cards_received,
+      created_at,
+      reversed_at,
+      reversal_reason
+    `)
+    .eq('id', id)
+    .eq('user_id', user.id)
+    .single()
+
+  if (response.error || !response.data) {
+    notFound()
+  }
+
+  const item = response.data as BreakRow
+
+  const breakCost = Number(item.total_cost ?? 0)
+  const declaredCardsReceived = Number(item.cards_received ?? 0)
+
+  return (
+    <div>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold">Break Details</h1>
+          <p className="mt-2 text-zinc-400">
+            {item.product_name || 'Untitled break'}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/app/breaks"
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            All Breaks
+          </Link>
+
+          {!item.reversed_at ? (
+            <>
+              <Link
+                href={`/app/breaks/${item.id}/edit`}
+                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+              >
+                Edit Break
+              </Link>
+              <Link
+                href={`/app/breaks/${item.id}/add-cards`}
+                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+              >
+                Add Cards
+              </Link>
+              <Link
+                href="/app/breaks/new"
+                className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+              >
+                Add Another Break
+              </Link>
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {errorMessage ? (
+        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          {errorMessage}
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="mt-6 rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+          {successMessage}
+        </div>
+      ) : null}
+
+      {item.reversed_at ? (
+        <div className="mt-6 rounded-2xl border border-yellow-900 bg-yellow-950/30 p-5">
+          <div className="text-sm text-yellow-300">Break Reversed</div>
+          <div className="mt-2 text-lg font-semibold text-yellow-100">
+            This break has been rolled back and should be treated as inactive.
+          </div>
+          <div className="mt-2 text-sm text-yellow-200">
+            Reversed at: {new Date(item.reversed_at).toLocaleString()}
+          </div>
+          {item.reversal_reason ? (
+            <div className="mt-2 whitespace-pre-wrap text-sm text-yellow-200">
+              Reason: {item.reversal_reason}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-sm text-zinc-400">Safety</div>
+              <div className="mt-2 text-lg font-semibold">Roll back this break</div>
+              <div className="mt-2 max-w-2xl text-sm text-zinc-400">
+                This removes inventory created from this break, unlinks related Whatnot orders, and marks the break as reversed.
+                Rollback is blocked if any active sale exists from an item in this break.
+              </div>
+            </div>
+
+            <form action={rollbackBreakAction} className="w-full max-w-md space-y-3">
+              <input type="hidden" name="break_id" value={item.id} />
+              <textarea
+                name="reversal_reason"
+                rows={3}
+                placeholder="Optional rollback reason"
+                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              />
+              <button
+                type="submit"
+                disabled={!!item.reversed_at}
+                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Roll Back Break
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Break Date</div>
+          <div className="mt-2 text-xl font-semibold">{item.break_date}</div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Source / Breaker</div>
+          <div className="mt-2 text-xl font-semibold">
+            {item.source_name || '—'}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Order #</div>
+          <div className="mt-2 text-xl font-semibold">
+            {item.order_number || '—'}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Format</div>
+          <div className="mt-2 text-xl font-semibold">
+            {item.format_type || '—'}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Purchase Price</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {money(item.purchase_price)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Sales Tax</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {money(item.sales_tax)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Shipping</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {money(item.shipping_cost)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Other Fees</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {money(item.other_fees)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Total Cost</div>
+          <div className="mt-2 text-3xl font-semibold">{money(item.total_cost)}</div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Allocation Method</div>
+          <div className="mt-2 text-xl font-semibold capitalize">
+            {(item.allocation_method || '—').replaceAll('_', ' ')}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Teams / Spots</div>
+          <div className="mt-2 text-xl font-semibold">
+            {item.teams && item.teams.length ? item.teams.join(', ') : '—'}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Created</div>
+          <div className="mt-2 text-xl font-semibold">
+            {item.created_at
+              ? new Date(item.created_at).toLocaleDateString('en-US')
+              : '—'}
+          </div>
+        </div>
+      </div>
+
+      {item.notes ? (
+        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Notes</div>
+          <div className="mt-2 whitespace-pre-wrap">{item.notes}</div>
+        </div>
+      ) : null}
+
+      <Suspense fallback={<SectionLoading title="Linked Whatnot Orders" rows={2} />}>
+        <LinkedWhatnotOrdersSection breakId={item.id} userId={user.id} />
+      </Suspense>
+
+      <Suspense fallback={<MetricsLoading />}>
+        <BreakCardsAndMetricsSection
+          breakId={item.id}
+          userId={user.id}
+          breakCost={breakCost}
+          declaredCardsReceived={declaredCardsReceived}
+          reversedAt={item.reversed_at}
+        />
+      </Suspense>
     </div>
   )
 }

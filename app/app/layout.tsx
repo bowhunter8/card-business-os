@@ -82,7 +82,7 @@ export default async function AppLayout({
         </aside>
 
         <main className="min-w-0">
-          <div className="border-b border-zinc-800 bg-zinc-950/95 px-4 py-4 md:px-6">
+          <div className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 px-4 py-4 backdrop-blur md:px-6">
             <AppGlobalSearch />
           </div>
 

@@ -49,7 +49,9 @@ export default async function InventoryPage({
   searchParams?: Promise<{ q?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
-  const q = cleanSearchTerm(params?.q ?? '')
+  const qRaw = String(params?.q ?? '')
+  const q = cleanSearchTerm(qRaw)
+  const qNormalized = q.toLowerCase()
 
   const supabase = await createClient()
 
@@ -84,7 +86,9 @@ export default async function InventoryPage({
     `)
     .eq('user_id', user.id)
 
-  if (q) {
+  if (qNormalized === 'listed') {
+    query = query.eq('status', 'listed')
+  } else if (q) {
     query = query.or(
       [
         `title.ilike.%${q}%`,
@@ -102,12 +106,12 @@ export default async function InventoryPage({
 
   const response = await query.order('created_at', { ascending: false })
 
-  const items: InventoryRow[] = (response.data ?? []) as InventoryRow[]
+  const items = (response.data ?? []) as InventoryRow[]
   const error = response.error
 
   const itemIds = items.map((item) => item.id)
 
-  let salesByItemId = new Map<string, SaleRow[]>()
+  const latestActiveSaleByItemId = new Map<string, SaleRow>()
 
   if (itemIds.length > 0) {
     const salesResponse = await supabase
@@ -123,24 +127,33 @@ export default async function InventoryPage({
       .in('inventory_item_id', itemIds)
       .order('sale_date', { ascending: false })
 
-    const salesRows: SaleRow[] = (salesResponse.data ?? []) as SaleRow[]
+    const salesRows = (salesResponse.data ?? []) as SaleRow[]
 
-    salesByItemId = salesRows.reduce((map, sale) => {
-      const existing = map.get(sale.inventory_item_id) ?? []
-      existing.push(sale)
-      map.set(sale.inventory_item_id, existing)
-      return map
-    }, new Map<string, SaleRow[]>())
+    for (const sale of salesRows) {
+      if (sale.reversed_at) continue
+      if (latestActiveSaleByItemId.has(sale.inventory_item_id)) continue
+      latestActiveSaleByItemId.set(sale.inventory_item_id, sale)
+    }
   }
 
+  const pageDescription =
+    qNormalized === 'listed'
+      ? 'Showing listed inventory items.'
+      : 'View and manage your card inventory.'
+
+  const showingSearchText =
+    q && qNormalized !== 'listed'
+      ? `Showing results for "${q}"`
+      : qNormalized === 'listed'
+        ? 'Showing listed inventory.'
+        : ''
+
   return (
-    <div>
+    <div className="max-w-7xl space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-3xl font-semibold">Inventory</h1>
-          <p className="mt-2 text-zinc-400">
-            View and manage your card inventory.
-          </p>
+          <p className="mt-2 text-zinc-400">{pageDescription}</p>
         </div>
 
         <Link
@@ -151,7 +164,33 @@ export default async function InventoryPage({
         </Link>
       </div>
 
-      <form method="get" className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/app/inventory"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            q === ''
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          All
+        </Link>
+        <Link
+          href="/app/inventory?q=listed"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qNormalized === 'listed'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Listed
+        </Link>
+      </div>
+
+      <form
+        method="get"
+        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
+      >
         <div className="flex flex-col gap-3 md:flex-row">
           <input
             type="text"
@@ -178,20 +217,20 @@ export default async function InventoryPage({
           </div>
         </div>
 
-        {q ? (
+        {showingSearchText ? (
           <div className="mt-3 text-sm text-zinc-400">
-            Showing results for <span className="text-zinc-200">"{q}"</span>
+            {showingSearchText}
           </div>
         ) : null}
       </form>
 
       {error ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           Error loading inventory: {error.message}
         </div>
       ) : null}
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+      <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
@@ -222,9 +261,7 @@ export default async function InventoryPage({
                   .join(' • ')
 
                 const hasAvailable = Number(item.available_quantity ?? 0) > 0
-                const itemSales = salesByItemId.get(item.id) ?? []
-                const activeSales = itemSales.filter((sale) => !sale.reversed_at)
-                const latestActiveSale = activeSales[0] ?? null
+                const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
 
                 return (
                   <tr key={item.id} className="border-t border-zinc-800">
