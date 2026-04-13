@@ -122,12 +122,6 @@ export default async function BreaksPage() {
 
         <div className="flex gap-3">
           <Link
-            href="/app/search"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Global Search
-          </Link>
-          <Link
             href="/app/breaks/new"
             className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
           >
@@ -145,7 +139,7 @@ export default async function BreaksPage() {
           <input
             type="text"
             name="q"
-            placeholder="Search breaks or staging orders from here"
+            placeholder="Search breaks, orders, players, teams..."
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
           />
           <div className="flex gap-3">
@@ -153,7 +147,7 @@ export default async function BreaksPage() {
               type="submit"
               className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
             >
-              Search Everywhere
+              Search
             </button>
           </div>
         </div>
