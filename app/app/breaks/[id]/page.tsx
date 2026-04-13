@@ -236,71 +236,57 @@ export default async function BreakDetailPage({
     breakSales = (salesResponse.data ?? []) as SaleRow[]
   }
 
-  const activeBreakSales = breakSales.filter((sale) => !sale.reversed_at)
-
   const declaredCardsReceived = Number(item.cards_received ?? 0)
 
-  const cardsEntered = breakCards.reduce(
-    (sum, card) => sum + Number(card.quantity ?? 0),
-    0
-  )
+  // Optimized single-pass card calculations
+  let cardsEntered = 0
+  let availableCards = 0
+  let totalAllocatedCost = 0
+  let totalEstimatedValue = 0
+  let remainingEstimatedValue = 0
+
+  for (const card of breakCards) {
+    const qty = Number(card.quantity ?? 0)
+    const avail = Number(card.available_quantity ?? 0)
+    const costTotal = Number(card.cost_basis_total ?? 0)
+    const estTotal = Number(card.estimated_value_total ?? 0)
+
+    cardsEntered += qty
+    availableCards += avail
+    totalAllocatedCost += costTotal
+    totalEstimatedValue += estTotal
+
+    if (qty > 0 && avail > 0 && estTotal > 0) {
+      const estPerUnit = estTotal / qty
+      remainingEstimatedValue += estPerUnit * avail
+    }
+  }
 
   const remainingToEnter = Math.max(0, declaredCardsReceived - cardsEntered)
 
-  const availableCards = breakCards.reduce(
-    (sum, card) => sum + Number(card.available_quantity ?? 0),
-    0
-  )
+  // Optimized single-pass sales calculations
+  let totalSales = 0
+  let totalFees = 0
+  let totalNetProceeds = 0
+  let realizedCOGS = 0
+  let realizedProfit = 0
+  let hasAnySales = false
 
-  const totalAllocatedCost = breakCards.reduce(
-    (sum, card) => sum + Number(card.cost_basis_total ?? 0),
-    0
-  )
+  for (const sale of breakSales) {
+    if (sale.reversed_at) continue
 
-  const totalEstimatedValue = breakCards.reduce(
-    (sum, card) => sum + Number(card.estimated_value_total ?? 0),
-    0
-  )
+    const qtySold = Number(sale.quantity_sold ?? 0)
+    if (qtySold > 0) hasAnySales = true
 
-  const remainingEstimatedValue = breakCards.reduce((sum, card) => {
-    const qty = Number(card.quantity ?? 0)
-    const avail = Number(card.available_quantity ?? 0)
-    const estTotal = Number(card.estimated_value_total ?? 0)
-
-    if (qty <= 0 || avail <= 0 || estTotal <= 0) return sum
-
-    const estPerUnit = estTotal / qty
-    return sum + estPerUnit * avail
-  }, 0)
-
-  const totalSales = activeBreakSales.reduce(
-    (sum, sale) => sum + Number(sale.gross_sale ?? 0),
-    0
-  )
-
-  const totalFees = activeBreakSales.reduce(
-    (sum, sale) =>
-      sum +
+    totalSales += Number(sale.gross_sale ?? 0)
+    totalFees +=
       Number(sale.platform_fees ?? 0) +
       Number(sale.shipping_cost ?? 0) +
-      Number(sale.other_costs ?? 0),
-    0
-  )
-
-  const totalNetProceeds = activeBreakSales.reduce(
-    (sum, sale) => sum + Number(sale.net_proceeds ?? 0),
-    0
-  )
-
-  const realizedCOGS = activeBreakSales.reduce(
-    (sum, sale) => sum + Number(sale.cost_of_goods_sold ?? 0),
-    0
-  )
-
-  const realizedProfit = activeBreakSales.reduce(
-    (sum, sale) => sum + Number(sale.profit ?? 0),
-    0
-  )
+      Number(sale.other_costs ?? 0)
+    totalNetProceeds += Number(sale.net_proceeds ?? 0)
+    realizedCOGS += Number(sale.cost_of_goods_sold ?? 0)
+    realizedProfit += Number(sale.profit ?? 0)
+  }
 
   const breakCost = Number(item.total_cost ?? 0)
   const breakROI = breakCost > 0 ? (realizedProfit / breakCost) * 100 : 0
@@ -310,9 +296,6 @@ export default async function BreakDetailPage({
   const projectedROI = breakCost > 0 ? (projectedProfit / breakCost) * 100 : 0
   const breakStatus = getBreakStatus(projectedROI, item.reversed_at)
 
-  const hasAnySales = activeBreakSales.some(
-    (sale) => Number(sale.quantity_sold ?? 0) > 0
-  )
   const rollbackBlocked = !!item.reversed_at || hasAnySales
 
   const linkedWhatnotTotal = linkedWhatnotOrders.reduce(
