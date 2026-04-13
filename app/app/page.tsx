@@ -172,61 +172,85 @@ export default async function AppHomePage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/inventory"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Inventory Items</div>
           <div className="mt-2 text-3xl font-semibold">{inventoryCount}</div>
           <div className="mt-2 text-sm text-zinc-500">
             {availableUnits} unit(s) available
           </div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/breaks?q=active"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Active Breaks</div>
           <div className="mt-2 text-3xl font-semibold">{breakCount}</div>
           <div className="mt-2 text-sm text-zinc-500">
             Total spend {money(breakSpend)}
           </div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/sales?q=active"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Active Sales</div>
           <div className="mt-2 text-3xl font-semibold">{saleCount}</div>
           <div className="mt-2 text-sm text-zinc-500">
             Gross sales {money(grossSales)}
           </div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/whatnot-orders?q=unassigned"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Whatnot Orders</div>
           <div className="mt-2 text-3xl font-semibold">{whatnotCount}</div>
           <div className="mt-2 text-sm text-zinc-500">
             {unassignedWhatnotOrders.length} unassigned
           </div>
-        </div>
+        </Link>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/inventory"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Inventory Cost Basis</div>
           <div className="mt-2 text-3xl font-semibold">{money(inventoryCost)}</div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/inventory"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Estimated Inventory Value</div>
           <div className="mt-2 text-3xl font-semibold">
             {money(inventoryEstimatedValue)}
           </div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/sales?q=active"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Net Sales</div>
           <div className="mt-2 text-3xl font-semibold">{money(netSales)}</div>
-        </div>
+        </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <Link
+          href="/app/sales?q=active"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
           <div className="text-sm text-zinc-400">Total Profit</div>
           <div className="mt-2 text-3xl font-semibold">{money(totalProfit)}</div>
-        </div>
+        </Link>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -296,7 +320,10 @@ export default async function AppHomePage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <Link
+          href="/app/whatnot-orders?q=unassigned"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 transition hover:bg-zinc-800"
+        >
           <h2 className="text-xl font-semibold">Whatnot Staging</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
@@ -314,15 +341,10 @@ export default async function AppHomePage() {
             </div>
           </div>
 
-          <div className="mt-4">
-            <Link
-              href="/app/whatnot-orders"
-              className="inline-flex rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-            >
-              View Whatnot Orders
-            </Link>
+          <div className="mt-4 text-sm text-zinc-400">
+            Click to view unassigned Whatnot orders.
           </div>
-        </div>
+        </Link>
       </div>
     </div>
   )

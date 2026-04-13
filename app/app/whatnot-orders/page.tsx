@@ -1,17 +1,5 @@
-'use client'
-
 import Link from 'next/link'
-import { useEffect, useMemo, useState, useTransition } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { combineWhatnotOrdersIntoBreakAction } from '@/app/actions/whatnot'
-
-function money(value: number | string | null | undefined) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(Number(value ?? 0))
-}
+import { createClient } from '@/lib/supabase/server'
 
 type WhatnotOrderRow = {
   id: string
@@ -30,67 +18,22 @@ type WhatnotOrderRow = {
   taxes: number | null
   total: number | null
   source_file_name: string | null
-  created_at: string | null
 }
 
 type SuggestedGroup = {
   key: string
   seller: string
-  processedDate: string | null
-  processedDateDisplay: string
-  orders: WhatnotOrderRow[]
-  subtotal: number
-  shipping: number
-  taxes: number
+  dateLabel: string
+  orderCount: number
   total: number
+  orders: WhatnotOrderRow[]
 }
 
-function buildSuggestedGroups(orders: WhatnotOrderRow[]) {
-  const map = new Map<string, SuggestedGroup>()
-
-  for (const order of orders) {
-    if (order.break_id) continue
-
-    const seller = String(order.seller ?? '').trim()
-    const processedDate = order.processed_date ?? null
-
-    if (!seller || !processedDate) continue
-
-    const key = `${processedDate}__${seller.toLowerCase()}`
-
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
-        seller,
-        processedDate,
-        processedDateDisplay:
-          order.processed_date_display ||
-          new Date(processedDate).toLocaleDateString('en-US'),
-        orders: [],
-        subtotal: 0,
-        shipping: 0,
-        taxes: 0,
-        total: 0,
-      })
-    }
-
-    const group = map.get(key)!
-    group.orders.push(order)
-    group.subtotal += Number(order.subtotal ?? 0)
-    group.shipping += Number(order.shipping_price ?? 0)
-    group.taxes += Number(order.taxes ?? 0)
-    group.total += Number(order.total ?? 0)
-  }
-
-  return Array.from(map.values())
-    .filter((group) => group.orders.length > 1)
-    .sort((a, b) => {
-      const aDate = a.processedDate ?? ''
-      const bDate = b.processedDate ?? ''
-      if (aDate > bDate) return -1
-      if (aDate < bDate) return 1
-      return a.seller.localeCompare(b.seller)
-    })
+function money(value: number | string | null | undefined) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(Number(value ?? 0))
 }
 
 function buildFocusHref(order: WhatnotOrderRow) {
@@ -103,255 +46,144 @@ function buildFocusHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
-function extractOrderNumbers(input: string): string[] {
-  if (!input) return []
-
-  const matches = input.match(/\d{6,}/g) || []
-  return Array.from(new Set(matches))
+function buildDateLabel(order: WhatnotOrderRow) {
+  const raw = order.processed_date_display || order.processed_date || ''
+  if (!raw) return 'No date'
+  return raw
 }
 
-export default function WhatnotOrdersPage() {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+function normalizeDateKey(order: WhatnotOrderRow) {
+  const raw = order.processed_date || order.processed_date_display || ''
+  if (!raw) return 'no-date'
+  return raw.slice(0, 10)
+}
 
-  const [orders, setOrders] = useState<WhatnotOrderRow[]>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [isLoadingOrders, setIsLoadingOrders] = useState(true)
+function buildSuggestedGroups(orders: WhatnotOrderRow[]): SuggestedGroup[] {
+  const map = new Map<string, SuggestedGroup>()
 
-  const [multiOrderInput, setMultiOrderInput] = useState(
-    searchParams.get('multi_order_input') ?? ''
-  )
-  const [globalQuery, setGlobalQuery] = useState(searchParams.get('q') ?? '')
+  for (const order of orders) {
+    const seller = (order.seller || 'Unknown seller').trim()
+    const dateKey = normalizeDateKey(order)
+    const dateLabel = buildDateLabel(order)
+    const key = `${seller}__${dateKey}`
 
-  useEffect(() => {
-    setMultiOrderInput(searchParams.get('multi_order_input') ?? '')
-    setGlobalQuery(searchParams.get('q') ?? '')
-  }, [searchParams])
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadOrders() {
-      setIsLoadingOrders(true)
-      setLoadError(null)
-
-      const supabase = createClient()
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        if (!cancelled) {
-          setOrders([])
-          setIsLoadingOrders(false)
-        }
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('whatnot_orders')
-        .select(
-          `
-          id,
-          break_id,
-          order_id,
-          order_numeric_id,
-          buyer,
-          seller,
-          product_name,
-          processed_date,
-          processed_date_display,
-          order_status,
-          quantity,
-          subtotal,
-          shipping_price,
-          taxes,
-          total,
-          source_file_name,
-          created_at
-        `
-        )
-        .eq('user_id', user.id)
-        .order('processed_date', { ascending: false })
-        .order('seller', { ascending: true })
-        .order('created_at', { ascending: false })
-
-      if (cancelled) return
-
-      if (error) {
-        setLoadError(error.message)
-        setOrders([])
-      } else {
-        setOrders((data ?? []) as WhatnotOrderRow[])
-      }
-
-      setIsLoadingOrders(false)
-    }
-
-    loadOrders()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const safeOrders = orders
-  const unassignedOrders = safeOrders.filter((order) => !order.break_id)
-  const assignedOrders = safeOrders.filter((order) => !!order.break_id)
-
-  const totals = useMemo(
-    () =>
-      safeOrders.reduce(
-        (acc, order) => {
-          acc.subtotal += Number(order.subtotal ?? 0)
-          acc.shipping += Number(order.shipping_price ?? 0)
-          acc.taxes += Number(order.taxes ?? 0)
-          acc.total += Number(order.total ?? 0)
-          return acc
-        },
-        {
-          subtotal: 0,
-          shipping: 0,
-          taxes: 0,
-          total: 0,
-        }
-      ),
-    [safeOrders]
-  )
-
-  const suggestedGroups = useMemo(() => buildSuggestedGroups(safeOrders), [safeOrders])
-
-  const extractedOrderNumbers = useMemo(
-    () => extractOrderNumbers((searchParams.get('multi_order_input') ?? '').trim()),
-    [searchParams]
-  )
-
-  const multiOrderResults = useMemo(
-    () =>
-      extractedOrderNumbers.length > 0
-        ? safeOrders.filter((order) =>
-            extractedOrderNumbers.includes(String(order.order_numeric_id ?? ''))
-          )
-        : [],
-    [extractedOrderNumbers, safeOrders]
-  )
-
-  const foundOrderNumberSet = useMemo(
-    () =>
-      new Set(
-        multiOrderResults
-          .map((order) => String(order.order_numeric_id ?? ''))
-          .filter(Boolean)
-      ),
-    [multiOrderResults]
-  )
-
-  const missingOrderNumbers = useMemo(
-    () =>
-      extractedOrderNumbers.filter(
-        (orderNumber) => !foundOrderNumberSet.has(orderNumber)
-      ),
-    [extractedOrderNumbers, foundOrderNumberSet]
-  )
-
-  const multiOrderAssignedCount = multiOrderResults.filter(
-    (order) => !!order.break_id
-  ).length
-  const multiOrderUnassignedCount = multiOrderResults.filter(
-    (order) => !order.break_id
-  ).length
-
-  useEffect(() => {
-    if ((searchParams.get('multi_order_input') ?? '').trim() && !isLoadingOrders) {
-      const el = document.getElementById('results-anchor')
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-  }, [searchParams, isLoadingOrders])
-
-  function handlePasteSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-
-    const trimmed = multiOrderInput.trim()
-    const params = new URLSearchParams(searchParams.toString())
-
-    if (trimmed) {
-      params.set('multi_order_input', trimmed)
+    const existing = map.get(key)
+    if (existing) {
+      existing.orderCount += 1
+      existing.total += Number(order.total ?? 0)
+      existing.orders.push(order)
     } else {
-      params.delete('multi_order_input')
+      map.set(key, {
+        key,
+        seller,
+        dateLabel,
+        orderCount: 1,
+        total: Number(order.total ?? 0),
+        orders: [order],
+      })
     }
+  }
 
-    startTransition(() => {
-      router.push(`${pathname}?${params.toString()}#results-anchor`)
+  return Array.from(map.values())
+    .filter((group) => group.orderCount >= 2)
+    .sort((a, b) => {
+      if (b.orderCount !== a.orderCount) return b.orderCount - a.orderCount
+      return b.total - a.total
     })
-  }
+}
 
-  function handleGlobalSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+export default async function WhatnotOrdersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string }>
+}) {
+  const params = searchParams ? await searchParams : undefined
+  const qRaw = String(params?.q ?? '').trim().toLowerCase()
 
-    const trimmed = globalQuery.trim()
-    const params = new URLSearchParams()
+  const supabase = await createClient()
 
-    if (trimmed) {
-      params.set('q', trimmed)
-    }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-    startTransition(() => {
-      router.push(`/app/search?${params.toString()}`)
-    })
-  }
+  if (!user) return null
 
-  if (isLoadingOrders) {
-    return (
-      <div className="max-w-7xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-semibold">Whatnot Orders</h1>
-          <p className="mt-2 text-zinc-400">Loading imported Whatnot orders…</p>
-        </div>
-      </div>
-    )
-  }
+  const { data, error } = await supabase
+    .from('whatnot_orders')
+    .select(`
+      id,
+      break_id,
+      order_id,
+      order_numeric_id,
+      buyer,
+      seller,
+      product_name,
+      processed_date,
+      processed_date_display,
+      order_status,
+      quantity,
+      subtotal,
+      shipping_price,
+      taxes,
+      total,
+      source_file_name
+    `)
+    .eq('user_id', user.id)
+    .order('processed_date', { ascending: false })
 
-  if (loadError) {
-    return (
-      <div className="max-w-6xl space-y-6">
-        <div>
-          <h1 className="text-3xl font-semibold">Whatnot Orders</h1>
-          <p className="mt-2 text-zinc-400">
-            Imported Whatnot buyer orders waiting to be reviewed or grouped into breaks later.
-          </p>
-        </div>
+  const allOrders = (data ?? []) as WhatnotOrderRow[]
 
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Failed to load Whatnot orders: {loadError}
-        </div>
-      </div>
-    )
-  }
+  const unassignedOrders = allOrders.filter((order) => !order.break_id)
+  const assignedOrders = allOrders.filter((order) => !!order.break_id)
+
+  const filteredOrders =
+    qRaw === 'unassigned'
+      ? unassignedOrders
+      : qRaw === 'assigned'
+        ? assignedOrders
+        : allOrders
+
+  const suggestedGroups = buildSuggestedGroups(unassignedOrders)
+
+  const totalOrders = allOrders.length
+  const subtotalTotal = allOrders.reduce(
+    (sum, order) => sum + Number(order.subtotal ?? 0),
+    0
+  )
+  const shippingTotal = allOrders.reduce(
+    (sum, order) => sum + Number(order.shipping_price ?? 0),
+    0
+  )
+  const totalPaid = allOrders.reduce(
+    (sum, order) => sum + Number(order.total ?? 0),
+    0
+  )
+
+  const pageTitle =
+    qRaw === 'unassigned'
+      ? 'Whatnot Orders — Unassigned'
+      : qRaw === 'assigned'
+        ? 'Whatnot Orders — Assigned'
+        : 'Whatnot Orders'
+
+  const pageDescription =
+    qRaw === 'unassigned'
+      ? 'Showing only Whatnot orders that have not yet been grouped into a break.'
+      : qRaw === 'assigned'
+        ? 'Showing only Whatnot orders that are already linked to a break.'
+        : 'Imported Whatnot buyer orders. This is your staging area before grouping orders into breaks.'
 
   return (
     <div className="max-w-7xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Whatnot Orders</h1>
-          <p className="mt-2 text-zinc-400">
-            Imported Whatnot buyer orders. This is your staging area before grouping orders into breaks.
-          </p>
+          <h1 className="text-3xl font-semibold">{pageTitle}</h1>
+          <p className="mt-2 text-zinc-400">{pageDescription}</p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Link
-            href="/app/search"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Global Search
-          </Link>
-          <Link
-            href="/app/imports/whatnot"
+            href="/app/whatnot-orders/imports"
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
             Import More
@@ -365,518 +197,255 @@ export default function WhatnotOrdersPage() {
         </div>
       </div>
 
-      <form
-        onSubmit={handleGlobalSearchSubmit}
-        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
-      >
-        <div className="flex flex-col gap-3 md:flex-row">
-          <input
-            type="text"
-            name="q"
-            value={globalQuery}
-            onChange={(e) => setGlobalQuery(e.target.value)}
-            placeholder="Search orders or breaks from here"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
-          />
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={isPending}
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200 disabled:opacity-50"
-            >
-              {isPending ? 'Searching…' : 'Search Everywhere'}
-            </button>
-          </div>
-        </div>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/app/whatnot-orders"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === ''
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          All Orders
+        </Link>
+        <Link
+          href="/app/whatnot-orders?q=unassigned"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === 'unassigned'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Unassigned
+        </Link>
+        <Link
+          href="/app/whatnot-orders?q=assigned"
+          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+            qRaw === 'assigned'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Assigned
+        </Link>
+      </div>
 
-        <div className="mt-3 text-sm text-zinc-500">
-          This opens a clean results page instead of filtering this big table.
-        </div>
-      </form>
-
-      <form
-        onSubmit={handlePasteSearchSubmit}
-        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
-      >
-        <div>
-          <h2 className="text-xl font-semibold">Multi-Order Paste Search</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Paste multiple Whatnot order numbers, a copied email, or mixed text. The page will extract order numbers and return only matching orders.
-          </p>
-        </div>
-
-        <div className="mt-4">
-          <textarea
-            name="multi_order_input"
-            value={multiOrderInput}
-            onChange={(e) => setMultiOrderInput(e.target.value)}
-            placeholder={`Example:\n945919708\n942422693\n\nor paste messy text from an email`}
-            className="min-h-[140px] w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-100"
-          />
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            type="submit"
-            disabled={isPending}
-            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200 disabled:opacity-50"
-          >
-            {isPending ? 'Searching…' : 'Find Orders From Paste'}
-          </button>
-
-          <Link
-            href="/app/whatnot-orders"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Clear
-          </Link>
-        </div>
-
-        <div className="mt-3 text-sm text-zinc-500">
-          Supports one-per-line, commas, and copied email text. This version is paste search only.
-        </div>
-      </form>
-
-      <div id="results-anchor" />
-
-      {(searchParams.get('multi_order_input') ?? '').trim() ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">Multi-Order Results</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Found {multiOrderResults.length} matching order(s) from {extractedOrderNumbers.length} extracted number(s).
-              </p>
-              <p className="mt-1 text-sm text-zinc-500">
-                Check any rows you want to merge together. Green assigned rows can be selected too, as long as they all belong to the same existing break.
-              </p>
-            </div>
-          </div>
-
-          {missingOrderNumbers.length > 0 ? (
-            <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-300">
-              These order number(s) were not found in imported Whatnot orders yet:{' '}
-              {missingOrderNumbers.join(', ')}
-            </div>
-          ) : null}
-
-          {multiOrderResults.length === 0 ? (
-            <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
-              No matching imported orders were found for the pasted input.
-            </div>
-          ) : (
-            <form action={combineWhatnotOrdersIntoBreakAction} className="mt-6 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-zinc-400">
-                  Found matches:{' '}
-                  <span className="font-medium text-zinc-200">{multiOrderResults.length}</span>
-                  {' '}• Assigned:{' '}
-                  <span className="font-medium text-zinc-200">{multiOrderAssignedCount}</span>
-                  {' '}• Unassigned:{' '}
-                  <span className="font-medium text-zinc-200">{multiOrderUnassignedCount}</span>
-                </div>
-
-                <button
-                  type="submit"
-                  className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-                >
-                  Create / Update Break From Selected Results
-                </button>
-              </div>
-
-              <div className="overflow-x-auto rounded-xl border border-zinc-800">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-zinc-950 text-zinc-300">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Select</th>
-                      <th className="px-3 py-2 text-left">Status</th>
-                      <th className="px-3 py-2 text-left">Date</th>
-                      <th className="px-3 py-2 text-left">Seller</th>
-                      <th className="px-3 py-2 text-left">Order #</th>
-                      <th className="px-3 py-2 text-left">Product</th>
-                      <th className="px-3 py-2 text-right">Qty</th>
-                      <th className="px-3 py-2 text-right">Total</th>
-                      <th className="px-3 py-2 text-left">Break Link</th>
-                      <th className="px-3 py-2 text-left">Focus</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {multiOrderResults.map((order) => {
-                      const assigned = !!order.break_id
-
-                      return (
-                        <tr key={order.id} className="border-t border-zinc-800">
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              name="whatnot_order_ids"
-                              value={order.id}
-                              className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-                            />
-                          </td>
-
-                          <td className="px-3 py-2">
-                            {assigned ? (
-                              <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                                Assigned
-                              </span>
-                            ) : (
-                              <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                                Unassigned
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {order.processed_date_display ||
-                              (order.processed_date
-                                ? new Date(order.processed_date).toLocaleDateString('en-US')
-                                : '—')}
-                          </td>
-
-                          <td className="px-3 py-2">{order.seller || '—'}</td>
-
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {order.order_numeric_id ? (
-                              <div>#{order.order_numeric_id}</div>
-                            ) : (
-                              <div className="text-zinc-500">—</div>
-                            )}
-                          </td>
-
-                          <td className="px-3 py-2 min-w-[320px]">
-                            <div>{order.product_name || '—'}</div>
-                            {order.order_status ? (
-                              <div className="text-xs text-zinc-500">
-                                {order.order_status}
-                              </div>
-                            ) : null}
-                          </td>
-
-                          <td className="px-3 py-2 text-right">{order.quantity ?? 0}</td>
-                          <td className="px-3 py-2 text-right">{money(order.total)}</td>
-
-                          <td className="px-3 py-2">
-                            {order.break_id ? (
-                              <Link
-                                href={`/app/breaks/${order.break_id}`}
-                                className="text-emerald-300 hover:text-emerald-200"
-                              >
-                                Open Linked Break
-                              </Link>
-                            ) : (
-                              <span className="text-zinc-500">Not linked yet</span>
-                            )}
-                          </td>
-
-                          <td className="px-3 py-2">
-                            <Link
-                              href={buildFocusHref(order)}
-                              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
-                            >
-                              Open Focus
-                            </Link>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </form>
-          )}
+      {error ? (
+        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          Order load error: {error.message}
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-6">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Total Orders</div>
-          <div className="mt-1 text-2xl font-semibold">{safeOrders.length}</div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Total Orders</div>
+          <div className="mt-2 text-3xl font-semibold">{totalOrders}</div>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Unassigned</div>
-          <div className="mt-1 text-2xl font-semibold">{unassignedOrders.length}</div>
+        <Link
+          href="/app/whatnot-orders?q=unassigned"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
+          <div className="text-sm text-zinc-400">Unassigned</div>
+          <div className="mt-2 text-3xl font-semibold">{unassignedOrders.length}</div>
+        </Link>
+
+        <Link
+          href="/app/whatnot-orders?q=assigned"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+        >
+          <div className="text-sm text-zinc-400">Assigned to Break</div>
+          <div className="mt-2 text-3xl font-semibold">{assignedOrders.length}</div>
+        </Link>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Subtotal</div>
+          <div className="mt-2 text-3xl font-semibold">{money(subtotalTotal)}</div>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Assigned to Break</div>
-          <div className="mt-1 text-2xl font-semibold">{assignedOrders.length}</div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Shipping</div>
+          <div className="mt-2 text-3xl font-semibold">{money(shippingTotal)}</div>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Subtotal</div>
-          <div className="mt-1 text-2xl font-semibold">{money(totals.subtotal)}</div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Shipping</div>
-          <div className="mt-1 text-2xl font-semibold">{money(totals.shipping)}</div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Total Paid</div>
-          <div className="mt-1 text-2xl font-semibold">{money(totals.total)}</div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <div className="text-sm text-zinc-400">Total Paid</div>
+          <div className="mt-2 text-3xl font-semibold">{money(totalPaid)}</div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Suggested Groups</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Auto-grouped by seller and date. These are suggestions only.
-            </p>
+      {suggestedGroups.length > 0 ? (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Suggested Groups</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Auto-grouped by seller and date. These are suggestions only.
+              </p>
+            </div>
+
+            <div className="text-sm text-zinc-500">
+              Showing groups with 2+ unassigned orders
+            </div>
           </div>
 
-          <div className="text-sm text-zinc-500">
-            Showing groups with 2+ unassigned orders
-          </div>
-        </div>
-
-        {suggestedGroups.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
-            No suggested groups found yet.
-          </div>
-        ) : (
           <div className="mt-6 grid gap-4">
             {suggestedGroups.map((group) => (
               <div
                 key={group.key}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5"
+                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
               >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="text-lg font-semibold">
-                      {group.seller} — {group.processedDateDisplay}
+                    <div className="text-xl font-semibold">
+                      {group.seller} — {group.dateLabel}
                     </div>
-                    <div className="mt-1 text-sm text-zinc-400">
-                      {group.orders.length} orders suggested for one break
+                    <div className="mt-2 text-sm text-zinc-400">
+                      {group.orderCount} orders suggested for one break
                     </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      <span className="rounded-full border border-zinc-700 px-2 py-1 text-zinc-300">
-                        Subtotal {money(group.subtotal)}
-                      </span>
-                      <span className="rounded-full border border-zinc-700 px-2 py-1 text-zinc-300">
-                        Shipping {money(group.shipping)}
-                      </span>
-                      <span className="rounded-full border border-zinc-700 px-2 py-1 text-zinc-300">
-                        Taxes {money(group.taxes)}
-                      </span>
-                      <span className="rounded-full border border-zinc-700 px-2 py-1 text-zinc-300">
-                        Total {money(group.total)}
-                      </span>
+                    <div className="mt-1 text-sm text-zinc-500">
+                      Total paid {money(group.total)}
                     </div>
                   </div>
 
-                  <form action={combineWhatnotOrdersIntoBreakAction}>
-                    {group.orders.map((order) => (
-                      <input
-                        key={order.id}
-                        type="hidden"
-                        name="whatnot_order_ids"
-                        value={order.id}
-                      />
-                    ))}
-
-                    <button
-                      type="submit"
-                      className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/app/search?q=${encodeURIComponent(group.seller)}`}
+                      className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
                     >
-                      Combine This Group Into Break
-                    </button>
-                  </form>
+                      Search Seller
+                    </Link>
+                  </div>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
-                <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-zinc-900 text-zinc-300">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Order #</th>
-                        <th className="px-3 py-2 text-left">Product</th>
-                        <th className="px-3 py-2 text-right">Qty</th>
-                        <th className="px-3 py-2 text-right">Subtotal</th>
-                        <th className="px-3 py-2 text-right">Shipping</th>
-                        <th className="px-3 py-2 text-right">Taxes</th>
-                        <th className="px-3 py-2 text-right">Total</th>
-                        <th className="px-3 py-2 text-left">Focus</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.orders.map((order) => (
-                        <tr key={order.id} className="border-t border-zinc-800">
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            {order.order_numeric_id ? (
-                              <div>#{order.order_numeric_id}</div>
-                            ) : (
-                              <div className="text-zinc-500">—</div>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 min-w-[320px]">
-                            <div>{order.product_name || '—'}</div>
-                            {order.order_status ? (
-                              <div className="text-xs text-zinc-500">
-                                {order.order_status}
-                              </div>
-                            ) : null}
-                          </td>
-                          <td className="px-3 py-2 text-right">{order.quantity ?? 0}</td>
-                          <td className="px-3 py-2 text-right">{money(order.subtotal)}</td>
-                          <td className="px-3 py-2 text-right">{money(order.shipping_price)}</td>
-                          <td className="px-3 py-2 text-right">{money(order.taxes)}</td>
-                          <td className="px-3 py-2 text-right">{money(order.total)}</td>
-                          <td className="px-3 py-2">
-                            <Link
-                              href={buildFocusHref(order)}
-                              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
-                            >
-                              Open Focus
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Orders</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              {qRaw === 'unassigned'
+                ? 'Showing only unassigned orders.'
+                : qRaw === 'assigned'
+                  ? 'Showing only assigned orders.'
+                  : 'Showing all imported Whatnot orders.'}
+            </p>
+          </div>
+
+          <div className="text-sm text-zinc-500">
+            {filteredOrders.length} shown
+          </div>
+        </div>
+
+        {filteredOrders.length === 0 ? (
+          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-400">
+            No orders found for this view.
+          </div>
+        ) : (
+          <div className="mt-6 grid gap-4">
+            {filteredOrders.map((order) => (
+              <div
+                key={order.id}
+                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {order.break_id ? (
+                        <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+                          Linked
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
+                          Unassigned
+                        </span>
+                      )}
+
+                      {order.order_status ? (
+                        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300">
+                          {order.order_status}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-2 text-lg font-semibold">
+                      {order.product_name || 'Untitled order'}
+                    </div>
+
+                    <div className="mt-2 text-sm text-zinc-300">
+                      Seller: {order.seller || '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Buyer: {order.buyer || '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Order #: {order.order_numeric_id || order.order_id || '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Date: {order.processed_date_display || order.processed_date || '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Qty: {order.quantity ?? '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Total: {money(order.total)}
+                    </div>
+
+                    {order.source_file_name ? (
+                      <div className="mt-1 text-xs text-zinc-500">
+                        Source file: {order.source_file_name}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={buildFocusHref(order)}
+                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                    >
+                      Open Order
+                    </Link>
+
+                    {order.break_id ? (
+                      <>
+                        <Link
+                          href={`/app/breaks/${order.break_id}`}
+                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                        >
+                          Break Details
+                        </Link>
+
+                        <Link
+                          href={`/app/breaks/${order.break_id}/edit`}
+                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                        >
+                          Edit Break
+                        </Link>
+                      </>
+                    ) : (
+                      <Link
+                        href={`/app/search?q=${encodeURIComponent(order.order_numeric_id || order.order_id || order.seller || '')}`}
+                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                      >
+                        Search Related
+                      </Link>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
-
-      <form
-        action={combineWhatnotOrdersIntoBreakAction}
-        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
-      >
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">All Orders</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Orders are sorted by date first, then seller. Select orders and combine them into a break or add missing ones to an existing break.
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-          >
-            Create / Update Break From Selected Orders
-          </button>
-        </div>
-
-        {safeOrders.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-500">
-            No Whatnot orders found yet. Import a CSV first.
-          </div>
-        ) : (
-          <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-950 text-zinc-300">
-                <tr>
-                  <th className="px-3 py-2 text-left">Select</th>
-                  <th className="px-3 py-2 text-left">Status</th>
-                  <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">Seller</th>
-                  <th className="px-3 py-2 text-left">Order #</th>
-                  <th className="px-3 py-2 text-left">Product</th>
-                  <th className="px-3 py-2 text-right">Qty</th>
-                  <th className="px-3 py-2 text-right">Subtotal</th>
-                  <th className="px-3 py-2 text-right">Shipping</th>
-                  <th className="px-3 py-2 text-right">Taxes</th>
-                  <th className="px-3 py-2 text-right">Total</th>
-                  <th className="px-3 py-2 text-left">Break Link</th>
-                  <th className="px-3 py-2 text-left">Focus</th>
-                </tr>
-              </thead>
-              <tbody>
-                {safeOrders.map((order) => {
-                  const assigned = !!order.break_id
-
-                  return (
-                    <tr key={order.id} className="border-t border-zinc-800">
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          name="whatnot_order_ids"
-                          value={order.id}
-                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-                        />
-                      </td>
-
-                      <td className="px-3 py-2">
-                        {assigned ? (
-                          <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                            Assigned
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {order.processed_date_display ||
-                          (order.processed_date
-                            ? new Date(order.processed_date).toLocaleDateString('en-US')
-                            : '—')}
-                      </td>
-
-                      <td className="px-3 py-2">{order.seller || '—'}</td>
-
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {order.order_numeric_id ? (
-                          <div>#{order.order_numeric_id}</div>
-                        ) : (
-                          <div className="text-zinc-500">—</div>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2 min-w-[320px]">
-                        <div>{order.product_name || '—'}</div>
-                        {order.order_status ? (
-                          <div className="text-xs text-zinc-500">
-                            {order.order_status}
-                          </div>
-                        ) : null}
-                      </td>
-
-                      <td className="px-3 py-2 text-right">{order.quantity ?? 0}</td>
-                      <td className="px-3 py-2 text-right">{money(order.subtotal)}</td>
-                      <td className="px-3 py-2 text-right">{money(order.shipping_price)}</td>
-                      <td className="px-3 py-2 text-right">{money(order.taxes)}</td>
-                      <td className="px-3 py-2 text-right">{money(order.total)}</td>
-
-                      <td className="px-3 py-2">
-                        {order.break_id ? (
-                          <Link
-                            href={`/app/breaks/${order.break_id}`}
-                            className="text-emerald-300 hover:text-emerald-200"
-                          >
-                            Open Linked Break
-                          </Link>
-                        ) : (
-                          <span className="text-zinc-500">Not linked yet</span>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2">
-                        <Link
-                          href={buildFocusHref(order)}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
-                        >
-                          Open Focus
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </form>
     </div>
   )
 }
