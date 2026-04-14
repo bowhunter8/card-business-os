@@ -109,6 +109,10 @@ export async function updateInventoryItemAction(formData: FormData) {
   const estimatedValueUnit = Number(formData.get('estimated_value_unit') ?? 0)
   const notes = String(formData.get('notes') ?? '').trim()
 
+  const from = String(formData.get('from') ?? '').trim()
+  const breakId = String(formData.get('break_id') ?? '').trim()
+  const cameFromBreak = from === 'break' && breakId.length > 0
+
   if (!inventoryItemId) {
     redirect('/app/inventory?error=Missing inventory item id')
   }
@@ -153,10 +157,22 @@ export async function updateInventoryItemAction(formData: FormData) {
     .eq('user_id', user.id)
 
   if (updateResponse.error) {
+    const backToEdit = cameFromBreak
+      ? `/app/inventory/${inventoryItemId}/edit?from=break&break_id=${encodeURIComponent(
+          breakId
+        )}&error=${encodeURIComponent(updateResponse.error.message)}`
+      : `/app/inventory/${inventoryItemId}/edit?error=${encodeURIComponent(
+          updateResponse.error.message
+        )}`
+
+    redirect(backToEdit)
+  }
+
+  if (cameFromBreak) {
     redirect(
-      `/app/inventory/${inventoryItemId}/edit?error=${encodeURIComponent(
-        updateResponse.error.message
-      )}`
+      `/app/breaks/${encodeURIComponent(
+        breakId
+      )}?success=${encodeURIComponent('Card updated successfully')}`
     )
   }
 

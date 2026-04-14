@@ -575,12 +575,22 @@ async function BreakCardsAndMetricsSection({
                   <td className="px-4 py-3">{money(card.cost_basis_total)}</td>
                   <td className="px-4 py-3">{money(card.estimated_value_total)}</td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/app/inventory/${card.id}`}
-                      className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
-                    >
-                      View Item
-                    </Link>
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href={`/app/inventory/${card.id}`}
+                        className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                      >
+                        View
+                      </Link>
+                      {!reversedAt ? (
+                        <Link
+                          href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
+                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                        >
+                          Edit
+                        </Link>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

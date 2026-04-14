@@ -30,11 +30,16 @@ export default async function EditInventoryPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string }>
+  searchParams?: Promise<{ error?: string; from?: string; break_id?: string }>
 }) {
   const { id } = await params
   const pageParams = searchParams ? await searchParams : undefined
   const pageError = pageParams?.error
+  const from = pageParams?.from
+  const breakId = pageParams?.break_id
+
+  const cameFromBreak = from === 'break' && typeof breakId === 'string' && breakId.length > 0
+  const backHref = cameFromBreak ? `/app/breaks/${breakId}` : `/app/inventory/${id}`
 
   const supabase = await createClient()
 
@@ -98,10 +103,10 @@ export default async function EditInventoryPage({
         </div>
 
         <Link
-          href={`/app/inventory/${item.id}`}
+          href={backHref}
           className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
         >
-          Back to Item
+          {cameFromBreak ? 'Back to Break' : 'Back to Item'}
         </Link>
       </div>
 
@@ -116,6 +121,8 @@ export default async function EditInventoryPage({
         className="mt-6 grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 md:grid-cols-2"
       >
         <input type="hidden" name="inventory_item_id" value={item.id} />
+        <input type="hidden" name="from" value={from ?? ''} />
+        <input type="hidden" name="break_id" value={breakId ?? ''} />
 
         <div>
           <label className="mb-1 block text-sm text-zinc-300">Title</label>
@@ -223,7 +230,7 @@ export default async function EditInventoryPage({
 
         <div className="md:col-span-2 flex justify-end gap-3 pt-2">
           <Link
-            href={`/app/inventory/${item.id}`}
+            href={backHref}
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
             Cancel
