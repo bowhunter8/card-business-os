@@ -68,10 +68,8 @@ function rowsMatch(a: EntryRow[], b: EntryRow[]) {
   return true
 }
 
-function rowHasMeaningfulData(row: EntryRow, defaultYear: string, defaultSet: string) {
+function rowHasMeaningfulData(row: EntryRow) {
   return (
-    row.year.trim() !== String(defaultYear).trim() ||
-    row.set_name.trim() !== String(defaultSet).trim() ||
     row.player_name.trim() !== '' ||
     row.card_number.trim() !== '' ||
     row.item_type !== 'single_card' ||
@@ -139,9 +137,7 @@ export default function BreakCardEntryGrid({
 
     saveTimerRef.current = window.setTimeout(() => {
       try {
-        const hasMeaningfulData = rows.some((row) =>
-          rowHasMeaningfulData(row, defaultYear, defaultSet)
-        )
+        const hasMeaningfulData = rows.some((row) => rowHasMeaningfulData(row))
 
         if (!hasMeaningfulData) {
           window.localStorage.removeItem(storageKey)
@@ -173,7 +169,7 @@ export default function BreakCardEntryGrid({
         window.clearTimeout(saveTimerRef.current)
       }
     }
-  }, [rows, storageKey, defaultYear, defaultSet])
+  }, [rows, storageKey])
 
   function setPlayerRef(index: number, el: HTMLInputElement | null) {
     playerRefs.current[index] = el

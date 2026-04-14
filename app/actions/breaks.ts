@@ -59,11 +59,22 @@ function buildCardTitle(input: {
   return base
 }
 
+function rowHasMeaningfulData(row: RestorableEntryRow) {
+  return (
+    row.player_name.trim() !== '' ||
+    row.card_number.trim() !== '' ||
+    row.notes.trim() !== '' ||
+    row.item_type !== 'single_card' ||
+    row.quantity !== '1' ||
+    row.status !== 'available'
+  )
+}
+
 function buildRestoreRows(formData: FormData, rowCount: number): RestorableEntryRow[] {
   const rows: RestorableEntryRow[] = []
 
   for (let i = 0; i < rowCount; i++) {
-    rows.push({
+    const row: RestorableEntryRow = {
       year: safeText(formData.get(`year_${i}`)),
       set_name: safeText(formData.get(`set_name_${i}`)),
       player_name: safeText(formData.get(`player_name_${i}`)),
@@ -72,7 +83,9 @@ function buildRestoreRows(formData: FormData, rowCount: number): RestorableEntry
       quantity: String(Math.max(1, safeNumber(formData.get(`quantity_${i}`)) || 1)),
       status: safeText(formData.get(`status_${i}`)) || 'available',
       notes: safeText(formData.get(`notes_${i}`)),
-    })
+    }
+
+    rows.push(row)
   }
 
   return rows
@@ -432,23 +445,19 @@ export async function addBreakCardsAction(formData: FormData) {
   const maxRows = Math.min(cardCount, 100)
 
   for (let i = 0; i < maxRows; i++) {
-    const yearRaw = safeText(formData.get(`year_${i}`))
-    const setName = safeText(formData.get(`set_name_${i}`))
-    const playerName = safeText(formData.get(`player_name_${i}`))
-    const cardNumber = safeText(formData.get(`card_number_${i}`))
-    const itemTypeRaw = safeText(formData.get(`item_type_${i}`))
-    const quantityRaw = safeNumber(formData.get(`quantity_${i}`))
-    const statusRaw = safeText(formData.get(`status_${i}`))
-    const notes = safeText(formData.get(`notes_${i}`))
+    const restoreRow = restoreRows[i]
+    if (!restoreRow || !rowHasMeaningfulData(restoreRow)) {
+      continue
+    }
 
-    const rowHasMeaningfulData =
-      yearRaw.length > 0 ||
-      setName.length > 0 ||
-      playerName.length > 0 ||
-      cardNumber.length > 0 ||
-      notes.length > 0
-
-    if (!rowHasMeaningfulData) continue
+    const yearRaw = restoreRow.year
+    const setName = restoreRow.set_name
+    const playerName = restoreRow.player_name
+    const cardNumber = restoreRow.card_number
+    const itemTypeRaw = restoreRow.item_type
+    const quantityRaw = safeNumber(restoreRow.quantity)
+    const statusRaw = restoreRow.status
+    const notes = restoreRow.notes
 
     const year = yearRaw ? Number(yearRaw) : null
     const normalizedStatus = normalizeInventoryStatus(statusRaw)
