@@ -21,7 +21,7 @@ export default async function AppLayout({
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="grid min-h-screen grid-cols-1 md:grid-cols-[260px_1fr]">
-        <aside className="border-r border-zinc-800 bg-zinc-900/70 p-4">
+        <aside className="border-r border-zinc-800 bg-zinc-900/70 p-4 md:sticky md:top-0 md:h-screen md:overflow-y-auto">
           <div className="mb-8">
             <div className="text-xs uppercase tracking-[0.25em] text-zinc-500">
               Standalone App
