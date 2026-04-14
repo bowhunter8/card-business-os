@@ -124,7 +124,13 @@ export default async function AddBreakCardsPage({
   const { id } = await params
   const pageParams = searchParams ? await searchParams : undefined
   const pageError = pageParams?.error
-  const restoredRows = parseRestoreRows(pageParams?.restore)
+
+  const safeRestore =
+    pageParams?.restore && pageParams.restore.length <= 12000
+      ? pageParams.restore
+      : undefined
+
+  const restoredRows = parseRestoreRows(safeRestore)
 
   const supabase = await createClient()
 
@@ -190,8 +196,11 @@ export default async function AddBreakCardsPage({
     pageParams?.row_count != null
       ? Math.min(Math.max(1, Number(pageParams.row_count)), 100)
       : itemsReceived > 0
-      ? Math.min(itemsReceived, 50)
-      : 1
+        ? Math.min(itemsReceived, 50)
+        : 1
+
+  const droppedOversizedRestore =
+    Boolean(pageParams?.restore) && safeRestore == null
 
   return (
     <div className="max-w-7xl">
@@ -218,6 +227,17 @@ export default async function AddBreakCardsPage({
           {pageError}
         </div>
       ) : null}
+
+      {droppedOversizedRestore ? (
+        <div className="mt-4 rounded-xl border border-yellow-900 bg-yellow-950/40 px-4 py-3 text-sm text-yellow-200">
+          A previous restore payload was too large to safely reload on this page.
+          Your break still exists, but large card-entry recovery should not rely on the URL.
+        </div>
+      ) : null}
+
+      <div className="mt-4 rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+        Autosave is enabled on this page. Large entries should now stay recoverable in this browser even if the page refreshes or errors.
+      </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-6">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
@@ -268,7 +288,9 @@ export default async function AddBreakCardsPage({
           <p>If you want a lot, enter it explicitly, such as Blue Jays Lot with Qty 10.</p>
           <p>Quantity counts toward the total items received for this break.</p>
           <p>Choose each row as For Sale or Personal Collection during entry.</p>
-          <p>If total entered quantity is too high, your entries will stay on the page so you can fix them instead of starting over.</p>
+          <p>Autosave keeps your in-progress entry in this browser for this break.</p>
+          <p>If total entered quantity is too high, small restore payloads can still stay on the page so you can fix them instead of starting over.</p>
+          <p>Large entries should not rely on URL restore anymore.</p>
           <p>Equal break cost is split across the total quantity you entered.</p>
           <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Item / Player / Lot Name field.</p>
         </div>
@@ -287,6 +309,7 @@ export default async function AddBreakCardsPage({
         </div>
 
         <BreakCardEntryGrid
+          breakId={item.id}
           rowCount={rowCount}
           defaultYear={defaultYear}
           defaultSet={defaultSet}

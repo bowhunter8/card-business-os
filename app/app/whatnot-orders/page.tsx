@@ -187,7 +187,7 @@ export default async function WhatnotOrdersPage({
 
         <div className="flex flex-wrap gap-3">
           <Link
-            href="/app/whatnot-orders/imports"
+            href="/app/imports/whatnot"
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
             Import More

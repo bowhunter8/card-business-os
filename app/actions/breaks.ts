@@ -19,7 +19,7 @@ function safeText(value: FormDataEntryValue | null) {
 }
 
 function safeNumber(value: FormDataEntryValue | null) {
-  const num = Number(value ?? 0)
+  const num = Number(String(value ?? '').replace(/,/g, '').trim() || 0)
   return Number.isFinite(num) ? num : 0
 }
 
@@ -78,18 +78,16 @@ function buildRestoreRows(formData: FormData, rowCount: number): RestorableEntry
   return rows
 }
 
-function redirectBackToAddCardsWithRestore(args: {
+function redirectBackToAddCards(args: {
   breakId: string
   error: string
   rowCount: number
   cardsReceived: number
-  restoreRows: RestorableEntryRow[]
 }) {
   const params = new URLSearchParams()
   params.set('error', args.error)
   params.set('row_count', String(args.rowCount))
   params.set('cards_received', String(args.cardsReceived))
-  params.set('restore', JSON.stringify(args.restoreRows))
   redirect(`/app/breaks/${args.breakId}/add-cards?${params.toString()}`)
 }
 
@@ -133,7 +131,9 @@ export async function createBreakAction(formData: FormData) {
         : ''
 
     redirect(
-      `/app/breaks/new?error=Break date, source, and product name are required${whatnotQuery}`
+      `/app/breaks/new?error=${encodeURIComponent(
+        'Break date, source, and product name are required'
+      )}${whatnotQuery}`
     )
   }
 
@@ -166,9 +166,9 @@ export async function createBreakAction(formData: FormData) {
     const alreadyLinked = selectedOrders.filter((order) => !!order.break_id)
     if (alreadyLinked.length > 0) {
       redirect(
-        `/app/breaks/new?error=One or more selected Whatnot orders are already linked to a break&whatnot_order_ids=${encodeURIComponent(
-          selectedWhatnotOrderIds.join(',')
-        )}`
+        `/app/breaks/new?error=${encodeURIComponent(
+          'One or more selected Whatnot orders are already linked to a break'
+        )}&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
       )
     }
 
@@ -182,9 +182,9 @@ export async function createBreakAction(formData: FormData) {
 
     if (distinctSellers.length > 1) {
       redirect(
-        `/app/breaks/new?error=Please select orders from only one seller at a time&whatnot_order_ids=${encodeURIComponent(
-          selectedWhatnotOrderIds.join(',')
-        )}`
+        `/app/breaks/new?error=${encodeURIComponent(
+          'Please select orders from only one seller at a time'
+        )}&whatnot_order_ids=${encodeURIComponent(selectedWhatnotOrderIds.join(','))}`
       )
     }
   }
@@ -279,28 +279,30 @@ export async function updateBreakAction(formData: FormData) {
     safeText(formData.get('allocation_method')) || 'equal_per_item'
 
   if (!breakId) {
-    redirect('/app/breaks?error=Missing break id')
+    redirect('/app/breaks?error=Missing%20break%20id')
   }
 
   if (!breakDate || !sourceName || !productName) {
     redirect(
-      `/app/breaks/${breakId}/edit?error=Break date, source, and product name are required`
+      `/app/breaks/${breakId}/edit?error=${encodeURIComponent(
+        'Break date, source, and product name are required'
+      )}`
     )
   }
 
   const { data: existingBreak, error: existingBreakError } = await supabase
     .from('breaks')
-    .select('id, user_id, reversed_at')
+    .select('id, user_id')
     .eq('id', breakId)
     .eq('user_id', user.id)
     .single()
 
   if (existingBreakError || !existingBreak) {
-    redirect('/app/breaks?error=Break not found')
-  }
-
-  if (existingBreak.reversed_at) {
-    redirect(`/app/breaks/${breakId}?error=Reversed breaks cannot be edited`)
+    redirect(
+      `/app/breaks?error=${encodeURIComponent(
+        existingBreakError?.message || 'Break not found'
+      )}`
+    )
   }
 
   const teams = teamsRaw
@@ -343,7 +345,7 @@ export async function updateBreakAction(formData: FormData) {
     )
   }
 
-  redirect(`/app/breaks/${breakId}?success=Break updated`)
+  redirect(`/app/breaks/${breakId}?success=${encodeURIComponent('Break updated')}`)
 }
 
 export async function addBreakCardsAction(formData: FormData) {
@@ -358,11 +360,15 @@ export async function addBreakCardsAction(formData: FormData) {
   }
 
   const breakId = safeText(formData.get('break_id'))
-  const cardCount = safeNumber(formData.get('card_count'))
+  const cardCount = Math.max(0, Math.floor(safeNumber(formData.get('card_count'))))
   const declaredCardsReceived = safeNumber(formData.get('cards_received'))
 
   if (!breakId || cardCount < 1) {
-    redirect(`/app/breaks/${breakId}/add-cards?error=Invalid card count`)
+    redirect(
+      `/app/breaks/${breakId || ''}/add-cards?error=${encodeURIComponent(
+        'Invalid card count'
+      )}`
+    )
   }
 
   const { data: breakRow, error: breakError } = await supabase
@@ -373,7 +379,7 @@ export async function addBreakCardsAction(formData: FormData) {
     .single()
 
   if (breakError || !breakRow) {
-    redirect('/app?error=Break not found')
+    redirect(`/app?error=${encodeURIComponent(breakError?.message || 'Break not found')}`)
   }
 
   const cardsReceived = Math.max(
@@ -383,7 +389,9 @@ export async function addBreakCardsAction(formData: FormData) {
 
   if (cardsReceived < 1) {
     redirect(
-      `/app/breaks/${breakId}/add-cards?error=This break needs a Cards Received value before cards can be added`
+      `/app/breaks/${breakId}/add-cards?error=${encodeURIComponent(
+        'This break needs a Cards Received value before cards can be added'
+      )}`
     )
   }
 
@@ -421,7 +429,6 @@ export async function addBreakCardsAction(formData: FormData) {
   }
 
   const enteredRows: InsertRow[] = []
-
   const maxRows = Math.min(cardCount, 100)
 
   for (let i = 0; i < maxRows; i++) {
@@ -435,14 +442,18 @@ export async function addBreakCardsAction(formData: FormData) {
     const notes = safeText(formData.get(`notes_${i}`))
 
     const rowHasMeaningfulData =
-      playerName.length > 0 || cardNumber.length > 0 || notes.length > 0
+      yearRaw.length > 0 ||
+      setName.length > 0 ||
+      playerName.length > 0 ||
+      cardNumber.length > 0 ||
+      notes.length > 0
 
     if (!rowHasMeaningfulData) continue
 
     const year = yearRaw ? Number(yearRaw) : null
     const normalizedStatus = normalizeInventoryStatus(statusRaw)
     const normalizedItemType = normalizeItemType(itemTypeRaw)
-    const quantity = Math.max(1, quantityRaw || 1)
+    const quantity = Math.max(1, Math.floor(quantityRaw || 1))
 
     enteredRows.push({
       user_id: user.id,
@@ -463,7 +474,7 @@ export async function addBreakCardsAction(formData: FormData) {
           quantity,
         }) || null,
       player_name: playerName || null,
-      year: year && !Number.isNaN(year) ? year : null,
+      year: year !== null && !Number.isNaN(year) ? year : null,
       brand: null,
       set_name: setName || null,
       card_number: cardNumber || null,
@@ -484,22 +495,20 @@ export async function addBreakCardsAction(formData: FormData) {
   )
 
   if (enteredUnitCount > cardsReceived) {
-    redirectBackToAddCardsWithRestore({
+    redirectBackToAddCards({
       breakId,
       error: `You entered ${enteredUnitCount} total cards but this break only has ${cardsReceived} cards received`,
       rowCount: cardCount,
       cardsReceived,
-      restoreRows,
     })
   }
 
   if (enteredUnitCount === 0) {
-    redirectBackToAddCardsWithRestore({
+    redirectBackToAddCards({
       breakId,
       error: 'Enter at least one card or lot before saving',
       rowCount: cardCount,
       cardsReceived,
-      restoreRows,
     })
   }
 
@@ -527,25 +536,21 @@ export async function addBreakCardsAction(formData: FormData) {
     row.cost_basis_total = Number(rowTotal.toFixed(2))
   }
 
-  const rowsToInsert: InsertRow[] = [...enteredRows]
-
   const { data: insertedRows, error: insertError } = await supabase
     .from('inventory_items')
-    .insert(rowsToInsert)
+    .insert(enteredRows)
     .select('id, cost_basis_total, quantity, status')
 
   if (insertError || !insertedRows || insertedRows.length === 0) {
-    redirectBackToAddCardsWithRestore({
+    redirectBackToAddCards({
       breakId,
       error: insertError?.message ?? 'Could not add cards',
       rowCount: cardCount,
       cardsReceived,
-      restoreRows,
     })
   }
 
-  const insertedRowsSafe: InsertedInventoryRow[] =
-    insertedRows as InsertedInventoryRow[]
+  const insertedRowsSafe = insertedRows as InsertedInventoryRow[]
 
   const txRows = insertedRowsSafe.map((item) => ({
     user_id: user.id,
@@ -565,12 +570,11 @@ export async function addBreakCardsAction(formData: FormData) {
     .insert(txRows)
 
   if (txError) {
-    redirectBackToAddCardsWithRestore({
+    redirectBackToAddCards({
       breakId,
       error: txError.message || 'Cards were added but inventory transactions failed',
       rowCount: cardCount,
       cardsReceived,
-      restoreRows,
     })
   }
 
