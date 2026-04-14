@@ -86,6 +86,7 @@ type LinkedWhatnotOrderRow = {
 }
 
 type CardSortKey =
+  | 'created_at'
   | 'status'
   | 'item_type'
   | 'card'
@@ -119,6 +120,8 @@ function buildDisplay(card: BreakCardRow) {
 
 function getCardSortValue(card: BreakCardRow, key: CardSortKey) {
   switch (key) {
+    case 'created_at':
+      return card.created_at || ''
     case 'status':
       return card.status || ''
     case 'item_type':
@@ -163,7 +166,7 @@ function sortBreakCards(cards: BreakCardRow[], sortKey: CardSortKey, sortDir: So
 }
 
 function getNextSortDir(currentKey: CardSortKey, currentDir: SortDir, nextKey: CardSortKey): SortDir {
-  if (currentKey !== nextKey) return 'asc'
+  if (currentKey !== nextKey) return nextKey === 'created_at' ? 'desc' : 'asc'
   return currentDir === 'asc' ? 'desc' : 'asc'
 }
 
@@ -793,10 +796,11 @@ export default async function BreakDetailPage({
   const errorMessage = query?.error
   const successMessage = query?.success
 
-  const requestedCardsSort = String(query?.cards_sort ?? 'card').trim() as CardSortKey
-  const requestedCardsDir = String(query?.cards_dir ?? 'asc').trim() as SortDir
+  const requestedCardsSort = String(query?.cards_sort ?? 'created_at').trim() as CardSortKey
+  const requestedCardsDir = String(query?.cards_dir ?? 'desc').trim() as SortDir
 
   const cardsSortKey: CardSortKey = [
+    'created_at',
     'status',
     'item_type',
     'card',
@@ -807,9 +811,9 @@ export default async function BreakDetailPage({
     'estimated_value_total',
   ].includes(requestedCardsSort)
     ? requestedCardsSort
-    : 'card'
+    : 'created_at'
 
-  const cardsSortDir: SortDir = requestedCardsDir === 'desc' ? 'desc' : 'asc'
+  const cardsSortDir: SortDir = requestedCardsDir === 'asc' ? 'asc' : 'desc'
 
   const supabase = await createClient()
 

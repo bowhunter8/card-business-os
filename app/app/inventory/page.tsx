@@ -33,6 +33,7 @@ type SaleRow = {
 }
 
 type SortKey =
+  | 'created_at'
   | 'card'
   | 'status'
   | 'quantity'
@@ -71,6 +72,8 @@ function getCardDisplay(item: InventoryRow) {
 
 function getSortValue(item: InventoryRow, key: SortKey) {
   switch (key) {
+    case 'created_at':
+      return item.created_at || ''
     case 'card':
       return getCardDisplay(item)
     case 'status':
@@ -115,13 +118,13 @@ function sortRows(rows: InventoryRow[], sortKey: SortKey, sortDir: SortDir) {
 }
 
 function getNextSortDir(currentKey: SortKey, currentDir: SortDir, nextKey: SortKey): SortDir {
-  if (currentKey !== nextKey) return 'asc'
+  if (currentKey !== nextKey) return nextKey === 'created_at' ? 'desc' : 'asc'
   return currentDir === 'asc' ? 'desc' : 'asc'
 }
 
-function getSortIndicator(currentKey: SortKey, currentDir: SortDir, key: SortKey) {
+function getSortIndicator(currentKey: SortKey, currentSortDir: SortDir, key: SortKey) {
   if (currentKey !== key) return '↕'
-  return currentDir === 'asc' ? '↑' : '↓'
+  return currentSortDir === 'asc' ? '↑' : '↓'
 }
 
 function SortHeader({
@@ -167,10 +170,11 @@ export default async function InventoryPage({
   const q = cleanSearchTerm(qRaw)
   const qNormalized = q.toLowerCase()
 
-  const requestedSort = String(params?.sort ?? 'card').trim() as SortKey
-  const requestedDir = String(params?.dir ?? 'asc').trim() as SortDir
+  const requestedSort = String(params?.sort ?? 'created_at').trim() as SortKey
+  const requestedDir = String(params?.dir ?? 'desc').trim() as SortDir
 
   const sortKey: SortKey = [
+    'created_at',
     'card',
     'status',
     'quantity',
@@ -181,9 +185,9 @@ export default async function InventoryPage({
     'storage_location',
   ].includes(requestedSort)
     ? requestedSort
-    : 'card'
+    : 'created_at'
 
-  const sortDir: SortDir = requestedDir === 'desc' ? 'desc' : 'asc'
+  const sortDir: SortDir = requestedDir === 'asc' ? 'asc' : 'desc'
 
   const supabase = await createClient()
 
