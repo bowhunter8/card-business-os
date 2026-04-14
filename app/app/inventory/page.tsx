@@ -32,6 +32,18 @@ type SaleRow = {
   reversed_at: string | null
 }
 
+type SortKey =
+  | 'card'
+  | 'status'
+  | 'quantity'
+  | 'available_quantity'
+  | 'cost_basis_unit'
+  | 'cost_basis_total'
+  | 'estimated_value_total'
+  | 'storage_location'
+
+type SortDir = 'asc' | 'desc'
+
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -43,15 +55,135 @@ function cleanSearchTerm(value: string) {
   return value.trim().replace(/,/g, ' ')
 }
 
+function getCardDisplay(item: InventoryRow) {
+  return [
+    item.title || item.player_name || 'Untitled item',
+    item.year,
+    item.brand,
+    item.set_name,
+    item.card_number ? `#${item.card_number}` : null,
+    item.parallel_name,
+    item.team,
+  ]
+    .filter(Boolean)
+    .join(' • ')
+}
+
+function getSortValue(item: InventoryRow, key: SortKey) {
+  switch (key) {
+    case 'card':
+      return getCardDisplay(item)
+    case 'status':
+      return item.status || ''
+    case 'quantity':
+      return Number(item.quantity ?? 0)
+    case 'available_quantity':
+      return Number(item.available_quantity ?? 0)
+    case 'cost_basis_unit':
+      return Number(item.cost_basis_unit ?? 0)
+    case 'cost_basis_total':
+      return Number(item.cost_basis_total ?? 0)
+    case 'estimated_value_total':
+      return Number(item.estimated_value_total ?? 0)
+    case 'storage_location':
+      return item.storage_location || ''
+    default:
+      return ''
+  }
+}
+
+function compareValues(a: string | number, b: string | number) {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b
+  }
+
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function sortRows(rows: InventoryRow[], sortKey: SortKey, sortDir: SortDir) {
+  return [...rows].sort((left, right) => {
+    const result = compareValues(
+      getSortValue(left, sortKey),
+      getSortValue(right, sortKey)
+    )
+
+    return sortDir === 'asc' ? result : -result
+  })
+}
+
+function getNextSortDir(currentKey: SortKey, currentDir: SortDir, nextKey: SortKey): SortDir {
+  if (currentKey !== nextKey) return 'asc'
+  return currentDir === 'asc' ? 'desc' : 'asc'
+}
+
+function getSortIndicator(currentKey: SortKey, currentDir: SortDir, key: SortKey) {
+  if (currentKey !== key) return '↕'
+  return currentDir === 'asc' ? '↑' : '↓'
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  currentSortKey,
+  currentSortDir,
+  q,
+}: {
+  label: string
+  sortKey: SortKey
+  currentSortKey: SortKey
+  currentSortDir: SortDir
+  q: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('sort', sortKey)
+  params.set('dir', getNextSortDir(currentSortKey, currentSortDir, sortKey))
+
+  return (
+    <Link
+      href={`/app/inventory?${params.toString()}`}
+      className="inline-flex items-center gap-1 hover:text-zinc-100"
+    >
+      <span>{label}</span>
+      <span className="text-xs">{getSortIndicator(currentSortKey, currentSortDir, sortKey)}</span>
+    </Link>
+  )
+}
+
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>
+  searchParams?: Promise<{ q?: string; sort?: string; dir?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '')
   const q = cleanSearchTerm(qRaw)
   const qNormalized = q.toLowerCase()
+
+  const requestedSort = String(params?.sort ?? 'card').trim() as SortKey
+  const requestedDir = String(params?.dir ?? 'asc').trim() as SortDir
+
+  const sortKey: SortKey = [
+    'card',
+    'status',
+    'quantity',
+    'available_quantity',
+    'cost_basis_unit',
+    'cost_basis_total',
+    'estimated_value_total',
+    'storage_location',
+  ].includes(requestedSort)
+    ? requestedSort
+    : 'card'
+
+  const sortDir: SortDir = requestedDir === 'desc' ? 'desc' : 'asc'
 
   const supabase = await createClient()
 
@@ -106,7 +238,8 @@ export default async function InventoryPage({
 
   const response = await query.order('created_at', { ascending: false })
 
-  const items = (response.data ?? []) as InventoryRow[]
+  const rawItems = (response.data ?? []) as InventoryRow[]
+  const items = sortRows(rawItems, sortKey, sortDir)
   const error = response.error
 
   const itemIds = items.map((item) => item.id)
@@ -235,31 +368,84 @@ export default async function InventoryPage({
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Card</th>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Qty</th>
-                <th className="px-4 py-3 text-left font-medium">Available</th>
-                <th className="px-4 py-3 text-left font-medium">Unit Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Total Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Est. Value</th>
-                <th className="px-4 py-3 text-left font-medium">Location</th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Card"
+                    sortKey="card"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Status"
+                    sortKey="status"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Qty"
+                    sortKey="quantity"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Available"
+                    sortKey="available_quantity"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Unit Cost"
+                    sortKey="cost_basis_unit"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Total Cost"
+                    sortKey="cost_basis_total"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Est. Value"
+                    sortKey="estimated_value_total"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Location"
+                    sortKey="storage_location"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    q={q}
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item) => {
-                const itemLine = [
-                  item.title || item.player_name || 'Untitled item',
-                  item.year,
-                  item.brand,
-                  item.set_name,
-                  item.card_number ? `#${item.card_number}` : null,
-                  item.parallel_name,
-                  item.team,
-                ]
-                  .filter(Boolean)
-                  .join(' • ')
-
+                const itemLine = getCardDisplay(item)
                 const hasAvailable = Number(item.available_quantity ?? 0) > 0
                 const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
 

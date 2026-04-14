@@ -85,6 +85,18 @@ type LinkedWhatnotOrderRow = {
   total: number | null
 }
 
+type CardSortKey =
+  | 'status'
+  | 'item_type'
+  | 'card'
+  | 'quantity'
+  | 'available_quantity'
+  | 'cost_basis_unit'
+  | 'cost_basis_total'
+  | 'estimated_value_total'
+
+type SortDir = 'asc' | 'desc'
+
 function getBreakStatus(projectedROI: number, reversedAt?: string | null) {
   if (reversedAt) return 'Reversed'
   if (projectedROI >= 100) return 'Smash'
@@ -103,6 +115,61 @@ function buildDisplay(card: BreakCardRow) {
   ]
 
   return parts.filter(Boolean).join(' • ')
+}
+
+function getCardSortValue(card: BreakCardRow, key: CardSortKey) {
+  switch (key) {
+    case 'status':
+      return card.status || ''
+    case 'item_type':
+      return card.item_type || ''
+    case 'card':
+      return buildDisplay(card) || card.title || ''
+    case 'quantity':
+      return Number(card.quantity ?? 0)
+    case 'available_quantity':
+      return Number(card.available_quantity ?? 0)
+    case 'cost_basis_unit':
+      return Number(card.cost_basis_unit ?? 0)
+    case 'cost_basis_total':
+      return Number(card.cost_basis_total ?? 0)
+    case 'estimated_value_total':
+      return Number(card.estimated_value_total ?? 0)
+    default:
+      return ''
+  }
+}
+
+function compareValues(a: string | number, b: string | number) {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b
+  }
+
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function sortBreakCards(cards: BreakCardRow[], sortKey: CardSortKey, sortDir: SortDir) {
+  return [...cards].sort((left, right) => {
+    const result = compareValues(
+      getCardSortValue(left, sortKey),
+      getCardSortValue(right, sortKey)
+    )
+
+    return sortDir === 'asc' ? result : -result
+  })
+}
+
+function getNextSortDir(currentKey: CardSortKey, currentDir: SortDir, nextKey: CardSortKey): SortDir {
+  if (currentKey !== nextKey) return 'asc'
+  return currentDir === 'asc' ? 'desc' : 'asc'
+}
+
+function getSortIndicator(currentKey: CardSortKey, currentDir: SortDir, key: CardSortKey) {
+  if (currentKey !== key) return '↕'
+  return currentDir === 'asc' ? '↑' : '↓'
 }
 
 function SectionLoading({
@@ -189,6 +256,36 @@ function MetricsLoading() {
         <div className="mt-4 h-6 w-72 rounded bg-zinc-800" />
       </div>
     </div>
+  )
+}
+
+function BreakCardSortHeader({
+  breakId,
+  label,
+  sortKey,
+  currentSortKey,
+  currentSortDir,
+}: {
+  breakId: string
+  label: string
+  sortKey: CardSortKey
+  currentSortKey: CardSortKey
+  currentSortDir: SortDir
+}) {
+  const params = new URLSearchParams()
+  params.set('cards_sort', sortKey)
+  params.set('cards_dir', getNextSortDir(currentSortKey, currentSortDir, sortKey))
+
+  return (
+    <Link
+      href={`/app/breaks/${breakId}?${params.toString()}`}
+      className="inline-flex items-center gap-1 hover:text-zinc-100"
+    >
+      <span>{label}</span>
+      <span className="text-xs">
+        {getSortIndicator(currentSortKey, currentSortDir, sortKey)}
+      </span>
+    </Link>
   )
 }
 
@@ -296,12 +393,16 @@ async function BreakCardsAndMetricsSection({
   breakCost,
   declaredCardsReceived,
   reversedAt,
+  cardsSortKey,
+  cardsSortDir,
 }: {
   breakId: string
   userId: string
   breakCost: number
   declaredCardsReceived: number
   reversedAt?: string | null
+  cardsSortKey: CardSortKey
+  cardsSortDir: SortDir
 }) {
   const supabase = await createClient()
 
@@ -332,9 +433,10 @@ async function BreakCardsAndMetricsSection({
     .eq('source_break_id', breakId)
     .order('created_at', { ascending: false })
 
-  const breakCards = (cardsResponse.data ?? []) as BreakCardRow[]
+  const rawBreakCards = (cardsResponse.data ?? []) as BreakCardRow[]
+  const breakCards = sortBreakCards(rawBreakCards, cardsSortKey, cardsSortDir)
   const cardsError = cardsResponse.error
-  const breakCardIds = breakCards.map((card) => card.id)
+  const breakCardIds = rawBreakCards.map((card) => card.id)
 
   let breakSales: SaleRow[] = []
 
@@ -366,7 +468,7 @@ async function BreakCardsAndMetricsSection({
   let totalEstimatedValue = 0
   let remainingEstimatedValue = 0
 
-  for (const card of breakCards) {
+  for (const card of rawBreakCards) {
     const qty = Number(card.quantity ?? 0)
     const avail = Number(card.available_quantity ?? 0)
     const costTotal = Number(card.cost_basis_total ?? 0)
@@ -541,14 +643,78 @@ async function BreakCardsAndMetricsSection({
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Type</th>
-                <th className="px-4 py-3 text-left font-medium">Card / Lot</th>
-                <th className="px-4 py-3 text-left font-medium">Qty</th>
-                <th className="px-4 py-3 text-left font-medium">Avail</th>
-                <th className="px-4 py-3 text-left font-medium">Unit Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Total Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Est. Value</th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Status"
+                    sortKey="status"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Type"
+                    sortKey="item_type"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Card / Lot"
+                    sortKey="card"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Qty"
+                    sortKey="quantity"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Avail"
+                    sortKey="available_quantity"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Unit Cost"
+                    sortKey="cost_basis_unit"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Total Cost"
+                    sortKey="cost_basis_total"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <BreakCardSortHeader
+                    breakId={breakId}
+                    label="Est. Value"
+                    sortKey="estimated_value_total"
+                    currentSortKey={cardsSortKey}
+                    currentSortDir={cardsSortDir}
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-medium">Actions</th>
               </tr>
             </thead>
@@ -615,12 +781,35 @@ export default async function BreakDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string; success?: string }>
+  searchParams?: Promise<{
+    error?: string
+    success?: string
+    cards_sort?: string
+    cards_dir?: string
+  }>
 }) {
   const { id } = await params
   const query = searchParams ? await searchParams : undefined
   const errorMessage = query?.error
   const successMessage = query?.success
+
+  const requestedCardsSort = String(query?.cards_sort ?? 'card').trim() as CardSortKey
+  const requestedCardsDir = String(query?.cards_dir ?? 'asc').trim() as SortDir
+
+  const cardsSortKey: CardSortKey = [
+    'status',
+    'item_type',
+    'card',
+    'quantity',
+    'available_quantity',
+    'cost_basis_unit',
+    'cost_basis_total',
+    'estimated_value_total',
+  ].includes(requestedCardsSort)
+    ? requestedCardsSort
+    : 'card'
+
+  const cardsSortDir: SortDir = requestedCardsDir === 'desc' ? 'desc' : 'asc'
 
   const supabase = await createClient()
 
@@ -873,6 +1062,8 @@ export default async function BreakDetailPage({
           breakCost={breakCost}
           declaredCardsReceived={declaredCardsReceived}
           reversedAt={item.reversed_at}
+          cardsSortKey={cardsSortKey}
+          cardsSortDir={cardsSortDir}
         />
       </Suspense>
     </div>

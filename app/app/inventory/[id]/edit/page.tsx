@@ -94,6 +94,10 @@ export default async function EditInventoryPage({
     .filter(Boolean)
     .join(' • ')
 
+  const currentQuantity = Number(item.quantity ?? 0)
+  const currentAvailable = Number(item.available_quantity ?? 0)
+  const soldQuantity = Math.max(0, currentQuantity - currentAvailable)
+
   return (
     <div className="max-w-4xl">
       <div className="flex items-center justify-between gap-4">
@@ -198,6 +202,20 @@ export default async function EditInventoryPage({
         </div>
 
         <div>
+          <label className="mb-1 block text-sm text-zinc-300">Quantity</label>
+          <input
+            name="quantity"
+            type="number"
+            min={Math.max(1, soldQuantity)}
+            defaultValue={item.quantity ?? 1}
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+          <div className="mt-1 text-xs text-zinc-500">
+            Sold: {soldQuantity} • Available now: {currentAvailable}. Quantity cannot go below sold quantity.
+          </div>
+        </div>
+
+        <div>
           <label className="mb-1 block text-sm text-zinc-300">Storage Location</label>
           <input
             name="storage_location"
@@ -216,6 +234,10 @@ export default async function EditInventoryPage({
             defaultValue={item.estimated_value_unit ?? 0}
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
+        </div>
+
+        <div className="md:col-span-2 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
+          Changing quantity updates available quantity automatically while preserving already sold quantity.
         </div>
 
         <div className="md:col-span-2">

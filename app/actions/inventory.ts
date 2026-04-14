@@ -105,6 +105,7 @@ export async function updateInventoryItemAction(formData: FormData) {
   const cardNumber = String(formData.get('card_number') ?? '').trim()
   const parallelName = String(formData.get('parallel_name') ?? '').trim()
   const team = String(formData.get('team') ?? '').trim()
+  const quantityRaw = String(formData.get('quantity') ?? '').trim()
   const storageLocation = String(formData.get('storage_location') ?? '').trim()
   const estimatedValueUnit = Number(formData.get('estimated_value_unit') ?? 0)
   const notes = String(formData.get('notes') ?? '').trim()
@@ -129,12 +130,35 @@ export async function updateInventoryItemAction(formData: FormData) {
   }
 
   const item = itemResponse.data
-  const quantity = Number(item.quantity ?? 0)
+  const oldQuantity = Number(item.quantity ?? 0)
+  const oldAvailableQuantity = Number(item.available_quantity ?? 0)
+  const soldQuantity = Math.max(0, oldQuantity - oldAvailableQuantity)
+
+  const parsedQuantity = Number(quantityRaw || oldQuantity)
+  const newQuantity = Number.isFinite(parsedQuantity) ? parsedQuantity : oldQuantity
+
+  const editBasePath = cameFromBreak
+    ? `/app/inventory/${inventoryItemId}/edit?from=break&break_id=${encodeURIComponent(breakId)}`
+    : `/app/inventory/${inventoryItemId}/edit`
+
+  if (newQuantity < 1) {
+    redirect(`${editBasePath}&error=${encodeURIComponent('Quantity must be at least 1')}`)
+  }
+
+  if (newQuantity < soldQuantity) {
+    redirect(
+      `${editBasePath}&error=${encodeURIComponent(
+        `Quantity cannot be lower than sold quantity (${soldQuantity})`
+      )}`
+    )
+  }
+
+  const newAvailableQuantity = newQuantity - soldQuantity
   const costBasisUnit = Number(item.cost_basis_unit ?? 0)
   const year = yearRaw ? Number(yearRaw) : null
 
-  const costBasisTotal = Number((costBasisUnit * quantity).toFixed(2))
-  const estimatedValueTotal = Number((estimatedValueUnit * quantity).toFixed(2))
+  const costBasisTotal = Number((costBasisUnit * newQuantity).toFixed(2))
+  const estimatedValueTotal = Number((estimatedValueUnit * newQuantity).toFixed(2))
 
   const updateResponse = await supabase
     .from('inventory_items')
@@ -147,6 +171,8 @@ export async function updateInventoryItemAction(formData: FormData) {
       card_number: cardNumber || null,
       parallel_name: parallelName || null,
       team: team || null,
+      quantity: newQuantity,
+      available_quantity: newAvailableQuantity,
       storage_location: storageLocation || null,
       estimated_value_unit: estimatedValueUnit,
       estimated_value_total: estimatedValueTotal,
@@ -157,15 +183,7 @@ export async function updateInventoryItemAction(formData: FormData) {
     .eq('user_id', user.id)
 
   if (updateResponse.error) {
-    const backToEdit = cameFromBreak
-      ? `/app/inventory/${inventoryItemId}/edit?from=break&break_id=${encodeURIComponent(
-          breakId
-        )}&error=${encodeURIComponent(updateResponse.error.message)}`
-      : `/app/inventory/${inventoryItemId}/edit?error=${encodeURIComponent(
-          updateResponse.error.message
-        )}`
-
-    redirect(backToEdit)
+    redirect(`${editBasePath}&error=${encodeURIComponent(updateResponse.error.message)}`)
   }
 
   if (cameFromBreak) {

@@ -28,6 +28,19 @@ type BreakViewRow = BreakRow & {
   completionStatus: 'Open' | 'In Progress' | 'Complete' | 'Reversed'
 }
 
+type SortKey =
+  | 'break_date'
+  | 'product_name'
+  | 'source_name'
+  | 'order_number'
+  | 'completionStatus'
+  | 'entered'
+  | 'received'
+  | 'remaining'
+  | 'total_cost'
+
+type SortDir = 'asc' | 'desc'
+
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -47,13 +60,122 @@ function getCompletionStatus(
   return 'Complete'
 }
 
+function getSortValue(item: BreakViewRow, key: SortKey) {
+  switch (key) {
+    case 'break_date':
+      return item.break_date || ''
+    case 'product_name':
+      return item.product_name || ''
+    case 'source_name':
+      return item.source_name || ''
+    case 'order_number':
+      return item.order_number || ''
+    case 'completionStatus':
+      return item.completionStatus || ''
+    case 'entered':
+      return item.entered
+    case 'received':
+      return item.received
+    case 'remaining':
+      return item.remaining
+    case 'total_cost':
+      return Number(item.total_cost ?? 0)
+    default:
+      return ''
+  }
+}
+
+function compareValues(a: string | number, b: string | number) {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b
+  }
+
+  return String(a).localeCompare(String(b), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function sortRows(rows: BreakViewRow[], sortKey: SortKey, sortDir: SortDir) {
+  return [...rows].sort((left, right) => {
+    const result = compareValues(
+      getSortValue(left, sortKey),
+      getSortValue(right, sortKey)
+    )
+
+    return sortDir === 'asc' ? result : -result
+  })
+}
+
+function getNextSortDir(currentKey: SortKey, currentDir: SortDir, nextKey: SortKey): SortDir {
+  if (currentKey !== nextKey) return 'asc'
+  return currentDir === 'asc' ? 'desc' : 'asc'
+}
+
+function getSortIndicator(currentKey: SortKey, currentDir: SortDir, key: SortKey) {
+  if (currentKey !== key) return '↕'
+  return currentDir === 'asc' ? '↑' : '↓'
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  currentSortKey,
+  currentSortDir,
+  qRaw,
+}: {
+  label: string
+  sortKey: SortKey
+  currentSortKey: SortKey
+  currentSortDir: SortDir
+  qRaw: string
+}) {
+  const params = new URLSearchParams()
+
+  if (qRaw) {
+    params.set('q', qRaw)
+  }
+
+  params.set('sort', sortKey)
+  params.set('dir', getNextSortDir(currentSortKey, currentSortDir, sortKey))
+
+  return (
+    <Link
+      href={`/app/breaks?${params.toString()}`}
+      className="inline-flex items-center gap-1 hover:text-zinc-100"
+    >
+      <span>{label}</span>
+      <span className="text-xs">{getSortIndicator(currentSortKey, currentSortDir, sortKey)}</span>
+    </Link>
+  )
+}
+
 export default async function BreaksPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>
+  searchParams?: Promise<{ q?: string; sort?: string; dir?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim().toLowerCase()
+
+  const requestedSort = String(params?.sort ?? 'break_date').trim() as SortKey
+  const requestedDir = String(params?.dir ?? 'desc').trim() as SortDir
+
+  const sortKey: SortKey = [
+    'break_date',
+    'product_name',
+    'source_name',
+    'order_number',
+    'completionStatus',
+    'entered',
+    'received',
+    'remaining',
+    'total_cost',
+  ].includes(requestedSort)
+    ? requestedSort
+    : 'break_date'
+
+  const sortDir: SortDir = requestedDir === 'asc' ? 'asc' : 'desc'
 
   const supabase = await createClient()
 
@@ -131,7 +253,7 @@ export default async function BreaksPage({
     }
   }
 
-  const breaks =
+  const filteredBreaks =
     qRaw === 'active'
       ? allRows.filter((item) => !item.reversed_at)
       : qRaw === 'open'
@@ -142,6 +264,8 @@ export default async function BreaksPage({
                 item.completionStatus === 'In Progress')
           )
         : allRows
+
+  const breaks = sortRows(filteredBreaks, sortKey, sortDir)
 
   const pageTitle =
     qRaw === 'active'
@@ -269,15 +393,87 @@ export default async function BreaksPage({
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Date</th>
-                <th className="px-4 py-3 text-left font-medium">Product</th>
-                <th className="px-4 py-3 text-left font-medium">Source</th>
-                <th className="px-4 py-3 text-left font-medium">Order #</th>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Entered</th>
-                <th className="px-4 py-3 text-left font-medium">Received</th>
-                <th className="px-4 py-3 text-left font-medium">Remaining</th>
-                <th className="px-4 py-3 text-left font-medium">Total Cost</th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Date"
+                    sortKey="break_date"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Product"
+                    sortKey="product_name"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Source"
+                    sortKey="source_name"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Order #"
+                    sortKey="order_number"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Status"
+                    sortKey="completionStatus"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Entered"
+                    sortKey="entered"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Received"
+                    sortKey="received"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Remaining"
+                    sortKey="remaining"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
+                <th className="px-4 py-3 text-left font-medium">
+                  <SortHeader
+                    label="Total Cost"
+                    sortKey="total_cost"
+                    currentSortKey={sortKey}
+                    currentSortDir={sortDir}
+                    qRaw={qRaw}
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-medium">Actions</th>
               </tr>
             </thead>
