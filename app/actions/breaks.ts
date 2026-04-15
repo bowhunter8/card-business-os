@@ -14,6 +14,17 @@ type RestorableEntryRow = {
   notes: string
 }
 
+type DuplicateCheckRow = {
+  item_type: string
+  status: string
+  quantity: number
+  year: number | null
+  set_name: string | null
+  player_name: string | null
+  card_number: string | null
+  notes: string | null
+}
+
 function safeText(value: FormDataEntryValue | null) {
   return String(value ?? '').trim()
 }
@@ -32,6 +43,35 @@ function normalizeInventoryStatus(value: string) {
 function normalizeItemType(value: string) {
   if (value === 'lot') return 'team_lot_line'
   return 'single_card'
+}
+
+function normalizeKeyPart(value: string | number | null | undefined) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+function buildDuplicateKey(input: {
+  itemType: string
+  status: string
+  quantity: number
+  year: string | number | null
+  setName: string | null
+  playerName: string | null
+  cardNumber: string | null
+  notes: string | null
+}) {
+  return [
+    normalizeKeyPart(input.itemType),
+    normalizeKeyPart(input.status),
+    normalizeKeyPart(input.quantity),
+    normalizeKeyPart(input.year),
+    normalizeKeyPart(input.setName),
+    normalizeKeyPart(input.playerName),
+    normalizeKeyPart(input.cardNumber),
+    normalizeKeyPart(input.notes),
+  ].join('||')
 }
 
 function buildCardTitle(input: {
@@ -444,6 +484,7 @@ export async function addBreakCardsAction(formData: FormData) {
 
   const enteredRows: InsertRow[] = []
   const maxRows = Math.min(cardCount, 100)
+  const submittedKeySet = new Set<string>()
 
   for (let i = 0; i < maxRows; i++) {
     const restoreRow = restoreRows[i]
@@ -465,6 +506,29 @@ export async function addBreakCardsAction(formData: FormData) {
     const normalizedItemType = normalizeItemType(itemTypeRaw)
     const quantity = Math.max(1, Math.floor(quantityRaw || 1))
     const isAvailableForSale = normalizedStatus === 'available'
+
+    const submittedKey = buildDuplicateKey({
+      itemType: normalizedItemType,
+      status: normalizedStatus,
+      quantity,
+      year: yearRaw,
+      setName,
+      playerName,
+      cardNumber,
+      notes,
+    })
+
+    if (submittedKeySet.has(submittedKey)) {
+      redirectBackToAddCards({
+        breakId,
+        error:
+          'Duplicate row detected in this entry. Combine duplicate quantities or remove the repeated row before saving.',
+        rowCount: cardCount,
+        cardsReceived,
+      })
+    }
+
+    submittedKeySet.add(submittedKey)
 
     enteredRows.push({
       user_id: user.id,
@@ -521,6 +585,69 @@ export async function addBreakCardsAction(formData: FormData) {
       rowCount: cardCount,
       cardsReceived,
     })
+  }
+
+  const { data: existingBreakItems, error: existingBreakItemsError } = await supabase
+    .from('inventory_items')
+    .select(`
+      item_type,
+      status,
+      quantity,
+      year,
+      set_name,
+      player_name,
+      card_number,
+      notes
+    `)
+    .eq('user_id', user.id)
+    .eq('source_type', 'break')
+    .eq('source_break_id', breakId)
+
+  if (existingBreakItemsError) {
+    redirectBackToAddCards({
+      breakId,
+      error: existingBreakItemsError.message || 'Could not validate existing break items',
+      rowCount: cardCount,
+      cardsReceived,
+    })
+  }
+
+  const existingKeySet = new Set(
+    ((existingBreakItems ?? []) as DuplicateCheckRow[]).map((item) =>
+      buildDuplicateKey({
+        itemType: item.item_type,
+        status: item.status,
+        quantity: Number(item.quantity ?? 0),
+        year: item.year,
+        setName: item.set_name,
+        playerName: item.player_name,
+        cardNumber: item.card_number,
+        notes: item.notes,
+      })
+    )
+  )
+
+  for (const row of enteredRows) {
+    const duplicateKey = buildDuplicateKey({
+      itemType: row.item_type,
+      status: row.status,
+      quantity: row.quantity,
+      year: row.year,
+      setName: row.set_name,
+      playerName: row.player_name,
+      cardNumber: row.card_number,
+      notes: row.notes,
+    })
+
+    if (existingKeySet.has(duplicateKey)) {
+      redirectBackToAddCards({
+        breakId,
+        error:
+          'This break already has one or more matching items. Open the break and edit the existing item instead of entering it again.',
+        rowCount: cardCount,
+        cardsReceived,
+      })
+    }
   }
 
   const totalUnits = enteredUnitCount
@@ -590,4 +717,91 @@ export async function addBreakCardsAction(formData: FormData) {
   }
 
   redirect(`/app/breaks/${breakId}`)
+}
+
+export async function deleteInventoryItemAction(formData: FormData) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const inventoryItemId = safeText(formData.get('inventory_item_id'))
+  const returnTo = safeText(formData.get('return_to'))
+  const breakIdFromForm = safeText(formData.get('break_id'))
+
+  if (!inventoryItemId) {
+    redirect('/app/inventory?error=Missing%20inventory%20item%20id')
+  }
+
+  const { data: item, error: itemError } = await supabase
+    .from('inventory_items')
+    .select('id, source_break_id')
+    .eq('id', inventoryItemId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (itemError || !item) {
+    redirect('/app/inventory?error=Inventory%20item%20not%20found')
+  }
+
+  const breakId = breakIdFromForm || String(item.source_break_id ?? '')
+
+  const { data: activeSales, error: salesError } = await supabase
+    .from('sales')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('inventory_item_id', inventoryItemId)
+    .is('reversed_at', null)
+    .limit(1)
+
+  if (salesError) {
+    const fallback = returnTo === 'break' && breakId
+      ? `/app/breaks/${breakId}?error=${encodeURIComponent('Could not validate sales before delete')}`
+      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent('Could not validate sales before delete')}`
+    redirect(fallback)
+  }
+
+  if ((activeSales ?? []).length > 0) {
+    const fallback = returnTo === 'break' && breakId
+      ? `/app/breaks/${breakId}?error=${encodeURIComponent('Cannot delete an item with active sales. Reverse the sale first.')}`
+      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent('Cannot delete an item with active sales. Reverse the sale first.')}`
+    redirect(fallback)
+  }
+
+  const { error: txDeleteError } = await supabase
+    .from('inventory_transactions')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('inventory_item_id', inventoryItemId)
+
+  if (txDeleteError) {
+    const fallback = returnTo === 'break' && breakId
+      ? `/app/breaks/${breakId}?error=${encodeURIComponent(txDeleteError.message)}`
+      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(txDeleteError.message)}`
+    redirect(fallback)
+  }
+
+  const { error: itemDeleteError } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('id', inventoryItemId)
+    .eq('user_id', user.id)
+
+  if (itemDeleteError) {
+    const fallback = returnTo === 'break' && breakId
+      ? `/app/breaks/${breakId}?error=${encodeURIComponent(itemDeleteError.message)}`
+      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(itemDeleteError.message)}`
+    redirect(fallback)
+  }
+
+  if (returnTo === 'break' && breakId) {
+    redirect(`/app/breaks/${breakId}?success=${encodeURIComponent('Item deleted')}`)
+  }
+
+  redirect(`/app/inventory?success=${encodeURIComponent('Item deleted')}`)
 }

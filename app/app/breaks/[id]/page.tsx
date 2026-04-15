@@ -3,6 +3,7 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { rollbackBreakAction } from '@/app/actions/break-safety'
+import { deleteInventoryItemAction } from '@/app/actions/breaks'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -465,6 +466,12 @@ async function BreakCardsAndMetricsSection({
     breakSales = (salesResponse.data ?? []) as SaleRow[]
   }
 
+  const activeSaleItemIds = new Set(
+    breakSales
+      .filter((sale) => !sale.reversed_at)
+      .map((sale) => String(sale.inventory_item_id))
+  )
+
   let cardsEntered = 0
   let availableCards = 0
   let totalAllocatedCost = 0
@@ -722,47 +729,71 @@ async function BreakCardsAndMetricsSection({
               </tr>
             </thead>
             <tbody>
-              {breakCards.map((card) => (
-                <tr key={card.id} className="border-t border-zinc-800">
-                  <td className="px-4 py-3 capitalize">
-                    {(card.status || '—').replaceAll('_', ' ')}
-                  </td>
-                  <td className="px-4 py-3 capitalize">
-                    {(card.item_type || '—').replaceAll('_', ' ')}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link
-                      href={`/app/inventory/${card.id}`}
-                      className="font-medium hover:underline"
-                    >
-                      {buildDisplay(card) || card.title || 'Untitled item'}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3">{card.quantity ?? 0}</td>
-                  <td className="px-4 py-3">{card.available_quantity ?? 0}</td>
-                  <td className="px-4 py-3">{money(card.cost_basis_unit)}</td>
-                  <td className="px-4 py-3">{money(card.cost_basis_total)}</td>
-                  <td className="px-4 py-3">{money(card.estimated_value_total)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
+              {breakCards.map((card) => {
+                const canDelete = !activeSaleItemIds.has(card.id)
+
+                return (
+                  <tr key={card.id} className="border-t border-zinc-800">
+                    <td className="px-4 py-3 capitalize">
+                      {(card.status || '—').replaceAll('_', ' ')}
+                    </td>
+                    <td className="px-4 py-3 capitalize">
+                      {(card.item_type || '—').replaceAll('_', ' ')}
+                    </td>
+                    <td className="px-4 py-3">
                       <Link
                         href={`/app/inventory/${card.id}`}
-                        className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                        className="font-medium hover:underline"
                       >
-                        View
+                        {buildDisplay(card) || card.title || 'Untitled item'}
                       </Link>
-                      {!reversedAt ? (
+                    </td>
+                    <td className="px-4 py-3">{card.quantity ?? 0}</td>
+                    <td className="px-4 py-3">{card.available_quantity ?? 0}</td>
+                    <td className="px-4 py-3">{money(card.cost_basis_unit)}</td>
+                    <td className="px-4 py-3">{money(card.cost_basis_total)}</td>
+                    <td className="px-4 py-3">{money(card.estimated_value_total)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
                         <Link
-                          href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
+                          href={`/app/inventory/${card.id}`}
                           className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
                         >
-                          Edit
+                          View
                         </Link>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {!reversedAt ? (
+                          <>
+                            <Link
+                              href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
+                              className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                            >
+                              Edit
+                            </Link>
+
+                            {canDelete ? (
+                              <form action={deleteInventoryItemAction}>
+                                <input type="hidden" name="inventory_item_id" value={card.id} />
+                                <input type="hidden" name="return_to" value="break" />
+                                <input type="hidden" name="break_id" value={breakId} />
+                                <button
+                                  type="submit"
+                                  className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-red-200 hover:bg-red-950"
+                                >
+                                  Delete
+                                </button>
+                              </form>
+                            ) : (
+                              <span className="inline-flex rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-1.5 text-yellow-200">
+                                Has Sale
+                              </span>
+                            )}
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
 
               {breakCards.length === 0 && (
                 <tr>

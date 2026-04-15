@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
+import { deleteInventoryItemAction } from '@/app/actions/breaks'
 
 type InventoryItem = {
   id: string
@@ -196,6 +197,7 @@ export default async function InventoryDetailPage({
   const availableQuantity = Number(item.available_quantity ?? 0)
   const hasAvailableToSell = availableQuantity > 0
   const latestActiveSale = activeSales[0] ?? null
+  const canDelete = activeSales.length === 0
 
   return (
     <div>
@@ -213,7 +215,7 @@ export default async function InventoryDetailPage({
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Link
             href={`/app/inventory/${item.id}/edit`}
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
@@ -245,6 +247,20 @@ export default async function InventoryDetailPage({
               </button>
             </form>
           ) : null}
+
+          {canDelete ? (
+            <form action={deleteInventoryItemAction}>
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="return_to" value="inventory" />
+              <input type="hidden" name="break_id" value={item.source_break_id ?? ''} />
+              <button
+                type="submit"
+                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 font-medium text-red-200 hover:bg-red-950"
+              >
+                Delete Item
+              </button>
+            </form>
+          ) : null}
         </div>
       </div>
 
@@ -257,6 +273,12 @@ export default async function InventoryDetailPage({
       {successMessage ? (
         <div className="mb-6 rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
           {successMessage}
+        </div>
+      ) : null}
+
+      {!canDelete ? (
+        <div className="mb-6 rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-200">
+          This item cannot be deleted while it has active sales. Reverse the sale first.
         </div>
       ) : null}
 
