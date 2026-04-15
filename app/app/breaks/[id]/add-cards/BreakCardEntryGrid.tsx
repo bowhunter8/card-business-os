@@ -348,6 +348,7 @@ export default function BreakCardEntryGrid({
                     >
                       <option value="available">For Sale</option>
                       <option value="personal">Personal Collection</option>
+                      <option value="junk">Junk</option>
                     </select>
                   </td>
 

@@ -25,6 +25,7 @@ function safeNumber(value: FormDataEntryValue | null) {
 
 function normalizeInventoryStatus(value: string) {
   if (value === 'personal') return 'personal'
+  if (value === 'junk') return 'junk'
   return 'available'
 }
 
@@ -463,6 +464,7 @@ export async function addBreakCardsAction(formData: FormData) {
     const normalizedStatus = normalizeInventoryStatus(statusRaw)
     const normalizedItemType = normalizeItemType(itemTypeRaw)
     const quantity = Math.max(1, Math.floor(quantityRaw || 1))
+    const isAvailableForSale = normalizedStatus === 'available'
 
     enteredRows.push({
       user_id: user.id,
@@ -471,7 +473,7 @@ export async function addBreakCardsAction(formData: FormData) {
       item_type: normalizedItemType,
       status: normalizedStatus,
       quantity,
-      available_quantity: normalizedStatus === 'personal' ? 0 : quantity,
+      available_quantity: isAvailableForSale ? quantity : 0,
       title:
         buildCardTitle({
           year: yearRaw,

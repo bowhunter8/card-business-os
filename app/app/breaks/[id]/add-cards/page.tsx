@@ -208,7 +208,7 @@ export default async function AddBreakCardsPage({
         <div>
           <h1 className="text-3xl font-semibold">Add Items From Break</h1>
           <p className="mt-2 text-zinc-400">
-            Enter items or lots from this break, choose for sale or personal, and quantity will count toward the total items received.
+            Enter items or lots from this break, choose for sale, personal, or junk, and quantity will count toward the total items received.
           </p>
         </div>
 
@@ -287,7 +287,8 @@ export default async function AddBreakCardsPage({
           <p>Only rows you actually fill in count toward the total items received.</p>
           <p>If you want a lot, enter it explicitly, such as Blue Jays Lot with Qty 10.</p>
           <p>Quantity counts toward the total items received for this break.</p>
-          <p>Choose each row as For Sale or Personal Collection during entry.</p>
+          <p>Choose each row as For Sale, Personal Collection, or Junk during entry.</p>
+          <p>Junk items remain tracked for recordkeeping but are not available for sale.</p>
           <p>Autosave keeps your in-progress entry in this browser for this break.</p>
           <p>If total entered quantity is too high, small restore payloads can still stay on the page so you can fix them instead of starting over.</p>
           <p>Large entries should not rely on URL restore anymore.</p>
@@ -306,6 +307,15 @@ export default async function AddBreakCardsPage({
 
         <div className="mb-5 text-sm text-zinc-400">
           This break has <span className="font-medium text-zinc-200">{itemsReceived}</span> item(s) received, and only the quantities from filled rows will count toward that total.
+        </div>
+
+        <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
+          <button
+            type="submit"
+            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+          >
+            Add Items To Inventory
+          </button>
         </div>
 
         <BreakCardEntryGrid
