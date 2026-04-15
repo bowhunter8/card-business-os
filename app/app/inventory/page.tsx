@@ -222,8 +222,14 @@ export default async function InventoryPage({
     `)
     .eq('user_id', user.id)
 
+  if (qNormalized !== 'junk') {
+    query = query.neq('status', 'junk')
+  }
+
   if (qNormalized === 'listed') {
     query = query.eq('status', 'listed')
+  } else if (qNormalized === 'junk') {
+    query = query.eq('status', 'junk')
   } else if (q) {
     query = query.or(
       [
@@ -276,35 +282,39 @@ export default async function InventoryPage({
   const pageDescription =
     qNormalized === 'listed'
       ? 'Showing listed inventory items.'
-      : 'View and manage your card inventory.'
+      : qNormalized === 'junk'
+        ? 'Showing junk items you are not planning to sell.'
+        : 'View and manage your card inventory.'
 
   const showingSearchText =
-    q && qNormalized !== 'listed'
+    q && qNormalized !== 'listed' && qNormalized !== 'junk'
       ? `Showing results for "${q}"`
       : qNormalized === 'listed'
         ? 'Showing listed inventory.'
-        : ''
+        : qNormalized === 'junk'
+          ? 'Showing junk inventory.'
+          : ''
 
   return (
-    <div className="max-w-7xl space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="max-w-7xl space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Inventory</h1>
-          <p className="mt-2 text-zinc-400">{pageDescription}</p>
+          <h1 className="text-2xl font-semibold">Inventory</h1>
+          <p className="mt-1 text-sm text-zinc-400">{pageDescription}</p>
         </div>
 
         <Link
           href="/app/inventory/new"
-          className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+          className="inline-flex rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-zinc-200"
         >
           Add Inventory
         </Link>
       </div>
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2">
         <Link
           href="/app/inventory"
-          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
             q === ''
               ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
               : 'border-zinc-700 text-zinc-300'
@@ -314,7 +324,7 @@ export default async function InventoryPage({
         </Link>
         <Link
           href="/app/inventory?q=listed"
-          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
+          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
             qNormalized === 'listed'
               ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
               : 'border-zinc-700 text-zinc-300'
@@ -322,31 +332,41 @@ export default async function InventoryPage({
         >
           Listed
         </Link>
+        <Link
+          href="/app/inventory?q=junk"
+          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
+            qNormalized === 'junk'
+              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+              : 'border-zinc-700 text-zinc-300'
+          }`}
+        >
+          Junk
+        </Link>
       </div>
 
       <form
         method="get"
-        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
+        className="rounded-xl border border-zinc-800 bg-zinc-900 p-3"
       >
-        <div className="flex flex-col gap-3 md:flex-row">
+        <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
             name="q"
             defaultValue={q}
             placeholder="Search player, title, set, card #, team, notes..."
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <button
               type="submit"
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+              className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-zinc-200"
             >
               Search
             </button>
             {q ? (
               <Link
                 href="/app/inventory"
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
               >
                 Clear
               </Link>
@@ -355,7 +375,7 @@ export default async function InventoryPage({
         </div>
 
         {showingSearchText ? (
-          <div className="mt-3 text-sm text-zinc-400">
+          <div className="mt-2 text-xs text-zinc-400">
             {showingSearchText}
           </div>
         ) : null}
@@ -367,12 +387,12 @@ export default async function InventoryPage({
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Card"
                     sortKey="card"
@@ -381,7 +401,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Status"
                     sortKey="status"
@@ -390,7 +410,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Qty"
                     sortKey="quantity"
@@ -399,7 +419,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Available"
                     sortKey="available_quantity"
@@ -408,7 +428,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Unit Cost"
                     sortKey="cost_basis_unit"
@@ -417,7 +437,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Total Cost"
                     sortKey="cost_basis_total"
@@ -426,7 +446,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Est. Value"
                     sortKey="estimated_value_total"
@@ -435,7 +455,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="px-3 py-2.5 text-left font-medium">
                   <SortHeader
                     label="Location"
                     sortKey="storage_location"
@@ -444,7 +464,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">Actions</th>
+                <th className="px-3 py-2.5 text-left font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -454,42 +474,59 @@ export default async function InventoryPage({
                 const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
 
                 return (
-                  <tr key={item.id} className="border-t border-zinc-800">
-                    <td className="px-4 py-3">
-                      <div className="font-medium">
+                  <tr key={item.id} className="border-t border-zinc-800 align-top">
+                    <td className="px-3 py-2.5">
+                      <div className="font-medium leading-snug">
                         {item.title || item.player_name || 'Untitled item'}
                       </div>
-                      <div className="text-zinc-400">{itemLine}</div>
+                      <div className="mt-0.5 text-xs leading-snug text-zinc-400">
+                        {itemLine}
+                      </div>
                     </td>
 
-                    <td className="px-4 py-3 capitalize">
-                      {(item.status || '—').replaceAll('_', ' ')}
+                    <td className="px-3 py-2.5">
+                      {item.status === 'available' ? (
+                        <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs text-emerald-300">
+                          For Sale
+                        </span>
+                      ) : item.status === 'personal' ? (
+                        <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs text-blue-300">
+                          Personal
+                        </span>
+                      ) : item.status === 'junk' ? (
+                        <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                          Junk
+                        </span>
+                      ) : item.status === 'listed' ? (
+                        <span className="rounded-full border border-purple-800 bg-purple-950/40 px-2 py-0.5 text-xs text-purple-300">
+                          Listed
+                        </span>
+                      ) : (
+                        <span className="capitalize text-zinc-400">
+                          {(item.status || '—').replaceAll('_', ' ')}
+                        </span>
+                      )}
                     </td>
 
-                    <td className="px-4 py-3">{item.quantity ?? 0}</td>
+                    <td className="px-3 py-2.5">{item.quantity ?? 0}</td>
+                    <td className="px-3 py-2.5">{item.available_quantity ?? 0}</td>
+                    <td className="px-3 py-2.5">{money(item.cost_basis_unit)}</td>
+                    <td className="px-3 py-2.5">{money(item.cost_basis_total)}</td>
+                    <td className="px-3 py-2.5">{money(item.estimated_value_total)}</td>
+                    <td className="px-3 py-2.5">{item.storage_location || '—'}</td>
 
-                    <td className="px-4 py-3">{item.available_quantity ?? 0}</td>
-
-                    <td className="px-4 py-3">{money(item.cost_basis_unit)}</td>
-
-                    <td className="px-4 py-3">{money(item.cost_basis_total)}</td>
-
-                    <td className="px-4 py-3">{money(item.estimated_value_total)}</td>
-
-                    <td className="px-4 py-3">{item.storage_location || '—'}</td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex gap-3">
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap gap-2">
                         <Link
                           href={`/app/inventory/${item.id}`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
                         >
                           Details
                         </Link>
 
                         <Link
                           href={`/app/inventory/${item.id}/edit`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
                         >
                           Edit
                         </Link>
@@ -497,7 +534,7 @@ export default async function InventoryPage({
                         {hasAvailable ? (
                           <Link
                             href={`/app/inventory/${item.id}/sell`}
-                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
                           >
                             Sell
                           </Link>
@@ -512,7 +549,7 @@ export default async function InventoryPage({
                             />
                             <button
                               type="submit"
-                              className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-red-200 hover:bg-red-950"
+                              className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1 text-red-200 hover:bg-red-950"
                             >
                               Reverse Sale
                             </button>
@@ -526,7 +563,7 @@ export default async function InventoryPage({
 
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-zinc-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-zinc-400">
                     {q ? 'No inventory items match your search.' : 'No inventory items found.'}
                   </td>
                 </tr>

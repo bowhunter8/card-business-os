@@ -3,7 +3,10 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { rollbackBreakAction } from '@/app/actions/break-safety'
-import { deleteInventoryItemAction } from '@/app/actions/breaks'
+import {
+  bulkDeleteInventoryItemsAction,
+  deleteInventoryItemAction,
+} from '@/app/actions/breaks'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -176,6 +179,27 @@ function getSortIndicator(currentKey: CardSortKey, currentDir: SortDir, key: Car
   return currentDir === 'asc' ? '↑' : '↓'
 }
 
+function buildBreakDetailQueryString(options: {
+  cardsSortKey: CardSortKey
+  cardsSortDir: SortDir
+  confirmDelete?: string | null
+  inventoryItemIds?: string[]
+}) {
+  const params = new URLSearchParams()
+  params.set('cards_sort', options.cardsSortKey)
+  params.set('cards_dir', options.cardsSortDir)
+
+  if (options.confirmDelete) {
+    params.set('confirm_delete', options.confirmDelete)
+  }
+
+  for (const id of options.inventoryItemIds ?? []) {
+    params.append('inventory_item_ids', id)
+  }
+
+  return params.toString()
+}
+
 function SectionLoading({
   title,
   rows = 3,
@@ -283,6 +307,7 @@ function BreakCardSortHeader({
   return (
     <Link
       href={`/app/breaks/${breakId}?${params.toString()}`}
+      scroll={false}
       className="inline-flex items-center gap-1 hover:text-zinc-100"
     >
       <span>{label}</span>
@@ -399,6 +424,8 @@ async function BreakCardsAndMetricsSection({
   reversedAt,
   cardsSortKey,
   cardsSortDir,
+  confirmDelete,
+  selectedInventoryItemIds,
 }: {
   breakId: string
   userId: string
@@ -407,6 +434,8 @@ async function BreakCardsAndMetricsSection({
   reversedAt?: string | null
   cardsSortKey: CardSortKey
   cardsSortDir: SortDir
+  confirmDelete?: string
+  selectedInventoryItemIds: string[]
 }) {
   const supabase = await createClient()
 
@@ -521,12 +550,124 @@ async function BreakCardsAndMetricsSection({
   const projectedProfit = realizedProfit + remainingEstimatedValue
   const projectedROI = breakCost > 0 ? (projectedProfit / breakCost) * 100 : 0
   const breakStatus = getBreakStatus(projectedROI, reversedAt)
+  const bulkSelectionFormId = `bulk-select-break-cards-${breakId}`
+
+  const deletableSelectedCards = rawBreakCards.filter(
+    (card) =>
+      selectedInventoryItemIds.includes(card.id) && !activeSaleItemIds.has(card.id)
+  )
+
+  const singleDeleteCard =
+    confirmDelete && confirmDelete !== 'bulk'
+      ? rawBreakCards.find((card) => card.id === confirmDelete) ?? null
+      : null
+
+  const showBulkConfirm = confirmDelete === 'bulk'
+  const showSingleConfirm =
+    Boolean(singleDeleteCard) &&
+    !activeSaleItemIds.has(String(singleDeleteCard?.id ?? ''))
+
+  const cancelConfirmHref = `/app/breaks/${breakId}?${buildBreakDetailQueryString({
+    cardsSortKey,
+    cardsSortDir,
+  })}`
 
   return (
     <>
       {cardsError ? (
         <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
           Error loading break cards: {cardsError.message}
+        </div>
+      ) : null}
+
+      {showBulkConfirm ? (
+        <div className="mt-6 rounded-2xl border border-red-900 bg-red-950/30 p-5">
+          <div className="text-sm text-red-300">Confirm Bulk Delete</div>
+          <div className="mt-2 text-lg font-semibold text-red-100">
+            Are you sure you want to delete these selected items?
+          </div>
+
+          {deletableSelectedCards.length === 0 ? (
+            <div className="mt-3 text-sm text-red-200">
+              No deletable items were selected. Select one or more cards, then click Delete Selected again.
+            </div>
+          ) : (
+            <>
+              <div className="mt-3 text-sm text-red-200">
+                {deletableSelectedCards.length} item(s) will be deleted from this break.
+              </div>
+
+              <div className="mt-4 max-h-56 overflow-y-auto rounded-xl border border-red-900/60 bg-zinc-950 p-3">
+                <div className="space-y-2 text-sm text-zinc-200">
+                  {deletableSelectedCards.map((card) => (
+                    <div key={card.id}>
+                      {buildDisplay(card) || card.title || 'Untitled item'}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <form action={bulkDeleteInventoryItemsAction} className="mt-4 flex flex-wrap gap-3">
+                <input type="hidden" name="return_to" value="break" />
+                <input type="hidden" name="break_id" value={breakId} />
+                {deletableSelectedCards.map((card) => (
+                  <input
+                    key={card.id}
+                    type="hidden"
+                    name="inventory_item_ids"
+                    value={card.id}
+                  />
+                ))}
+
+                <button
+                  type="submit"
+                  className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2 text-sm text-red-200 hover:bg-red-950"
+                >
+                  Yes, Delete Selected
+                </button>
+
+                <Link
+                  href={cancelConfirmHref}
+                  scroll={false}
+                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+                >
+                  Cancel
+                </Link>
+              </form>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {showSingleConfirm && singleDeleteCard ? (
+        <div className="mt-6 rounded-2xl border border-red-900 bg-red-950/30 p-5">
+          <div className="text-sm text-red-300">Confirm Delete</div>
+          <div className="mt-2 text-lg font-semibold text-red-100">
+            Are you sure you want to delete this item?
+          </div>
+          <div className="mt-3 rounded-xl border border-red-900/60 bg-zinc-950 p-3 text-sm text-zinc-200">
+            {buildDisplay(singleDeleteCard) || singleDeleteCard.title || 'Untitled item'}
+          </div>
+
+          <form action={deleteInventoryItemAction} className="mt-4 flex flex-wrap gap-3">
+            <input type="hidden" name="inventory_item_id" value={singleDeleteCard.id} />
+            <input type="hidden" name="return_to" value="break" />
+            <input type="hidden" name="break_id" value={breakId} />
+            <button
+              type="submit"
+              className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2 text-sm text-red-200 hover:bg-red-950"
+            >
+              Yes, Delete Item
+            </button>
+
+            <Link
+              href={cancelConfirmHref}
+              scroll={false}
+              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+            >
+              Cancel
+            </Link>
+          </form>
         </div>
       ) : null}
 
@@ -637,22 +778,57 @@ async function BreakCardsAndMetricsSection({
       </div>
 
       <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900">
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
-          <h2 className="text-xl font-semibold">Cards From This Break</h2>
-          {!reversedAt ? (
-            <Link
-              href={`/app/breaks/${breakId}/add-cards`}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-            >
-              Add More Cards
-            </Link>
-          ) : null}
+        <div className="flex flex-col gap-4 border-b border-zinc-800 px-5 py-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">Cards From This Break</h2>
+            {!reversedAt ? (
+              <div className="mt-1 text-sm text-zinc-400">
+                Select multiple cards with the checkboxes, then bulk delete the selected rows.
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            {!reversedAt ? (
+              <>
+                <button
+                  type="submit"
+                  form={bulkSelectionFormId}
+                  className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm text-red-200 hover:bg-red-950"
+                >
+                  Delete Selected
+                </button>
+
+                <Link
+                  href={`/app/breaks/${breakId}/add-cards`}
+                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                >
+                  Add More Cards
+                </Link>
+              </>
+            ) : null}
+          </div>
         </div>
+
+        {!reversedAt ? (
+          <form
+            id={bulkSelectionFormId}
+            method="get"
+            action={`/app/breaks/${breakId}`}
+          >
+            <input type="hidden" name="cards_sort" value={cardsSortKey} />
+            <input type="hidden" name="cards_dir" value={cardsSortDir} />
+            <input type="hidden" name="confirm_delete" value="bulk" />
+          </form>
+        ) : null}
 
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
+                {!reversedAt ? (
+                  <th className="px-4 py-3 text-left font-medium">Select</th>
+                ) : null}
                 <th className="px-4 py-3 text-left font-medium">
                   <BreakCardSortHeader
                     breakId={breakId}
@@ -732,8 +908,27 @@ async function BreakCardsAndMetricsSection({
               {breakCards.map((card) => {
                 const canDelete = !activeSaleItemIds.has(card.id)
 
+                const singleDeleteHref = `/app/breaks/${breakId}?${buildBreakDetailQueryString({
+                  cardsSortKey,
+                  cardsSortDir,
+                  confirmDelete: card.id,
+                })}`
+
                 return (
                   <tr key={card.id} className="border-t border-zinc-800">
+                    {!reversedAt ? (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          name="inventory_item_ids"
+                          value={card.id}
+                          form={bulkSelectionFormId}
+                          defaultChecked={selectedInventoryItemIds.includes(card.id)}
+                          disabled={!canDelete}
+                          className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        />
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3 capitalize">
                       {(card.status || '—').replaceAll('_', ' ')}
                     </td>
@@ -759,7 +954,7 @@ async function BreakCardsAndMetricsSection({
                           href={`/app/inventory/${card.id}`}
                           className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
                         >
-                          View
+                          Quick Edit
                         </Link>
                         {!reversedAt ? (
                           <>
@@ -767,21 +962,17 @@ async function BreakCardsAndMetricsSection({
                               href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
                               className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
                             >
-                              Edit
+                              Full Edit
                             </Link>
 
                             {canDelete ? (
-                              <form action={deleteInventoryItemAction}>
-                                <input type="hidden" name="inventory_item_id" value={card.id} />
-                                <input type="hidden" name="return_to" value="break" />
-                                <input type="hidden" name="break_id" value={breakId} />
-                                <button
-                                  type="submit"
-                                  className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-red-200 hover:bg-red-950"
-                                >
-                                  Delete
-                                </button>
-                              </form>
+                              <Link
+                                href={singleDeleteHref}
+                                scroll={false}
+                                className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-red-200 hover:bg-red-950"
+                              >
+                                Delete
+                              </Link>
                             ) : (
                               <span className="inline-flex rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-1.5 text-yellow-200">
                                 Has Sale
@@ -797,7 +988,7 @@ async function BreakCardsAndMetricsSection({
 
               {breakCards.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-zinc-400">
+                  <td colSpan={reversedAt ? 9 : 10} className="px-4 py-10 text-center text-zinc-400">
                     No cards have been added from this break yet.
                   </td>
                 </tr>
@@ -805,6 +996,20 @@ async function BreakCardsAndMetricsSection({
             </tbody>
           </table>
         </div>
+
+        {!reversedAt ? (
+          <div className="border-t border-zinc-800 px-5 py-4">
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm text-red-200 hover:bg-red-950"
+              >
+                Delete Selected
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </>
   )
@@ -820,12 +1025,15 @@ export default async function BreakDetailPage({
     success?: string
     cards_sort?: string
     cards_dir?: string
+    confirm_delete?: string
+    inventory_item_ids?: string | string[]
   }>
 }) {
   const { id } = await params
   const query = searchParams ? await searchParams : undefined
   const errorMessage = query?.error
   const successMessage = query?.success
+  const confirmDelete = String(query?.confirm_delete ?? '').trim() || undefined
 
   const requestedCardsSort = String(query?.cards_sort ?? 'created_at').trim() as CardSortKey
   const requestedCardsDir = String(query?.cards_dir ?? 'desc').trim() as SortDir
@@ -845,6 +1053,12 @@ export default async function BreakDetailPage({
     : 'created_at'
 
   const cardsSortDir: SortDir = requestedCardsDir === 'asc' ? 'asc' : 'desc'
+
+  const selectedInventoryItemIds = Array.isArray(query?.inventory_item_ids)
+    ? query?.inventory_item_ids.map((value) => String(value))
+    : query?.inventory_item_ids
+      ? [String(query.inventory_item_ids)]
+      : []
 
   const supabase = await createClient()
 
@@ -1099,6 +1313,8 @@ export default async function BreakDetailPage({
           reversedAt={item.reversed_at}
           cardsSortKey={cardsSortKey}
           cardsSortDir={cardsSortDir}
+          confirmDelete={confirmDelete}
+          selectedInventoryItemIds={selectedInventoryItemIds}
         />
       </Suspense>
     </div>

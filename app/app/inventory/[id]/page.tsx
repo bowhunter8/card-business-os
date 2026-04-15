@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
+import { updateInventoryItemAction } from '@/app/actions/inventory'
 import { deleteInventoryItemAction } from '@/app/actions/breaks'
 
 type InventoryItem = {
@@ -89,6 +90,129 @@ function buildDisplay(item: InventoryItem) {
   ]
 
   return parts.filter(Boolean).join(' • ')
+}
+
+function renderStatusPill(status: string | null) {
+  if (status === 'available') {
+    return (
+      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+        For Sale
+      </span>
+    )
+  }
+
+  if (status === 'listed') {
+    return (
+      <span className="rounded-full border border-purple-800 bg-purple-950/40 px-2 py-1 text-xs text-purple-300">
+        Listed
+      </span>
+    )
+  }
+
+  if (status === 'personal') {
+    return (
+      <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
+        Personal
+      </span>
+    )
+  }
+
+  if (status === 'junk') {
+    return (
+      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+        Junk
+      </span>
+    )
+  }
+
+  return (
+    <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 capitalize">
+      {(status || 'unknown').replaceAll('_', ' ')}
+    </span>
+  )
+}
+
+function EditableField({
+  label,
+  name,
+  defaultValue,
+  type = 'text',
+  step,
+  min,
+  formId,
+}: {
+  label: string
+  name: string
+  defaultValue: string | number
+  type?: 'text' | 'number'
+  step?: string | number
+  min?: string | number
+  formId: string
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <label className="text-sm text-zinc-400" htmlFor={name}>
+        {label}
+      </label>
+      <input
+        id={name}
+        form={formId}
+        name={name}
+        type={type}
+        step={step}
+        min={min}
+        defaultValue={defaultValue}
+        className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xl font-semibold"
+      />
+    </div>
+  )
+}
+
+function ReadonlyMetric({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="text-sm text-zinc-400">{label}</div>
+      <div className="mt-2 text-xl font-semibold">{value}</div>
+    </div>
+  )
+}
+
+function EditableSelect({
+  label,
+  name,
+  defaultValue,
+  formId,
+}: {
+  label: string
+  name: string
+  defaultValue: string
+  formId: string
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <label className="text-sm text-zinc-400" htmlFor={name}>
+        {label}
+      </label>
+      <select
+        id={name}
+        form={formId}
+        name={name}
+        defaultValue={defaultValue}
+        className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-lg font-semibold text-zinc-100"
+      >
+        <option value="available">For Sale</option>
+        <option value="listed">Listed</option>
+        <option value="personal">Personal</option>
+        <option value="junk">Junk</option>
+      </select>
+    </div>
+  )
 }
 
 export default async function InventoryDetailPage({
@@ -198,9 +322,14 @@ export default async function InventoryDetailPage({
   const hasAvailableToSell = availableQuantity > 0
   const latestActiveSale = activeSales[0] ?? null
   const canDelete = activeSales.length === 0
+  const itemFormId = 'inventory-inline-edit-form'
 
   return (
     <div>
+      <form id={itemFormId} action={updateInventoryItemAction}>
+        <input type="hidden" name="inventory_item_id" value={item.id} />
+      </form>
+
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="mb-2">
@@ -213,14 +342,23 @@ export default async function InventoryDetailPage({
           <p className="mt-2 text-zinc-400">
             {buildDisplay(item) || item.title || 'Untitled item'}
           </p>
+          <div className="mt-3">{renderStatusPill(item.status)}</div>
         </div>
 
         <div className="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            form={itemFormId}
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Save Changes
+          </button>
+
           <Link
             href={`/app/inventory/${item.id}/edit`}
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
-            Edit
+            Edit Page
           </Link>
 
           {hasAvailableToSell ? (
@@ -282,49 +420,181 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
+      {item.status === 'junk' ? (
+        <div className="mb-6 rounded-xl border border-zinc-700 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
+          This item is marked as Junk and is being kept for recordkeeping, not active selling.
+        </div>
+      ) : null}
+
+      {item.status === 'personal' ? (
+        <div className="mb-6 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
+          This item is marked as Personal Collection and is not currently part of your active sell inventory.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Status</div>
-          <div className="mt-2 text-xl font-semibold capitalize">
-            {(item.status || '—').replaceAll('_', ' ')}
-          </div>
-        </div>
+        <EditableSelect
+          label="Status"
+          name="status"
+          defaultValue={item.status ?? 'available'}
+          formId={itemFormId}
+        />
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Quantity</div>
-          <div className="mt-2 text-xl font-semibold">{item.quantity ?? 0}</div>
-        </div>
+        <EditableField
+          label="Quantity"
+          name="quantity"
+          type="number"
+          min={1}
+          defaultValue={item.quantity ?? 0}
+          formId={itemFormId}
+        />
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Available</div>
-          <div className="mt-2 text-xl font-semibold">{item.available_quantity ?? 0}</div>
-        </div>
+        <ReadonlyMetric label="Available" value={item.available_quantity ?? 0} />
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Qty Sold</div>
-          <div className="mt-2 text-xl font-semibold">{totalQtySold}</div>
-        </div>
+        <ReadonlyMetric label="Qty Sold" value={totalQtySold} />
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Unit Cost</div>
-          <div className="mt-2 text-2xl font-semibold">{money(item.cost_basis_unit)}</div>
+        <ReadonlyMetric label="Unit Cost" value={money(item.cost_basis_unit)} />
+
+        <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
+
+        <EditableField
+          label="Est. Value / Unit"
+          name="estimated_value_unit"
+          type="number"
+          step="0.01"
+          min={0}
+          defaultValue={item.estimated_value_unit ?? 0}
+          formId={itemFormId}
+        />
+
+        <ReadonlyMetric label="Est. Value Total" value={money(item.estimated_value_total)} />
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <h2 className="text-xl font-semibold">Quick Edit Item</h2>
+
+          <button
+            type="submit"
+            form={itemFormId}
+            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+          >
+            Save Changes
+          </button>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Total Cost</div>
-          <div className="mt-2 text-2xl font-semibold">{money(item.cost_basis_total)}</div>
-        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Title</label>
+            <input
+              form={itemFormId}
+              name="title"
+              type="text"
+              defaultValue={item.title ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Est. Value / Unit</div>
-          <div className="mt-2 text-2xl font-semibold">{money(item.estimated_value_unit)}</div>
-        </div>
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Player</label>
+            <input
+              form={itemFormId}
+              name="player_name"
+              type="text"
+              defaultValue={item.player_name ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Est. Value Total</div>
-          <div className="mt-2 text-2xl font-semibold">{money(item.estimated_value_total)}</div>
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Year</label>
+            <input
+              form={itemFormId}
+              name="year"
+              type="number"
+              defaultValue={item.year ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Set</label>
+            <input
+              form={itemFormId}
+              name="set_name"
+              type="text"
+              defaultValue={item.set_name ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Card #</label>
+            <input
+              form={itemFormId}
+              name="card_number"
+              type="text"
+              defaultValue={item.card_number ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Brand</label>
+            <input
+              form={itemFormId}
+              name="brand"
+              type="text"
+              defaultValue={item.brand ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Parallel</label>
+            <input
+              form={itemFormId}
+              name="parallel_name"
+              type="text"
+              defaultValue={item.parallel_name ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Team</label>
+            <input
+              form={itemFormId}
+              name="team"
+              type="text"
+              defaultValue={item.team ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm text-zinc-300">Storage Location</label>
+            <input
+              form={itemFormId}
+              name="storage_location"
+              type="text"
+              defaultValue={item.storage_location ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
+
+          <div className="md:col-span-3">
+            <label className="mb-1 block text-sm text-zinc-300">Notes</label>
+            <textarea
+              form={itemFormId}
+              name="notes"
+              rows={4}
+              defaultValue={item.notes ?? ''}
+              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+            />
+          </div>
         </div>
       </div>
 

@@ -163,157 +163,157 @@ export default async function AppHomePage() {
   const whatnotCount = whatnotRes.count ?? whatnotOrders.length
 
   return (
-    <div className="max-w-7xl space-y-8">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div className="max-w-7xl space-y-5">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Dashboard</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <p className="mt-1 text-sm text-zinc-400">
             Overview of your breaks, inventory, sales, and imported Whatnot orders.
           </p>
         </div>
 
-        <div className="text-sm text-zinc-500">
+        <div className="text-xs text-zinc-500">
           Signed in as <span className="text-zinc-300">{user.email}</span>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Link
           href="/app/inventory"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Inventory Items</div>
-          <div className="mt-2 text-3xl font-semibold">{inventoryCount}</div>
-          <div className="mt-2 text-sm text-zinc-500">
+          <div className="mt-1.5 text-2xl font-semibold">{inventoryCount}</div>
+          <div className="mt-1 text-xs text-zinc-500">
             {availableUnits} unit(s) available
           </div>
         </Link>
 
         <Link
           href="/app/breaks?q=active"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Active Breaks</div>
-          <div className="mt-2 text-3xl font-semibold">{breakCount}</div>
-          <div className="mt-2 text-sm text-zinc-500">
+          <div className="mt-1.5 text-2xl font-semibold">{breakCount}</div>
+          <div className="mt-1 text-xs text-zinc-500">
             Total spend {money(breakSpend)}
           </div>
         </Link>
 
         <Link
           href="/app/sales?q=active"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Active Sales</div>
-          <div className="mt-2 text-3xl font-semibold">{saleCount}</div>
-          <div className="mt-2 text-sm text-zinc-500">
+          <div className="mt-1.5 text-2xl font-semibold">{saleCount}</div>
+          <div className="mt-1 text-xs text-zinc-500">
             Gross sales {money(grossSales)}
           </div>
         </Link>
 
         <Link
           href="/app/whatnot-orders?q=unassigned"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Whatnot Orders</div>
-          <div className="mt-2 text-3xl font-semibold">{whatnotCount}</div>
-          <div className="mt-2 text-sm text-zinc-500">
+          <div className="mt-1.5 text-2xl font-semibold">{whatnotCount}</div>
+          <div className="mt-1 text-xs text-zinc-500">
             {unassignedWhatnotOrdersCount} unassigned
           </div>
         </Link>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Link
           href="/app/inventory"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Inventory Cost Basis</div>
-          <div className="mt-2 text-3xl font-semibold">{money(inventoryCost)}</div>
+          <div className="mt-1.5 text-2xl font-semibold">{money(inventoryCost)}</div>
         </Link>
 
         <Link
           href="/app/inventory"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Estimated Inventory Value</div>
-          <div className="mt-2 text-3xl font-semibold">
+          <div className="mt-1.5 text-2xl font-semibold">
             {money(inventoryEstimatedValue)}
           </div>
         </Link>
 
         <Link
           href="/app/sales?q=active"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Net Sales</div>
-          <div className="mt-2 text-3xl font-semibold">{money(netSales)}</div>
+          <div className="mt-1.5 text-2xl font-semibold">{money(netSales)}</div>
         </Link>
 
         <Link
           href="/app/sales?q=active"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Total Profit</div>
-          <div className="mt-2 text-3xl font-semibold">{money(totalProfit)}</div>
+          <div className="mt-1.5 text-2xl font-semibold">{money(totalProfit)}</div>
         </Link>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2">
         <Link
           href="/app/breaks?q=open"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
-          <h2 className="text-xl font-semibold">Open Breaks</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Open Break Count</div>
-              <div className="mt-2 text-2xl font-semibold">{openBreakCount}</div>
+          <h2 className="text-lg font-semibold">Open Breaks</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Open Break Count</div>
+              <div className="mt-1.5 text-xl font-semibold">{openBreakCount}</div>
             </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Open Breakdown</div>
-              <div className="mt-2 space-y-1 text-sm text-zinc-300">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Open Breakdown</div>
+              <div className="mt-1.5 space-y-1 text-sm text-zinc-300">
                 <div>{incompleteBreaksCount} incomplete</div>
                 <div>{noCardsDeclaredBreaksCount} not started</div>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 text-sm text-zinc-400">
+          <div className="mt-3 text-xs text-zinc-400">
             Click to view breaks that still need card entry.
           </div>
         </Link>
 
         <Link
           href="/app/inventory?q=listed"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
-          <h2 className="text-xl font-semibold">Listed Items</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Listed Count</div>
-              <div className="mt-2 text-2xl font-semibold">{listedItemCount}</div>
+          <h2 className="text-lg font-semibold">Listed Items</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Listed Count</div>
+              <div className="mt-1.5 text-xl font-semibold">{listedItemCount}</div>
             </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Listed Total</div>
-              <div className="mt-2 text-2xl font-semibold">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Listed Total</div>
+              <div className="mt-1.5 text-xl font-semibold">
                 {money(listedItemTotal)}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 text-sm text-zinc-400">
+          <div className="mt-3 text-xs text-zinc-400">
             Click to view listed inventory.
           </div>
         </Link>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h2 className="text-xl font-semibold">Workflow</h2>
-          <div className="mt-4 space-y-3 text-sm text-zinc-400">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+          <h2 className="text-lg font-semibold">Workflow</h2>
+          <div className="mt-3 space-y-2.5 text-sm text-zinc-400">
             <p>
               Use <span className="text-zinc-200">Breaks</span> to create and manage break purchases.
             </p>
@@ -328,26 +328,26 @@ export default async function AppHomePage() {
 
         <Link
           href="/app/whatnot-orders?q=unassigned"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 transition hover:bg-zinc-800"
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
-          <h2 className="text-xl font-semibold">Whatnot Staging</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Unassigned Orders</div>
-              <div className="mt-2 text-2xl font-semibold">
+          <h2 className="text-lg font-semibold">Whatnot Staging</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Unassigned Orders</div>
+              <div className="mt-1.5 text-xl font-semibold">
                 {unassignedWhatnotOrdersCount}
               </div>
             </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-              <div className="text-sm text-zinc-400">Unassigned Total</div>
-              <div className="mt-2 text-2xl font-semibold">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+              <div className="text-xs text-zinc-400">Unassigned Total</div>
+              <div className="mt-1.5 text-xl font-semibold">
                 {money(whatnotUnassignedTotal)}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 text-sm text-zinc-400">
+          <div className="mt-3 text-xs text-zinc-400">
             Click to view unassigned Whatnot orders.
           </div>
         </Link>

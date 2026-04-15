@@ -132,6 +132,26 @@ function buildRestoreRows(formData: FormData, rowCount: number): RestorableEntry
   return rows
 }
 
+function buildReturnPath({
+  returnTo,
+  breakId,
+  inventoryItemId,
+}: {
+  returnTo: string
+  breakId?: string
+  inventoryItemId?: string
+}) {
+  if (returnTo === 'break' && breakId) {
+    return `/app/breaks/${breakId}`
+  }
+
+  if (inventoryItemId) {
+    return `/app/inventory/${inventoryItemId}`
+  }
+
+  return '/app/inventory'
+}
+
 function redirectBackToAddCards(args: {
   breakId: string
   error: string
@@ -760,16 +780,20 @@ export async function deleteInventoryItemAction(formData: FormData) {
     .limit(1)
 
   if (salesError) {
-    const fallback = returnTo === 'break' && breakId
-      ? `/app/breaks/${breakId}?error=${encodeURIComponent('Could not validate sales before delete')}`
-      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent('Could not validate sales before delete')}`
+    const fallback = `${buildReturnPath({
+      returnTo,
+      breakId,
+      inventoryItemId,
+    })}?error=${encodeURIComponent('Could not validate sales before delete')}`
     redirect(fallback)
   }
 
   if ((activeSales ?? []).length > 0) {
-    const fallback = returnTo === 'break' && breakId
-      ? `/app/breaks/${breakId}?error=${encodeURIComponent('Cannot delete an item with active sales. Reverse the sale first.')}`
-      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent('Cannot delete an item with active sales. Reverse the sale first.')}`
+    const fallback = `${buildReturnPath({
+      returnTo,
+      breakId,
+      inventoryItemId,
+    })}?error=${encodeURIComponent('Cannot delete an item with active sales. Reverse the sale first.')}`
     redirect(fallback)
   }
 
@@ -780,9 +804,11 @@ export async function deleteInventoryItemAction(formData: FormData) {
     .eq('inventory_item_id', inventoryItemId)
 
   if (txDeleteError) {
-    const fallback = returnTo === 'break' && breakId
-      ? `/app/breaks/${breakId}?error=${encodeURIComponent(txDeleteError.message)}`
-      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(txDeleteError.message)}`
+    const fallback = `${buildReturnPath({
+      returnTo,
+      breakId,
+      inventoryItemId,
+    })}?error=${encodeURIComponent(txDeleteError.message)}`
     redirect(fallback)
   }
 
@@ -793,15 +819,148 @@ export async function deleteInventoryItemAction(formData: FormData) {
     .eq('user_id', user.id)
 
   if (itemDeleteError) {
-    const fallback = returnTo === 'break' && breakId
-      ? `/app/breaks/${breakId}?error=${encodeURIComponent(itemDeleteError.message)}`
-      : `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(itemDeleteError.message)}`
+    const fallback = `${buildReturnPath({
+      returnTo,
+      breakId,
+      inventoryItemId,
+    })}?error=${encodeURIComponent(itemDeleteError.message)}`
     redirect(fallback)
   }
 
-  if (returnTo === 'break' && breakId) {
-    redirect(`/app/breaks/${breakId}?success=${encodeURIComponent('Item deleted')}`)
+  const successPath = `${buildReturnPath({
+    returnTo,
+    breakId,
+  })}?success=${encodeURIComponent('Item deleted')}`
+
+  redirect(successPath)
+}
+
+export async function bulkDeleteInventoryItemsAction(formData: FormData) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
   }
 
-  redirect(`/app/inventory?success=${encodeURIComponent('Item deleted')}`)
+  const returnTo = safeText(formData.get('return_to'))
+  const breakId = safeText(formData.get('break_id'))
+  const selectedIds = formData
+    .getAll('inventory_item_ids')
+    .map((value) => safeText(value))
+    .filter(Boolean)
+
+  const fallbackBase = buildReturnPath({
+    returnTo,
+    breakId,
+  })
+
+  if (selectedIds.length === 0) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        'Select at least one item before bulk delete.'
+      )}`
+    )
+  }
+
+  const uniqueSelectedIds = Array.from(new Set(selectedIds))
+
+  let itemsQuery = supabase
+    .from('inventory_items')
+    .select('id, source_break_id')
+    .eq('user_id', user.id)
+    .in('id', uniqueSelectedIds)
+
+  if (returnTo === 'break' && breakId) {
+    itemsQuery = itemsQuery.eq('source_break_id', breakId)
+  }
+
+  const { data: foundItems, error: foundItemsError } = await itemsQuery
+
+  if (foundItemsError) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        foundItemsError.message || 'Could not load selected items.'
+      )}`
+    )
+  }
+
+  const foundIds = new Set((foundItems ?? []).map((item) => String(item.id)))
+  const validIds = uniqueSelectedIds.filter((id) => foundIds.has(id))
+
+  if (validIds.length === 0) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        'No valid items were selected for bulk delete.'
+      )}`
+    )
+  }
+
+  const { data: activeSales, error: salesError } = await supabase
+    .from('sales')
+    .select('inventory_item_id')
+    .eq('user_id', user.id)
+    .in('inventory_item_id', validIds)
+    .is('reversed_at', null)
+
+  if (salesError) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        salesError.message || 'Could not validate selected item sales.'
+      )}`
+    )
+  }
+
+  const blockedIds = new Set(
+    (activeSales ?? []).map((sale) => String(sale.inventory_item_id))
+  )
+
+  const deletableIds = validIds.filter((id) => !blockedIds.has(id))
+  const skippedCount = validIds.length - deletableIds.length
+
+  if (deletableIds.length === 0) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        'Selected items could not be deleted because they have active sales.'
+      )}`
+    )
+  }
+
+  const { error: txDeleteError } = await supabase
+    .from('inventory_transactions')
+    .delete()
+    .eq('user_id', user.id)
+    .in('inventory_item_id', deletableIds)
+
+  if (txDeleteError) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        txDeleteError.message || 'Could not delete inventory transactions for selected items.'
+      )}`
+    )
+  }
+
+  const { error: itemDeleteError } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('user_id', user.id)
+    .in('id', deletableIds)
+
+  if (itemDeleteError) {
+    redirect(
+      `${fallbackBase}?error=${encodeURIComponent(
+        itemDeleteError.message || 'Could not delete selected items.'
+      )}`
+    )
+  }
+
+  const successMessage =
+    skippedCount > 0
+      ? `Deleted ${deletableIds.length} item(s). Skipped ${skippedCount} item(s) with active sales.`
+      : `Deleted ${deletableIds.length} item(s).`
+
+  redirect(`${fallbackBase}?success=${encodeURIComponent(successMessage)}`)
 }
