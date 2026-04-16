@@ -296,16 +296,16 @@ export default async function InventoryPage({
           : ''
 
   return (
-    <div className="max-w-7xl space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-2xl font-semibold">Inventory</h1>
-          <p className="mt-1 text-sm text-zinc-400">{pageDescription}</p>
+          <h1 className="app-title">Inventory</h1>
+          <p className="app-subtitle">{pageDescription}</p>
         </div>
 
         <Link
           href="/app/inventory/new"
-          className="inline-flex rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-zinc-200"
+          className="app-button-primary"
         >
           Add Inventory
         </Link>
@@ -314,30 +314,30 @@ export default async function InventoryPage({
       <div className="flex flex-wrap gap-2">
         <Link
           href="/app/inventory"
-          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
+          className={`app-chip ${
             q === ''
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
+              ? 'app-chip-active'
+              : 'app-chip-idle'
           }`}
         >
           All
         </Link>
         <Link
           href="/app/inventory?q=listed"
-          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
+          className={`app-chip ${
             qNormalized === 'listed'
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
+              ? 'app-chip-active'
+              : 'app-chip-idle'
           }`}
         >
           Listed
         </Link>
         <Link
           href="/app/inventory?q=junk"
-          className={`rounded-lg border px-4 py-1.5 text-sm hover:bg-zinc-800 ${
+          className={`app-chip ${
             qNormalized === 'junk'
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
+              ? 'app-chip-active'
+              : 'app-chip-idle'
           }`}
         >
           Junk
@@ -346,7 +346,7 @@ export default async function InventoryPage({
 
       <form
         method="get"
-        className="rounded-xl border border-zinc-800 bg-zinc-900 p-3"
+        className="app-search-panel"
       >
         <div className="flex flex-col gap-2 md:flex-row">
           <input
@@ -354,19 +354,19 @@ export default async function InventoryPage({
             name="q"
             defaultValue={q}
             placeholder="Search player, title, set, card #, team, notes..."
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2"
+            className="app-input"
           />
           <div className="flex gap-2">
             <button
               type="submit"
-              className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black hover:bg-zinc-200"
+              className="app-button-primary"
             >
               Search
             </button>
             {q ? (
               <Link
                 href="/app/inventory"
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+                className="app-button"
               >
                 Clear
               </Link>
@@ -382,17 +382,17 @@ export default async function InventoryPage({
       </form>
 
       {error ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="app-alert-error">
           Error loading inventory: {error.message}
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-zinc-950 text-zinc-400">
+      <div className="app-table-wrap">
+        <div className="app-table-scroll">
+          <table className="app-table">
+            <thead className="app-thead">
               <tr>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Card"
                     sortKey="card"
@@ -401,7 +401,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Status"
                     sortKey="status"
@@ -410,7 +410,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Qty"
                     sortKey="quantity"
@@ -419,7 +419,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Available"
                     sortKey="available_quantity"
@@ -428,7 +428,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Unit Cost"
                     sortKey="cost_basis_unit"
@@ -437,7 +437,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Total Cost"
                     sortKey="cost_basis_total"
@@ -446,7 +446,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Est. Value"
                     sortKey="estimated_value_total"
@@ -455,7 +455,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">
+                <th className="app-th">
                   <SortHeader
                     label="Location"
                     sortKey="storage_location"
@@ -464,7 +464,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">Actions</th>
+                <th className="app-th">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -474,8 +474,8 @@ export default async function InventoryPage({
                 const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
 
                 return (
-                  <tr key={item.id} className="border-t border-zinc-800 align-top">
-                    <td className="px-3 py-2.5">
+                  <tr key={item.id} className="app-tr">
+                    <td className="app-td">
                       <div className="font-medium leading-snug">
                         {item.title || item.player_name || 'Untitled item'}
                       </div>
@@ -484,21 +484,21 @@ export default async function InventoryPage({
                       </div>
                     </td>
 
-                    <td className="px-3 py-2.5">
+                    <td className="app-td">
                       {item.status === 'available' ? (
-                        <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-0.5 text-xs text-emerald-300">
+                        <span className="app-badge app-badge-success">
                           For Sale
                         </span>
                       ) : item.status === 'personal' ? (
-                        <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-0.5 text-xs text-blue-300">
+                        <span className="app-badge app-badge-info">
                           Personal
                         </span>
                       ) : item.status === 'junk' ? (
-                        <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                        <span className="app-badge app-badge-neutral">
                           Junk
                         </span>
                       ) : item.status === 'listed' ? (
-                        <span className="rounded-full border border-purple-800 bg-purple-950/40 px-2 py-0.5 text-xs text-purple-300">
+                        <span className="app-badge app-badge-info">
                           Listed
                         </span>
                       ) : (
@@ -508,25 +508,25 @@ export default async function InventoryPage({
                       )}
                     </td>
 
-                    <td className="px-3 py-2.5">{item.quantity ?? 0}</td>
-                    <td className="px-3 py-2.5">{item.available_quantity ?? 0}</td>
-                    <td className="px-3 py-2.5">{money(item.cost_basis_unit)}</td>
-                    <td className="px-3 py-2.5">{money(item.cost_basis_total)}</td>
-                    <td className="px-3 py-2.5">{money(item.estimated_value_total)}</td>
-                    <td className="px-3 py-2.5">{item.storage_location || '—'}</td>
+                    <td className="app-td">{item.quantity ?? 0}</td>
+                    <td className="app-td">{item.available_quantity ?? 0}</td>
+                    <td className="app-td whitespace-nowrap">{money(item.cost_basis_unit)}</td>
+                    <td className="app-td whitespace-nowrap">{money(item.cost_basis_total)}</td>
+                    <td className="app-td whitespace-nowrap">{money(item.estimated_value_total)}</td>
+                    <td className="app-td">{item.storage_location || '—'}</td>
 
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-wrap gap-2">
+                    <td className="app-td">
+                      <div className="flex flex-wrap gap-1.5">
                         <Link
                           href={`/app/inventory/${item.id}`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
+                          className="app-button"
                         >
                           Details
                         </Link>
 
                         <Link
                           href={`/app/inventory/${item.id}/edit`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
+                          className="app-button"
                         >
                           Edit
                         </Link>
@@ -534,7 +534,7 @@ export default async function InventoryPage({
                         {hasAvailable ? (
                           <Link
                             href={`/app/inventory/${item.id}/sell`}
-                            className="inline-flex rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800"
+                            className="app-button"
                           >
                             Sell
                           </Link>
@@ -549,7 +549,7 @@ export default async function InventoryPage({
                             />
                             <button
                               type="submit"
-                              className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1 text-red-200 hover:bg-red-950"
+                              className="app-button-danger"
                             >
                               Reverse Sale
                             </button>

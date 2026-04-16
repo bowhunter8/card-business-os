@@ -42,30 +42,6 @@ function formatLabel(value: string | null | undefined) {
   return (value || '—').replaceAll('_', ' ')
 }
 
-function statusBadgeClass(status: string | null) {
-  switch (status) {
-    case 'draft':
-      return 'border-amber-900 bg-amber-950/40 text-amber-200'
-    case 'imported':
-      return 'border-emerald-900 bg-emerald-950/40 text-emerald-200'
-    case 'archived':
-      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
-    default:
-      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
-  }
-}
-
-function destinationBadgeClass(destination: string | null) {
-  switch (destination) {
-    case 'sell':
-      return 'border-blue-900 bg-blue-950/40 text-blue-200'
-    case 'personal':
-      return 'border-fuchsia-900 bg-fuchsia-950/40 text-fuchsia-200'
-    default:
-      return 'border-zinc-700 bg-zinc-800 text-zinc-300'
-  }
-}
-
 export default async function StartingInventoryPage({
   searchParams,
 }: {
@@ -96,27 +72,7 @@ export default async function StartingInventoryPage({
 
   let query = supabase
     .from('starting_inventory_items')
-    .select(`
-      id,
-      status,
-      destination,
-      item_type,
-      title,
-      player_name,
-      year,
-      brand,
-      set_name,
-      card_number,
-      parallel_name,
-      quantity,
-      cost_basis_unit,
-      cost_basis_total,
-      estimated_value_total,
-      storage_location,
-      cost_basis_method,
-      imported_inventory_item_id,
-      created_at
-    `)
+    .select('*')
     .eq('user_id', user.id)
 
   if (statusFilter) {
@@ -138,66 +94,66 @@ export default async function StartingInventoryPage({
   }
 
   const response = await query.order('created_at', { ascending: false })
-
   const items: StartingInventoryRow[] = (response.data ?? []) as StartingInventoryRow[]
   const error = response.error
 
   return (
-    <div>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      {/* HEADER */}
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">Starting Inventory</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Starting Inventory</h1>
+          <p className="app-subtitle">
             Enter legacy inventory, assign cost basis, and import it into your main inventory.
           </p>
         </div>
 
         <Link
           href="/app/starting-inventory/new"
-          className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+          className="app-button-primary"
         >
           Add Starting Inventory
         </Link>
       </div>
 
-      {createdId ? (
-        <div className="mt-6 rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+      {/* ALERTS */}
+      {createdId && (
+        <div className="app-alert-success">
           Starting inventory item created successfully.
         </div>
-      ) : null}
+      )}
 
-      {updated ? (
-        <div className="mt-6 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
+      {updated && (
+        <div className="app-alert-info">
           Starting inventory item updated successfully.
         </div>
-      ) : null}
+      )}
 
-      {archived ? (
-        <div className="mt-6 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200">
+      {archived && (
+        <div className="app-alert-info">
           Starting inventory item archived.
         </div>
-      ) : null}
+      )}
 
-      {errorMessage ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {errorMessage}
-        </div>
-      ) : null}
+      {errorMessage && (
+        <div className="app-alert-error">{errorMessage}</div>
+      )}
 
-      <form method="get" className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+      {/* SEARCH */}
+      <form method="get" className="app-search-panel">
+        <div className="grid gap-2 md:grid-cols-[1fr_160px_auto]">
           <input
             type="text"
             name="q"
             defaultValue={q}
             placeholder="Search player, title, set, card #..."
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
+            className="app-input"
           />
 
           <select
             name="status"
             defaultValue={statusFilter}
-            className="rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
+            className="app-select"
           >
             <option value="">All statuses</option>
             <option value="draft">Draft</option>
@@ -205,207 +161,143 @@ export default async function StartingInventoryPage({
             <option value="archived">Archived</option>
           </select>
 
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-            >
+          <div className="flex gap-2">
+            <button type="submit" className="app-button-primary">
               Search
             </button>
 
-            {q || statusFilter ? (
-              <Link
-                href="/app/starting-inventory"
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-              >
+            {(q || statusFilter) && (
+              <Link href="/app/starting-inventory" className="app-button">
                 Clear
               </Link>
-            ) : null}
+            )}
           </div>
         </div>
       </form>
 
-      {error ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+      {error && (
+        <div className="app-alert-error">
           Error loading starting inventory: {error.message}
         </div>
-      ) : null}
+      )}
 
-      <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-zinc-950 text-zinc-400">
+      {/* TABLE */}
+      <div className="app-table-wrap">
+        <div className="app-table-scroll">
+          <table className="app-table">
+            <thead className="app-thead">
               <tr>
-                <th className="px-4 py-3 text-left font-medium">Card</th>
-                <th className="px-4 py-3 text-left font-medium">Status</th>
-                <th className="px-4 py-3 text-left font-medium">Destination</th>
-                <th className="px-4 py-3 text-left font-medium">Qty</th>
-                <th className="px-4 py-3 text-left font-medium">Unit Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Total Cost</th>
-                <th className="px-4 py-3 text-left font-medium">Est. Value</th>
-                <th className="px-4 py-3 text-left font-medium">Method</th>
-                <th className="px-4 py-3 text-left font-medium">Actions</th>
+                <th className="app-th">Card</th>
+                <th className="app-th">Status</th>
+                <th className="app-th">Destination</th>
+                <th className="app-th">Qty</th>
+                <th className="app-th">Unit Cost</th>
+                <th className="app-th">Total Cost</th>
+                <th className="app-th">Est. Value</th>
+                <th className="app-th">Method</th>
+                <th className="app-th">Actions</th>
               </tr>
             </thead>
 
             <tbody>
               {items.map((item) => {
-                const itemLine = [
-                  item.title || item.player_name || 'Untitled item',
+                const isDraft = item.status === 'draft'
+                const isImported = item.status === 'imported'
+                const isArchived = item.status === 'archived'
+
+                const display = [
                   item.year,
-                  item.brand,
                   item.set_name,
+                  item.player_name,
                   item.card_number ? `#${item.card_number}` : null,
                   item.parallel_name,
                 ]
                   .filter(Boolean)
                   .join(' • ')
 
-                const isImported = item.status === 'imported' && !!item.imported_inventory_item_id
-                const isDraft = item.status === 'draft'
-                const isArchived = item.status === 'archived'
-
                 return (
-                  <tr key={item.id} className="border-t border-zinc-800 align-top">
-                    <td className="px-4 py-3">
+                  <tr key={item.id} className="app-tr">
+                    <td className="app-td">
                       <div className="font-medium">
-                        {item.title || item.player_name || 'Untitled item'}
+                        {item.title || item.player_name || 'Untitled'}
                       </div>
-                      <div className="text-zinc-400">{itemLine}</div>
-
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-500">
-                        {item.item_type ? (
-                          <span className="rounded-full border border-zinc-800 px-2 py-1">
-                            {formatLabel(item.item_type)}
-                          </span>
-                        ) : null}
-
-                        {item.storage_location ? (
-                          <span className="rounded-full border border-zinc-800 px-2 py-1">
-                            {item.storage_location}
-                          </span>
-                        ) : null}
-                      </div>
+                      <div className="text-zinc-400">{display}</div>
                     </td>
 
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${statusBadgeClass(
-                          item.status
-                        )}`}
-                      >
-                        {formatLabel(item.status)}
-                      </span>
+                    <td className="app-td capitalize">
+                      {formatLabel(item.status)}
                     </td>
 
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${destinationBadgeClass(
-                          item.destination
-                        )}`}
-                      >
-                        {formatLabel(item.destination)}
-                      </span>
+                    <td className="app-td capitalize">
+                      {formatLabel(item.destination)}
                     </td>
 
-                    <td className="px-4 py-3">{item.quantity ?? 0}</td>
-                    <td className="px-4 py-3">{money(item.cost_basis_unit)}</td>
-                    <td className="px-4 py-3">{money(item.cost_basis_total)}</td>
-                    <td className="px-4 py-3">{money(item.estimated_value_total)}</td>
-                    <td className="px-4 py-3 capitalize text-zinc-300">
+                    <td className="app-td">{item.quantity ?? 0}</td>
+                    <td className="app-td">{money(item.cost_basis_unit)}</td>
+                    <td className="app-td">{money(item.cost_basis_total)}</td>
+                    <td className="app-td">{money(item.estimated_value_total)}</td>
+                    <td className="app-td capitalize">
                       {formatLabel(item.cost_basis_method)}
                     </td>
 
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-3">
-                        {isDraft ? (
+                    <td className="app-td">
+                      <div className="flex flex-wrap gap-1.5">
+                        {isDraft && (
                           <>
                             <Link
                               href={`/app/starting-inventory/${item.id}/edit`}
-                              className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                              className="app-button"
                             >
                               Edit
                             </Link>
 
                             <form action={importStartingInventoryItemAction}>
-                              <input
-                                type="hidden"
-                                name="starting_inventory_item_id"
-                                value={item.id}
-                              />
-                              <button
-                                type="submit"
-                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
-                              >
-                                Import to Inventory
+                              <input type="hidden" name="starting_inventory_item_id" value={item.id} />
+                              <button type="submit" className="app-button">
+                                Import
                               </button>
                             </form>
 
                             <form action={archiveStartingInventoryItemAction}>
-                              <input
-                                type="hidden"
-                                name="starting_inventory_item_id"
-                                value={item.id}
-                              />
-                              <button
-                                type="submit"
-                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
-                              >
+                              <input type="hidden" name="starting_inventory_item_id" value={item.id} />
+                              <button type="submit" className="app-button">
                                 Archive
                               </button>
                             </form>
                           </>
-                        ) : null}
+                        )}
 
-                        {isImported ? (
+                        {isImported && item.imported_inventory_item_id && (
                           <>
-                            <div className="inline-flex rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-1.5 text-xs font-medium text-emerald-200">
-                              Imported
-                            </div>
+                            <span className="app-badge app-badge-success">Imported</span>
 
                             <Link
                               href={`/app/inventory/${item.imported_inventory_item_id}`}
-                              className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                              className="app-button"
                             >
-                              View Imported Item
+                              View
                             </Link>
-
-                            <form action={archiveStartingInventoryItemAction}>
-                              <input
-                                type="hidden"
-                                name="starting_inventory_item_id"
-                                value={item.id}
-                              />
-                              <button
-                                type="submit"
-                                className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 hover:bg-zinc-800"
-                              >
-                                Archive
-                              </button>
-                            </form>
                           </>
-                        ) : null}
+                        )}
 
-                        {isArchived ? (
-                          <div className="inline-flex rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300">
+                        {isArchived && (
+                          <span className="app-badge app-badge-neutral">
                             Archived
-                          </div>
-                        ) : null}
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
                 )
               })}
 
-              {items.length === 0 ? (
+              {items.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-10 text-center text-zinc-400">
-                    {q || statusFilter
-                      ? 'No starting inventory items match your search.'
-                      : 'No starting inventory items found.'}
+                    No items found.
                   </td>
                 </tr>
-              ) : null}
+              )}
             </tbody>
           </table>
         </div>

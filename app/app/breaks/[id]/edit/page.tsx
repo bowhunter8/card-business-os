@@ -72,47 +72,35 @@ export default async function EditBreakPage({
   const item = response.data as BreakRow
 
   return (
-    <div className="max-w-5xl">
-      <div className="flex items-center justify-between gap-4">
+    <div className="app-page max-w-5xl">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">Edit Break</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Edit Break</h1>
+          <p className="app-subtitle">
             Update this break just like a normal break entry.
           </p>
         </div>
 
-        <div className="flex gap-3">
-          <Link
-            href={`/app/breaks/${item.id}`}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+        <div className="flex flex-wrap gap-2">
+          <Link href={`/app/breaks/${item.id}`} className="app-button">
             Back to Break
           </Link>
-          <Link
-            href="/app/breaks"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href="/app/breaks" className="app-button">
             All Breaks
           </Link>
         </div>
       </div>
 
       {item.reversed_at ? (
-        <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/40 px-4 py-3 text-sm text-yellow-300">
-          Reversed breaks cannot be edited.
-        </div>
+        <div className="app-alert-warning">Reversed breaks cannot be edited.</div>
       ) : null}
 
-      {error ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {error}
-        </div>
-      ) : null}
+      {error ? <div className="app-alert-error">{error}</div> : null}
 
       {!item.reversed_at ? (
         <form
           action={updateBreakAction}
-          className="mt-6 grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 md:grid-cols-2"
+          className="app-section grid gap-3 md:grid-cols-2"
         >
           <input type="hidden" name="break_id" value={item.id} />
 
@@ -123,7 +111,7 @@ export default async function EditBreakPage({
               type="date"
               required
               defaultValue={item.break_date}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -134,7 +122,7 @@ export default async function EditBreakPage({
               type="text"
               required
               defaultValue={item.source_name || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -145,7 +133,7 @@ export default async function EditBreakPage({
               type="text"
               required
               defaultValue={item.product_name || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -155,7 +143,7 @@ export default async function EditBreakPage({
               name="order_number"
               type="text"
               defaultValue={item.order_number || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -166,7 +154,7 @@ export default async function EditBreakPage({
               type="number"
               min={0}
               defaultValue={Number(item.cards_received ?? 0)}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -176,7 +164,7 @@ export default async function EditBreakPage({
               name="format_type"
               type="text"
               defaultValue={item.format_type || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -186,7 +174,7 @@ export default async function EditBreakPage({
               name="teams"
               type="text"
               defaultValue={item.teams?.join(', ') || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -199,7 +187,7 @@ export default async function EditBreakPage({
               step="0.01"
               defaultValue={Number(item.purchase_price ?? 0).toFixed(2)}
               required
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -212,7 +200,7 @@ export default async function EditBreakPage({
               step="0.01"
               defaultValue={Number(item.sales_tax ?? 0).toFixed(2)}
               required
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -225,7 +213,7 @@ export default async function EditBreakPage({
               step="0.01"
               defaultValue={Number(item.shipping_cost ?? 0).toFixed(2)}
               required
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -238,7 +226,7 @@ export default async function EditBreakPage({
               step="0.01"
               defaultValue={Number(item.other_fees ?? 0).toFixed(2)}
               required
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -247,7 +235,7 @@ export default async function EditBreakPage({
             <select
               name="allocation_method"
               defaultValue={item.allocation_method || 'equal_per_item'}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-select"
             >
               <option value="equal_per_item">Equal Per Item</option>
               <option value="equal_per_sellable_item">Equal Per Sellable Item</option>
@@ -257,7 +245,7 @@ export default async function EditBreakPage({
             </select>
           </div>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+          <div className="app-card-tight">
             <div className="text-sm font-medium text-zinc-200">Edit notes</div>
             <div className="mt-2 space-y-1 text-sm text-zinc-400">
               <p>Update source, costs, and order info</p>
@@ -272,21 +260,15 @@ export default async function EditBreakPage({
               name="notes"
               rows={5}
               defaultValue={item.notes || ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-textarea"
             />
           </div>
 
-          <div className="md:col-span-2 flex justify-end gap-3 pt-2">
-            <Link
-              href={`/app/breaks/${item.id}`}
-              className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-            >
+          <div className="md:col-span-2 flex justify-end gap-2 pt-1">
+            <Link href={`/app/breaks/${item.id}`} className="app-button">
               Cancel
             </Link>
-            <button
-              type="submit"
-              className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
-            >
+            <button type="submit" className="app-button-primary">
               Save Changes
             </button>
           </div>

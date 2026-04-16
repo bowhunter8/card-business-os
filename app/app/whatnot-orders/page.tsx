@@ -178,136 +178,115 @@ export default async function WhatnotOrdersPage({
         : 'Imported Whatnot buyer orders. This is your staging area before grouping orders into breaks.'
 
   return (
-    <div className="max-w-7xl space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">{pageTitle}</h1>
-          <p className="mt-2 text-zinc-400">{pageDescription}</p>
+          <h1 className="app-title">{pageTitle}</h1>
+          <p className="app-subtitle">{pageDescription}</p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <Link
-            href="/app/imports/whatnot"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+        <div className="flex flex-wrap gap-2">
+          <Link href="/app/imports/whatnot" className="app-button">
             Import More
           </Link>
-          <Link
-            href="/app/utilities"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href="/app/utilities" className="app-button">
             Back to Utilities
           </Link>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2">
         <Link
           href="/app/whatnot-orders"
-          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
-            qRaw === ''
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
-          }`}
+          className={`app-chip ${qRaw === '' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           All Orders
         </Link>
         <Link
           href="/app/whatnot-orders?q=unassigned"
-          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
-            qRaw === 'unassigned'
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
-          }`}
+          className={`app-chip ${qRaw === 'unassigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Unassigned
         </Link>
         <Link
           href="/app/whatnot-orders?q=assigned"
-          className={`rounded-xl border px-4 py-2 text-sm hover:bg-zinc-800 ${
-            qRaw === 'assigned'
-              ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-              : 'border-zinc-700 text-zinc-300'
-          }`}
+          className={`app-chip ${qRaw === 'assigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Assigned
         </Link>
       </div>
 
       {error ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="app-alert-error">
           Order load error: {error.message}
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Total Orders</div>
-          <div className="mt-2 text-3xl font-semibold">{totalOrders}</div>
+          <div className="mt-1 text-2xl font-semibold">{totalOrders}</div>
         </div>
 
         <Link
           href="/app/whatnot-orders?q=unassigned"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Unassigned</div>
-          <div className="mt-2 text-3xl font-semibold">{unassignedOrders.length}</div>
+          <div className="mt-1 text-2xl font-semibold">{unassignedOrders.length}</div>
         </Link>
 
         <Link
           href="/app/whatnot-orders?q=assigned"
-          className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 transition hover:bg-zinc-800"
+          className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Assigned to Break</div>
-          <div className="mt-2 text-3xl font-semibold">{assignedOrders.length}</div>
+          <div className="mt-1 text-2xl font-semibold">{assignedOrders.length}</div>
         </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Subtotal</div>
-          <div className="mt-2 text-3xl font-semibold">{money(subtotalTotal)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(subtotalTotal)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Shipping</div>
-          <div className="mt-2 text-3xl font-semibold">{money(shippingTotal)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(shippingTotal)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Total Paid</div>
-          <div className="mt-2 text-3xl font-semibold">{money(totalPaid)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(totalPaid)}</div>
         </div>
       </div>
 
       {suggestedGroups.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center justify-between gap-4">
+        <div className="app-section">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-semibold">Suggested Groups</h2>
-              <p className="mt-1 text-sm text-zinc-400">
+              <h2 className="text-lg font-semibold">Suggested Groups</h2>
+              <p className="mt-0.5 text-sm text-zinc-400">
                 Auto-grouped by seller and date. These are suggestions only.
               </p>
             </div>
 
-            <div className="text-sm text-zinc-500">
+            <div className="text-xs text-zinc-500">
               Showing groups with 2+ unassigned orders
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4">
+          <div className="mt-4 grid gap-3">
             {suggestedGroups.map((group) => (
-              <div
-                key={group.key}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <div className="text-xl font-semibold">
+              <div key={group.key} className="app-card-tight">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="min-w-0">
+                    <div className="text-lg font-semibold leading-snug">
                       {group.seller} — {group.dateLabel}
                     </div>
-                    <div className="mt-2 text-sm text-zinc-400">
+                    <div className="mt-1 text-sm text-zinc-400">
                       {group.orderCount} orders suggested for one break
                     </div>
-                    <div className="mt-1 text-sm text-zinc-500">
+                    <div className="mt-0.5 text-sm text-zinc-500">
                       Total paid {money(group.total)}
                     </div>
                   </div>
@@ -315,7 +294,7 @@ export default async function WhatnotOrdersPage({
                   <div className="flex flex-wrap gap-2">
                     <Link
                       href={`/app/search?q=${encodeURIComponent(group.seller)}`}
-                      className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+                      className="app-button"
                     >
                       Search Seller
                     </Link>
@@ -327,11 +306,11 @@ export default async function WhatnotOrdersPage({
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <div className="flex items-center justify-between gap-4">
+      <div className="app-section">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-semibold">Orders</h2>
-            <p className="mt-1 text-sm text-zinc-400">
+            <h2 className="text-lg font-semibold">Orders</h2>
+            <p className="mt-0.5 text-sm text-zinc-400">
               {qRaw === 'unassigned'
                 ? 'Showing only unassigned orders.'
                 : qRaw === 'assigned'
@@ -340,98 +319,82 @@ export default async function WhatnotOrdersPage({
             </p>
           </div>
 
-          <div className="text-sm text-zinc-500">
+          <div className="text-xs text-zinc-500">
             {filteredOrders.length} shown
           </div>
         </div>
 
         {filteredOrders.length === 0 ? (
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-950 p-8 text-sm text-zinc-400">
+          <div className="app-empty mt-4">
             No orders found for this view.
           </div>
         ) : (
-          <div className="mt-6 grid gap-4">
+          <div className="mt-4 grid gap-3">
             {filteredOrders.map((order) => (
-              <div
-                key={order.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div key={order.id} className="app-card-tight">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       {order.break_id ? (
-                        <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                          Linked
-                        </span>
+                        <span className="app-badge app-badge-success">Linked</span>
                       ) : (
-                        <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                          Unassigned
-                        </span>
+                        <span className="app-badge app-badge-warning">Unassigned</span>
                       )}
 
                       {order.order_status ? (
-                        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300">
+                        <span className="app-badge app-badge-neutral">
                           {order.order_status}
                         </span>
                       ) : null}
                     </div>
 
-                    <div className="mt-2 text-lg font-semibold">
+                    <div className="mt-1.5 text-base font-semibold leading-snug">
                       {order.product_name || 'Untitled order'}
                     </div>
 
-                    <div className="mt-2 text-sm text-zinc-300">
+                    <div className="mt-1 text-sm text-zinc-300">
                       Seller: {order.seller || '—'}
                     </div>
 
-                    <div className="mt-1 text-sm text-zinc-300">
+                    <div className="mt-0.5 text-sm text-zinc-300">
                       Buyer: {order.buyer || '—'}
                     </div>
 
-                    <div className="mt-1 text-sm text-zinc-300">
+                    <div className="mt-0.5 text-sm text-zinc-300 break-words">
                       Order #: {order.order_numeric_id || order.order_id || '—'}
                     </div>
 
-                    <div className="mt-1 text-sm text-zinc-300">
+                    <div className="mt-0.5 text-sm text-zinc-300">
                       Date: {order.processed_date_display || order.processed_date || '—'}
                     </div>
 
-                    <div className="mt-1 text-sm text-zinc-300">
+                    <div className="mt-0.5 text-sm text-zinc-300">
                       Qty: {order.quantity ?? '—'}
                     </div>
 
-                    <div className="mt-1 text-sm text-zinc-300">
+                    <div className="mt-0.5 text-sm text-zinc-300">
                       Total: {money(order.total)}
                     </div>
 
                     {order.source_file_name ? (
-                      <div className="mt-1 text-xs text-zinc-500">
+                      <div className="mt-0.5 text-xs text-zinc-500 break-words">
                         Source file: {order.source_file_name}
                       </div>
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      href={buildFocusHref(order)}
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
+                  <div className="flex flex-wrap gap-1.5">
+                    <Link href={buildFocusHref(order)} className="app-button">
                       Open Order
                     </Link>
 
                     {order.break_id ? (
                       <>
-                        <Link
-                          href={`/app/breaks/${order.break_id}`}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                        >
+                        <Link href={`/app/breaks/${order.break_id}`} className="app-button">
                           Break Details
                         </Link>
 
-                        <Link
-                          href={`/app/breaks/${order.break_id}/edit`}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                        >
+                        <Link href={`/app/breaks/${order.break_id}/edit`} className="app-button">
                           Edit Break
                         </Link>
                       </>
@@ -440,7 +403,7 @@ export default async function WhatnotOrdersPage({
                         href={`/app/search?q=${encodeURIComponent(
                           order.order_numeric_id || order.order_id || order.seller || ''
                         )}`}
-                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                        className="app-button"
                       >
                         Search Related
                       </Link>

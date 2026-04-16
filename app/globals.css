@@ -19,8 +19,170 @@
   }
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+@layer components {
+  .app-page {
+    @apply w-full space-y-4;
+  }
+
+  .app-page-wide {
+    @apply w-full space-y-4;
+  }
+
+  .app-page-header {
+    @apply flex flex-col gap-2 md:flex-row md:items-end md:justify-between;
+  }
+
+  .app-title {
+    @apply text-2xl font-semibold;
+  }
+
+  .app-subtitle {
+    @apply mt-0.5 text-sm text-zinc-400;
+  }
+
+  .app-section {
+    @apply rounded-xl border border-zinc-800 bg-zinc-900 p-4;
+  }
+
+  .app-section-tight {
+    @apply rounded-lg border border-zinc-800 bg-zinc-950 p-3;
+  }
+
+  .app-card {
+    @apply rounded-xl border border-zinc-800 bg-zinc-900 p-3;
+  }
+
+  .app-card-tight {
+    @apply rounded-lg border border-zinc-800 bg-zinc-950 p-3;
+  }
+
+  .app-metric-card {
+    @apply rounded-xl border border-zinc-800 bg-zinc-900 p-3;
+  }
+
+  .app-chip {
+    @apply rounded-lg border px-3 py-1 text-sm hover:bg-zinc-800;
+  }
+
+  .app-chip-active {
+    @apply border-zinc-500 bg-zinc-800 text-zinc-100;
+  }
+
+  .app-chip-idle {
+    @apply border-zinc-700 text-zinc-300;
+  }
+
+  .app-button {
+    @apply inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800;
+  }
+
+  .app-button-primary {
+    @apply inline-flex rounded-lg bg-white px-4 py-1.5 text-sm font-medium text-black hover:bg-zinc-200;
+  }
+
+  .app-button-danger {
+    @apply inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm text-red-200 hover:bg-red-950;
+  }
+
+  .app-button-warning {
+    @apply inline-flex rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-1.5 text-sm text-yellow-200;
+  }
+
+  .app-input {
+    @apply w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500;
+  }
+
+  .app-select {
+    @apply w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100;
+  }
+
+  .app-textarea {
+    @apply w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500;
+  }
+
+  .app-search-panel {
+    @apply rounded-xl border border-zinc-800 bg-zinc-900 p-2.5;
+  }
+
+  .app-table-wrap {
+    @apply overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900;
+  }
+
+  .app-table-scroll {
+    @apply overflow-x-auto;
+  }
+
+  .app-table {
+    @apply min-w-full text-sm;
+  }
+
+  .app-thead {
+    @apply bg-zinc-950 text-zinc-400;
+  }
+
+  .app-th {
+    @apply px-2.5 py-2 text-left font-medium;
+  }
+
+  .app-td {
+    @apply px-2.5 py-2 align-top;
+  }
+
+  .app-tr {
+    @apply border-t border-zinc-800;
+  }
+
+  .app-badge {
+    @apply inline-flex rounded-full border px-2 py-0.5 text-xs;
+  }
+
+  .app-badge-success {
+    @apply border-emerald-800 bg-emerald-950/40 text-emerald-300;
+  }
+
+  .app-badge-info {
+    @apply border-blue-800 bg-blue-950/40 text-blue-300;
+  }
+
+  .app-badge-warning {
+    @apply border-yellow-800 bg-yellow-950/40 text-yellow-300;
+  }
+
+  .app-badge-danger {
+    @apply border-red-800 bg-red-950/40 text-red-300;
+  }
+
+  .app-badge-neutral {
+    @apply border-zinc-700 bg-zinc-800 text-zinc-300;
+  }
+
+  .app-empty {
+    @apply rounded-lg border border-zinc-800 bg-zinc-950 p-6 text-sm text-zinc-400;
+  }
+
+  .app-alert-error {
+    @apply rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300;
+  }
+
+  .app-alert-success {
+    @apply rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300;
+  }
+
+  .app-alert-warning {
+    @apply rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-200;
+  }
+
+  .app-alert-info {
+    @apply rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200;
+  }
 }

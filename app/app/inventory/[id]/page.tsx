@@ -94,39 +94,23 @@ function buildDisplay(item: InventoryItem) {
 
 function renderStatusPill(status: string | null) {
   if (status === 'available') {
-    return (
-      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-        For Sale
-      </span>
-    )
+    return <span className="app-badge app-badge-success">For Sale</span>
   }
 
   if (status === 'listed') {
-    return (
-      <span className="rounded-full border border-purple-800 bg-purple-950/40 px-2 py-1 text-xs text-purple-300">
-        Listed
-      </span>
-    )
+    return <span className="app-badge app-badge-info">Listed</span>
   }
 
   if (status === 'personal') {
-    return (
-      <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
-        Personal
-      </span>
-    )
+    return <span className="app-badge app-badge-info">Personal</span>
   }
 
   if (status === 'junk') {
-    return (
-      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
-        Junk
-      </span>
-    )
+    return <span className="app-badge app-badge-neutral">Junk</span>
   }
 
   return (
-    <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 capitalize">
+    <span className="app-badge app-badge-neutral capitalize">
       {(status || 'unknown').replaceAll('_', ' ')}
     </span>
   )
@@ -150,7 +134,7 @@ function EditableField({
   formId: string
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <div className="app-metric-card">
       <label className="text-sm text-zinc-400" htmlFor={name}>
         {label}
       </label>
@@ -162,7 +146,7 @@ function EditableField({
         step={step}
         min={min}
         defaultValue={defaultValue}
-        className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xl font-semibold"
+        className="app-input mt-2"
       />
     </div>
   )
@@ -176,9 +160,9 @@ function ReadonlyMetric({
   value: string | number
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <div className="app-metric-card">
       <div className="text-sm text-zinc-400">{label}</div>
-      <div className="mt-2 text-xl font-semibold">{value}</div>
+      <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   )
 }
@@ -195,7 +179,7 @@ function EditableSelect({
   formId: string
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <div className="app-metric-card">
       <label className="text-sm text-zinc-400" htmlFor={name}>
         {label}
       </label>
@@ -204,7 +188,7 @@ function EditableSelect({
         form={formId}
         name={name}
         defaultValue={defaultValue}
-        className="mt-2 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-lg font-semibold text-zinc-100"
+        className="app-select mt-2"
       >
         <option value="available">For Sale</option>
         <option value="listed">Listed</option>
@@ -325,51 +309,41 @@ export default async function InventoryDetailPage({
   const itemFormId = 'inventory-inline-edit-form'
 
   return (
-    <div>
+    <div className="app-page-wide">
       <form id={itemFormId} action={updateInventoryItemAction}>
         <input type="hidden" name="inventory_item_id" value={item.id} />
       </form>
 
-      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+      <div className="app-page-header">
         <div>
-          <div className="mb-2">
+          <div className="mb-1">
             <Link href="/app/inventory" className="text-sm text-zinc-400 hover:underline">
               ← Back to Inventory
             </Link>
           </div>
 
-          <h1 className="text-3xl font-semibold">Inventory Item</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Inventory Item</h1>
+          <p className="app-subtitle">
             {buildDisplay(item) || item.title || 'Untitled item'}
           </p>
-          <div className="mt-3">{renderStatusPill(item.status)}</div>
+          <div className="mt-2">{renderStatusPill(item.status)}</div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            form={itemFormId}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+        <div className="flex flex-wrap gap-2">
+          <button type="submit" form={itemFormId} className="app-button">
             Save Changes
           </button>
 
-          <Link
-            href={`/app/inventory/${item.id}/edit`}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
             Edit Page
           </Link>
 
           {hasAvailableToSell ? (
-            <Link
-              href={`/app/inventory/${item.id}/sell`}
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-            >
+            <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
               Sell Item
             </Link>
           ) : latestActiveSale ? (
-            <form action={reverseSaleAction} className="space-y-2">
+            <form action={reverseSaleAction}>
               <input type="hidden" name="sale_id" value={latestActiveSale.id} />
               <input type="hidden" name="inventory_item_id" value={item.id} />
               <input
@@ -377,10 +351,7 @@ export default async function InventoryDetailPage({
                 name="reversal_reason"
                 value="Quick reverse from inventory item header"
               />
-              <button
-                type="submit"
-                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 font-medium text-red-200 hover:bg-red-950"
-              >
+              <button type="submit" className="app-button-danger">
                 Reverse Sale
               </button>
             </form>
@@ -391,10 +362,7 @@ export default async function InventoryDetailPage({
               <input type="hidden" name="inventory_item_id" value={item.id} />
               <input type="hidden" name="return_to" value="inventory" />
               <input type="hidden" name="break_id" value={item.source_break_id ?? ''} />
-              <button
-                type="submit"
-                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 font-medium text-red-200 hover:bg-red-950"
-              >
+              <button type="submit" className="app-button-danger">
                 Delete Item
               </button>
             </form>
@@ -402,37 +370,28 @@ export default async function InventoryDetailPage({
         </div>
       </div>
 
-      {errorMessage ? (
-        <div className="mb-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      {successMessage ? (
-        <div className="mb-6 rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
-          {successMessage}
-        </div>
-      ) : null}
+      {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
+      {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
 
       {!canDelete ? (
-        <div className="mb-6 rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-200">
+        <div className="app-alert-warning">
           This item cannot be deleted while it has active sales. Reverse the sale first.
         </div>
       ) : null}
 
       {item.status === 'junk' ? (
-        <div className="mb-6 rounded-xl border border-zinc-700 bg-zinc-900/70 px-4 py-3 text-sm text-zinc-300">
+        <div className="app-alert-info">
           This item is marked as Junk and is being kept for recordkeeping, not active selling.
         </div>
       ) : null}
 
       {item.status === 'personal' ? (
-        <div className="mb-6 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
+        <div className="app-alert-info">
           This item is marked as Personal Collection and is not currently part of your active sell inventory.
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-4">
         <EditableSelect
           label="Status"
           name="status"
@@ -450,13 +409,11 @@ export default async function InventoryDetailPage({
         />
 
         <ReadonlyMetric label="Available" value={item.available_quantity ?? 0} />
-
         <ReadonlyMetric label="Qty Sold" value={totalQtySold} />
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-4">
         <ReadonlyMetric label="Unit Cost" value={money(item.cost_basis_unit)} />
-
         <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
 
         <EditableField
@@ -472,20 +429,16 @@ export default async function InventoryDetailPage({
         <ReadonlyMetric label="Est. Value Total" value={money(item.estimated_value_total)} />
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-xl font-semibold">Quick Edit Item</h2>
+      <div className="app-section">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h2 className="text-lg font-semibold">Quick Edit Item</h2>
 
-          <button
-            type="submit"
-            form={itemFormId}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <button type="submit" form={itemFormId} className="app-button">
             Save Changes
           </button>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Title</label>
             <input
@@ -493,7 +446,7 @@ export default async function InventoryDetailPage({
               name="title"
               type="text"
               defaultValue={item.title ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -504,7 +457,7 @@ export default async function InventoryDetailPage({
               name="player_name"
               type="text"
               defaultValue={item.player_name ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -515,7 +468,7 @@ export default async function InventoryDetailPage({
               name="year"
               type="number"
               defaultValue={item.year ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -526,7 +479,7 @@ export default async function InventoryDetailPage({
               name="set_name"
               type="text"
               defaultValue={item.set_name ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -537,7 +490,7 @@ export default async function InventoryDetailPage({
               name="card_number"
               type="text"
               defaultValue={item.card_number ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -548,7 +501,7 @@ export default async function InventoryDetailPage({
               name="brand"
               type="text"
               defaultValue={item.brand ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -559,7 +512,7 @@ export default async function InventoryDetailPage({
               name="parallel_name"
               type="text"
               defaultValue={item.parallel_name ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -570,7 +523,7 @@ export default async function InventoryDetailPage({
               name="team"
               type="text"
               defaultValue={item.team ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -581,7 +534,7 @@ export default async function InventoryDetailPage({
               name="storage_location"
               type="text"
               defaultValue={item.storage_location ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -592,16 +545,16 @@ export default async function InventoryDetailPage({
               name="notes"
               rows={4}
               defaultValue={item.notes ?? ''}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-textarea"
             />
           </div>
         </div>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <h2 className="text-xl font-semibold">Listing Details</h2>
+      <div className="app-section">
+        <h2 className="text-lg font-semibold">Listing Details</h2>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           <Detail
             label="Listed Price"
             value={item.listed_price != null ? money(item.listed_price) : '—'}
@@ -610,7 +563,7 @@ export default async function InventoryDetailPage({
           <Detail label="Listed Date" value={formatDate(item.listed_date)} />
         </div>
 
-        <form action={updateInventoryListingAction} className="mt-6 grid gap-4 md:grid-cols-3">
+        <form action={updateInventoryListingAction} className="mt-4 grid gap-3 md:grid-cols-3">
           <input type="hidden" name="inventory_item_id" value={item.id} />
 
           <div>
@@ -624,7 +577,7 @@ export default async function InventoryDetailPage({
                 item.listed_price != null ? Number(item.listed_price).toFixed(2) : ''
               }
               placeholder="0.00"
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -635,7 +588,7 @@ export default async function InventoryDetailPage({
               type="text"
               defaultValue={item.listed_platform ?? ''}
               placeholder="eBay, Whatnot, Facebook, local..."
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
@@ -645,25 +598,22 @@ export default async function InventoryDetailPage({
               name="listed_date"
               type="date"
               defaultValue={formatDateInput(item.listed_date)}
-              className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+              className="app-input"
             />
           </div>
 
           <div className="md:col-span-3 flex justify-end">
-            <button
-              type="submit"
-              className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-            >
+            <button type="submit" className="app-button">
               Save Listing Details
             </button>
           </div>
         </form>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <h2 className="text-xl font-semibold">Card Details</h2>
+      <div className="app-section">
+        <h2 className="text-lg font-semibold">Card Details</h2>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
           <Detail label="Year" value={item.year?.toString() || '—'} />
           <Detail label="Set" value={item.set_name || '—'} />
           <Detail label="Player" value={item.player_name || '—'} />
@@ -685,10 +635,10 @@ export default async function InventoryDetailPage({
         ) : null}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <h2 className="text-xl font-semibold">Record Trail</h2>
+      <div className="app-section">
+        <h2 className="text-lg font-semibold">Record Trail</h2>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-4">
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
           <Detail label="Source Type" value={item.source_type || '—'} />
           <Detail label="Source Break ID" value={item.source_break_id || '—'} />
           <Detail label="Created" value={formatDate(item.created_at)} />
@@ -707,27 +657,27 @@ export default async function InventoryDetailPage({
         ) : null}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900">
-        <div className="border-b border-zinc-800 px-5 py-4">
-          <h2 className="text-xl font-semibold">Sales History</h2>
+      <div className="app-table-wrap">
+        <div className="border-b border-zinc-800 px-4 py-3">
+          <h2 className="text-lg font-semibold">Sales History</h2>
         </div>
 
         {sales.length === 0 ? (
-          <div className="px-5 py-8 text-zinc-400">No sales recorded for this item.</div>
+          <div className="px-4 py-8 text-zinc-400">No sales recorded for this item.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-950 text-zinc-400">
+          <div className="app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">Status</th>
-                  <th className="px-4 py-3 text-left font-medium">Sale Date</th>
-                  <th className="px-4 py-3 text-left font-medium">Qty</th>
-                  <th className="px-4 py-3 text-left font-medium">Gross</th>
-                  <th className="px-4 py-3 text-left font-medium">Net</th>
-                  <th className="px-4 py-3 text-left font-medium">COGS</th>
-                  <th className="px-4 py-3 text-left font-medium">Profit</th>
-                  <th className="px-4 py-3 text-left font-medium">Platform</th>
-                  <th className="px-4 py-3 text-left font-medium">Actions</th>
+                  <th className="app-th">Status</th>
+                  <th className="app-th">Sale Date</th>
+                  <th className="app-th">Qty</th>
+                  <th className="app-th">Gross</th>
+                  <th className="app-th">Net</th>
+                  <th className="app-th">COGS</th>
+                  <th className="app-th">Profit</th>
+                  <th className="app-th">Platform</th>
+                  <th className="app-th">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -735,8 +685,8 @@ export default async function InventoryDetailPage({
                   const reversed = !!sale.reversed_at
 
                   return (
-                    <tr key={sale.id} className="border-t border-zinc-800">
-                      <td className="px-4 py-3">
+                    <tr key={sale.id} className="app-tr">
+                      <td className="app-td">
                         {reversed ? (
                           <div>
                             <div className="text-yellow-300">Reversed</div>
@@ -748,14 +698,14 @@ export default async function InventoryDetailPage({
                           <span className="text-emerald-300">Active</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">{sale.sale_date || '—'}</td>
-                      <td className="px-4 py-3">{sale.quantity_sold ?? 0}</td>
-                      <td className="px-4 py-3">{money(sale.gross_sale)}</td>
-                      <td className="px-4 py-3">{money(sale.net_proceeds)}</td>
-                      <td className="px-4 py-3">{money(sale.cost_of_goods_sold)}</td>
-                      <td className="px-4 py-3">{money(sale.profit)}</td>
-                      <td className="px-4 py-3">{sale.platform || '—'}</td>
-                      <td className="px-4 py-3">
+                      <td className="app-td">{sale.sale_date || '—'}</td>
+                      <td className="app-td">{sale.quantity_sold ?? 0}</td>
+                      <td className="app-td">{money(sale.gross_sale)}</td>
+                      <td className="app-td">{money(sale.net_proceeds)}</td>
+                      <td className="app-td">{money(sale.cost_of_goods_sold)}</td>
+                      <td className="app-td">{money(sale.profit)}</td>
+                      <td className="app-td">{sale.platform || '—'}</td>
+                      <td className="app-td">
                         {reversed ? (
                           <div className="text-xs text-zinc-500">
                             {sale.reversal_reason || 'Already reversed'}
@@ -763,21 +713,14 @@ export default async function InventoryDetailPage({
                         ) : (
                           <form action={reverseSaleAction} className="space-y-2">
                             <input type="hidden" name="sale_id" value={sale.id} />
-                            <input
-                              type="hidden"
-                              name="inventory_item_id"
-                              value={item.id}
-                            />
+                            <input type="hidden" name="inventory_item_id" value={item.id} />
                             <textarea
                               name="reversal_reason"
                               rows={2}
                               placeholder="Optional reversal reason"
-                              className="w-full min-w-[220px] rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs"
+                              className="app-textarea min-w-[220px]"
                             />
-                            <button
-                              type="submit"
-                              className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-950"
-                            >
+                            <button type="submit" className="app-button-danger">
                               Reverse Sale
                             </button>
                           </form>
@@ -791,7 +734,7 @@ export default async function InventoryDetailPage({
           </div>
         )}
 
-        <div className="grid gap-4 border-t border-zinc-800 p-5 md:grid-cols-3">
+        <div className="grid gap-3 border-t border-zinc-800 p-4 md:grid-cols-3">
           <Detail label="Total Gross" value={money(totalGross)} />
           <Detail label="Total Net" value={money(totalNet)} />
           <Detail label="Total Profit" value={money(totalProfit)} />
@@ -803,9 +746,9 @@ export default async function InventoryDetailPage({
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+    <div className="app-card-tight">
       <div className="text-sm text-zinc-400">{label}</div>
-      <div className="mt-2 text-lg font-semibold">{value}</div>
+      <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   )
 }
