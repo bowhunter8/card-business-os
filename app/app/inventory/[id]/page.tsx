@@ -370,28 +370,28 @@ export default async function InventoryDetailPage({
         </div>
       </div>
 
-      {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
-      {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
+      {errorMessage ? <div className="app-alert-error mt-4">{errorMessage}</div> : null}
+      {successMessage ? <div className="app-alert-success mt-4">{successMessage}</div> : null}
 
       {!canDelete ? (
-        <div className="app-alert-warning">
+        <div className="app-alert-warning mt-4">
           This item cannot be deleted while it has active sales. Reverse the sale first.
         </div>
       ) : null}
 
       {item.status === 'junk' ? (
-        <div className="app-alert-info">
+        <div className="app-alert-info mt-4">
           This item is marked as Junk and is being kept for recordkeeping, not active selling.
         </div>
       ) : null}
 
       {item.status === 'personal' ? (
-        <div className="app-alert-info">
+        <div className="app-alert-info mt-4">
           This item is marked as Personal Collection and is not currently part of your active sell inventory.
         </div>
       ) : null}
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
         <EditableSelect
           label="Status"
           name="status"
@@ -412,7 +412,7 @@ export default async function InventoryDetailPage({
         <ReadonlyMetric label="Qty Sold" value={totalQtySold} />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
         <ReadonlyMetric label="Unit Cost" value={money(item.cost_basis_unit)} />
         <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
 
@@ -429,8 +429,8 @@ export default async function InventoryDetailPage({
         <ReadonlyMetric label="Est. Value Total" value={money(item.estimated_value_total)} />
       </div>
 
-      <div className="app-section">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="app-section mt-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <h2 className="text-lg font-semibold">Quick Edit Item</h2>
 
           <button type="submit" form={itemFormId} className="app-button">
@@ -438,7 +438,7 @@ export default async function InventoryDetailPage({
           </button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Title</label>
             <input
@@ -543,7 +543,7 @@ export default async function InventoryDetailPage({
             <textarea
               form={itemFormId}
               name="notes"
-              rows={4}
+              rows={3}
               defaultValue={item.notes ?? ''}
               className="app-textarea"
             />
@@ -551,10 +551,10 @@ export default async function InventoryDetailPage({
         </div>
       </div>
 
-      <div className="app-section">
+      <div className="app-section mt-4">
         <h2 className="text-lg font-semibold">Listing Details</h2>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
           <Detail
             label="Listed Price"
             value={item.listed_price != null ? money(item.listed_price) : '—'}
@@ -563,7 +563,7 @@ export default async function InventoryDetailPage({
           <Detail label="Listed Date" value={formatDate(item.listed_date)} />
         </div>
 
-        <form action={updateInventoryListingAction} className="mt-4 grid gap-3 md:grid-cols-3">
+        <form action={updateInventoryListingAction} className="mt-3 grid gap-3 md:grid-cols-3">
           <input type="hidden" name="inventory_item_id" value={item.id} />
 
           <div>
@@ -610,10 +610,10 @@ export default async function InventoryDetailPage({
         </form>
       </div>
 
-      <div className="app-section">
+      <div className="app-section mt-4">
         <h2 className="text-lg font-semibold">Card Details</h2>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
           <Detail label="Year" value={item.year?.toString() || '—'} />
           <Detail label="Set" value={item.set_name || '—'} />
           <Detail label="Player" value={item.player_name || '—'} />
@@ -626,7 +626,7 @@ export default async function InventoryDetailPage({
         </div>
 
         {item.notes ? (
-          <div className="mt-4">
+          <div className="mt-3">
             <div className="text-sm text-zinc-400">Notes</div>
             <div className="mt-2 whitespace-pre-wrap rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               {item.notes}
@@ -635,10 +635,10 @@ export default async function InventoryDetailPage({
         ) : null}
       </div>
 
-      <div className="app-section">
+      <div className="app-section mt-4">
         <h2 className="text-lg font-semibold">Record Trail</h2>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <Detail label="Source Type" value={item.source_type || '—'} />
           <Detail label="Source Break ID" value={item.source_break_id || '—'} />
           <Detail label="Created" value={formatDate(item.created_at)} />
@@ -646,7 +646,7 @@ export default async function InventoryDetailPage({
         </div>
 
         {item.source_break_id ? (
-          <div className="mt-4">
+          <div className="mt-3">
             <Link
               href={`/app/breaks/${item.source_break_id}`}
               className="text-sm text-zinc-300 hover:underline"
@@ -657,13 +657,13 @@ export default async function InventoryDetailPage({
         ) : null}
       </div>
 
-      <div className="app-table-wrap">
+      <div className="app-table-wrap mt-4">
         <div className="border-b border-zinc-800 px-4 py-3">
           <h2 className="text-lg font-semibold">Sales History</h2>
         </div>
 
         {sales.length === 0 ? (
-          <div className="px-4 py-8 text-zinc-400">No sales recorded for this item.</div>
+          <div className="px-4 py-6 text-zinc-400">No sales recorded for this item.</div>
         ) : (
           <div className="app-table-scroll">
             <table className="app-table">

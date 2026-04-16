@@ -208,17 +208,17 @@ function SectionLoading({
   rows?: number
 }) {
   return (
-    <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 animate-pulse">
-      <div className="h-7 w-56 rounded bg-zinc-800" />
+    <div className="app-section mt-4 animate-pulse">
+      <div className="h-6 w-48 rounded bg-zinc-800" />
       <div className="mt-2 h-4 w-72 rounded bg-zinc-900" />
 
-      <div className="mt-6 grid gap-4">
+      <div className="mt-4 grid gap-3">
         {Array.from({ length: rows }).map((_, i) => (
           <div
             key={`${title}-${i}`}
-            className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+            className="app-card-tight"
           >
-            <div className="h-5 w-48 rounded bg-zinc-800" />
+            <div className="h-5 w-40 rounded bg-zinc-800" />
             <div className="mt-3 h-4 w-64 rounded bg-zinc-900" />
             <div className="mt-2 h-4 w-40 rounded bg-zinc-900" />
           </div>
@@ -231,57 +231,57 @@ function SectionLoading({
 function MetricsLoading() {
   return (
     <div className="animate-pulse">
-      <div className="mt-8 grid gap-4 md:grid-cols-4">
+      <div className="mt-6 grid gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={`metrics-a-${i}`}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+            className="app-metric-card"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
-            <div className="mt-4 h-8 w-20 rounded bg-zinc-800" />
+            <div className="mt-3 h-8 w-20 rounded bg-zinc-800" />
           </div>
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={`metrics-b-${i}`}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+            className="app-metric-card"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
-            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+            <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
           </div>
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={`metrics-c-${i}`}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+            className="app-metric-card"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
-            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+            <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
           </div>
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <div
             key={`metrics-d-${i}`}
-            className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5"
+            className="app-metric-card"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
-            <div className="mt-4 h-8 w-24 rounded bg-zinc-800" />
+            <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
           </div>
         ))}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 app-section">
         <div className="h-4 w-40 rounded bg-zinc-800" />
-        <div className="mt-4 h-6 w-72 rounded bg-zinc-800" />
+        <div className="mt-3 h-6 w-72 rounded bg-zinc-800" />
       </div>
     </div>
   )
@@ -355,11 +355,11 @@ async function LinkedWhatnotOrdersSection({
   )
 
   return (
-    <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+    <div className="app-section mt-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold">Linked Whatnot Orders</h2>
-          <p className="mt-1 text-sm text-zinc-400">
+          <h2 className="text-lg font-semibold">Linked Whatnot Orders</h2>
+          <p className="mt-0.5 text-sm text-zinc-400">
             Orders grouped into this break from Whatnot imports.
           </p>
         </div>
@@ -370,46 +370,48 @@ async function LinkedWhatnotOrdersSection({
       </div>
 
       {linkedWhatnotOrders.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-500">
+        <div className="app-empty mt-4">
           No Whatnot orders linked to this break.
         </div>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="min-w-full text-sm">
-            <thead className="bg-zinc-950 text-zinc-400">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium">Order #</th>
-                <th className="px-4 py-3 text-left font-medium">Date</th>
-                <th className="px-4 py-3 text-left font-medium">Seller</th>
-                <th className="px-4 py-3 text-left font-medium">Product</th>
-                <th className="px-4 py-3 text-left font-medium">Subtotal</th>
-                <th className="px-4 py-3 text-left font-medium">Shipping</th>
-                <th className="px-4 py-3 text-left font-medium">Taxes</th>
-                <th className="px-4 py-3 text-left font-medium">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {linkedWhatnotOrders.map((order) => (
-                <tr key={order.id} className="border-t border-zinc-800">
-                  <td className="px-4 py-3">
-                    {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    {order.processed_date_display ||
-                      (order.processed_date
-                        ? new Date(order.processed_date).toLocaleDateString('en-US')
-                        : '—')}
-                  </td>
-                  <td className="px-4 py-3">{order.seller || '—'}</td>
-                  <td className="px-4 py-3">{order.product_name || '—'}</td>
-                  <td className="px-4 py-3">{money(order.subtotal)}</td>
-                  <td className="px-4 py-3">{money(order.shipping_price)}</td>
-                  <td className="px-4 py-3">{money(order.taxes)}</td>
-                  <td className="px-4 py-3">{money(order.total)}</td>
+        <div className="app-table-wrap mt-4">
+          <div className="app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
+                <tr>
+                  <th className="app-th">Order #</th>
+                  <th className="app-th">Date</th>
+                  <th className="app-th">Seller</th>
+                  <th className="app-th">Product</th>
+                  <th className="app-th">Subtotal</th>
+                  <th className="app-th">Shipping</th>
+                  <th className="app-th">Taxes</th>
+                  <th className="app-th">Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {linkedWhatnotOrders.map((order) => (
+                  <tr key={order.id} className="app-tr">
+                    <td className="app-td">
+                      {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
+                    </td>
+                    <td className="app-td">
+                      {order.processed_date_display ||
+                        (order.processed_date
+                          ? new Date(order.processed_date).toLocaleDateString('en-US')
+                          : '—')}
+                    </td>
+                    <td className="app-td">{order.seller || '—'}</td>
+                    <td className="app-td">{order.product_name || '—'}</td>
+                    <td className="app-td">{money(order.subtotal)}</td>
+                    <td className="app-td">{money(order.shipping_price)}</td>
+                    <td className="app-td">{money(order.taxes)}</td>
+                    <td className="app-td">{money(order.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -575,13 +577,13 @@ async function BreakCardsAndMetricsSection({
   return (
     <>
       {cardsError ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="app-alert-error mt-4">
           Error loading break cards: {cardsError.message}
         </div>
       ) : null}
 
       {showBulkConfirm ? (
-        <div className="mt-6 rounded-2xl border border-red-900 bg-red-950/30 p-5">
+        <div className="app-alert-error mt-4">
           <div className="text-sm text-red-300">Confirm Bulk Delete</div>
           <div className="mt-2 text-lg font-semibold text-red-100">
             Are you sure you want to delete these selected items?
@@ -607,7 +609,7 @@ async function BreakCardsAndMetricsSection({
                 </div>
               </div>
 
-              <form action={bulkDeleteInventoryItemsAction} className="mt-4 flex flex-wrap gap-3">
+              <form action={bulkDeleteInventoryItemsAction} className="mt-4 flex flex-wrap gap-2">
                 <input type="hidden" name="return_to" value="break" />
                 <input type="hidden" name="break_id" value={breakId} />
                 {deletableSelectedCards.map((card) => (
@@ -621,7 +623,7 @@ async function BreakCardsAndMetricsSection({
 
                 <button
                   type="submit"
-                  className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2 text-sm text-red-200 hover:bg-red-950"
+                  className="app-button-danger"
                 >
                   Yes, Delete Selected
                 </button>
@@ -629,7 +631,7 @@ async function BreakCardsAndMetricsSection({
                 <Link
                   href={cancelConfirmHref}
                   scroll={false}
-                  className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+                  className="app-button"
                 >
                   Cancel
                 </Link>
@@ -640,7 +642,7 @@ async function BreakCardsAndMetricsSection({
       ) : null}
 
       {showSingleConfirm && singleDeleteCard ? (
-        <div className="mt-6 rounded-2xl border border-red-900 bg-red-950/30 p-5">
+        <div className="app-alert-error mt-4">
           <div className="text-sm text-red-300">Confirm Delete</div>
           <div className="mt-2 text-lg font-semibold text-red-100">
             Are you sure you want to delete this item?
@@ -649,13 +651,13 @@ async function BreakCardsAndMetricsSection({
             {buildDisplay(singleDeleteCard) || singleDeleteCard.title || 'Untitled item'}
           </div>
 
-          <form action={deleteInventoryItemAction} className="mt-4 flex flex-wrap gap-3">
+          <form action={deleteInventoryItemAction} className="mt-4 flex flex-wrap gap-2">
             <input type="hidden" name="inventory_item_id" value={singleDeleteCard.id} />
             <input type="hidden" name="return_to" value="break" />
             <input type="hidden" name="break_id" value={breakId} />
             <button
               type="submit"
-              className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2 text-sm text-red-200 hover:bg-red-950"
+              className="app-button-danger"
             >
               Yes, Delete Item
             </button>
@@ -663,7 +665,7 @@ async function BreakCardsAndMetricsSection({
             <Link
               href={cancelConfirmHref}
               scroll={false}
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+              className="app-button"
             >
               Cancel
             </Link>
@@ -671,137 +673,137 @@ async function BreakCardsAndMetricsSection({
         </div>
       ) : null}
 
-      <div className="mt-8 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-6 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Cards Received</div>
-          <div className="mt-2 text-2xl font-semibold">{declaredCardsReceived}</div>
+          <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Cards Entered</div>
-          <div className="mt-2 text-2xl font-semibold">{cardsEntered}</div>
+          <div className="mt-1 text-2xl font-semibold">{cardsEntered}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Remaining To Enter</div>
-          <div className="mt-2 text-2xl font-semibold">{remainingToEnter}</div>
+          <div className="mt-1 text-2xl font-semibold">{remainingToEnter}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Cards Available</div>
-          <div className="mt-2 text-2xl font-semibold">{availableCards}</div>
+          <div className="mt-1 text-2xl font-semibold">{availableCards}</div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Allocated Cost</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(totalAllocatedCost)}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Estimated Value</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(totalEstimatedValue)}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Cards Sold</div>
-          <div className="mt-2 text-2xl font-semibold">{cardsSold}</div>
+          <div className="mt-1 text-2xl font-semibold">{cardsSold}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">ROI</div>
-          <div className="mt-2 text-2xl font-semibold">{percent(breakROI)}</div>
+          <div className="mt-1 text-2xl font-semibold">{percent(breakROI)}</div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-5">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Total Sales</div>
-          <div className="mt-2 text-2xl font-semibold">{money(totalSales)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(totalSales)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Total Fees</div>
-          <div className="mt-2 text-2xl font-semibold">{money(totalFees)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(totalFees)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Net Proceeds</div>
-          <div className="mt-2 text-2xl font-semibold">{money(totalNetProceeds)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(totalNetProceeds)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Realized COGS</div>
-          <div className="mt-2 text-2xl font-semibold">{money(realizedCOGS)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(realizedCOGS)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Net Profit</div>
-          <div className="mt-2 text-2xl font-semibold">{money(realizedProfit)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(realizedProfit)}</div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Remaining Value</div>
-          <div className="mt-2 text-2xl font-semibold">{money(remainingEstimatedValue)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(remainingEstimatedValue)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Projected Profit</div>
-          <div className="mt-2 text-2xl font-semibold">{money(projectedProfit)}</div>
+          <div className="mt-1 text-2xl font-semibold">{money(projectedProfit)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Projected ROI</div>
-          <div className="mt-2 text-2xl font-semibold">{percent(projectedROI)}</div>
+          <div className="mt-1 text-2xl font-semibold">{percent(projectedROI)}</div>
         </div>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 app-section">
         <div className="text-sm text-zinc-400">Break Status</div>
-        <div className="mt-2 text-lg font-semibold">{breakStatus}</div>
+        <div className="mt-1 text-lg font-semibold">{breakStatus}</div>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 app-section">
         <div className="text-sm text-zinc-400">Unsold Cards Outlook</div>
-        <div className="mt-2 text-lg font-semibold">
+        <div className="mt-1 text-lg font-semibold">
           {availableCards > 0
             ? `${availableCards} card(s) still contribute upside`
             : 'No remaining cards from this break'}
         </div>
       </div>
 
-      <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900">
-        <div className="flex flex-col gap-4 border-b border-zinc-800 px-5 py-4 md:flex-row md:items-center md:justify-between">
+      <div className="mt-6 app-table-wrap">
+        <div className="flex flex-col gap-3 border-b border-zinc-800 px-4 py-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-xl font-semibold">Cards From This Break</h2>
+            <h2 className="text-lg font-semibold">Cards From This Break</h2>
             {!reversedAt ? (
-              <div className="mt-1 text-sm text-zinc-400">
+              <div className="mt-0.5 text-sm text-zinc-400">
                 Select multiple cards with the checkboxes, then bulk delete the selected rows.
               </div>
             ) : null}
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             {!reversedAt ? (
               <>
                 <button
                   type="submit"
                   form={bulkSelectionFormId}
-                  className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm text-red-200 hover:bg-red-950"
+                  className="app-button-danger"
                 >
                   Delete Selected
                 </button>
 
                 <Link
                   href={`/app/breaks/${breakId}/add-cards`}
-                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                  className="app-button"
                 >
                   Add More Cards
                 </Link>
@@ -822,14 +824,14 @@ async function BreakCardsAndMetricsSection({
           </form>
         ) : null}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-zinc-950 text-zinc-400">
+        <div className="app-table-scroll">
+          <table className="app-table">
+            <thead className="app-thead">
               <tr>
                 {!reversedAt ? (
-                  <th className="px-4 py-3 text-left font-medium">Select</th>
+                  <th className="app-th">Select</th>
                 ) : null}
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Status"
@@ -838,7 +840,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Type"
@@ -847,7 +849,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Card / Lot"
@@ -856,7 +858,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Qty"
@@ -865,7 +867,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Avail"
@@ -874,7 +876,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Unit Cost"
@@ -883,7 +885,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Total Cost"
@@ -892,7 +894,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
+                <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
                     label="Est. Value"
@@ -901,7 +903,7 @@ async function BreakCardsAndMetricsSection({
                     currentSortDir={cardsSortDir}
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">Actions</th>
+                <th className="app-th">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -915,9 +917,9 @@ async function BreakCardsAndMetricsSection({
                 })}`
 
                 return (
-                  <tr key={card.id} className="border-t border-zinc-800">
+                  <tr key={card.id} className="app-tr">
                     {!reversedAt ? (
-                      <td className="px-4 py-3">
+                      <td className="app-td">
                         <input
                           type="checkbox"
                           name="inventory_item_ids"
@@ -929,13 +931,13 @@ async function BreakCardsAndMetricsSection({
                         />
                       </td>
                     ) : null}
-                    <td className="px-4 py-3 capitalize">
+                    <td className="app-td capitalize">
                       {(card.status || '—').replaceAll('_', ' ')}
                     </td>
-                    <td className="px-4 py-3 capitalize">
+                    <td className="app-td capitalize">
                       {(card.item_type || '—').replaceAll('_', ' ')}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="app-td">
                       <Link
                         href={`/app/inventory/${card.id}`}
                         className="font-medium hover:underline"
@@ -943,16 +945,16 @@ async function BreakCardsAndMetricsSection({
                         {buildDisplay(card) || card.title || 'Untitled item'}
                       </Link>
                     </td>
-                    <td className="px-4 py-3">{card.quantity ?? 0}</td>
-                    <td className="px-4 py-3">{card.available_quantity ?? 0}</td>
-                    <td className="px-4 py-3">{money(card.cost_basis_unit)}</td>
-                    <td className="px-4 py-3">{money(card.cost_basis_total)}</td>
-                    <td className="px-4 py-3">{money(card.estimated_value_total)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                    <td className="app-td">{card.quantity ?? 0}</td>
+                    <td className="app-td">{card.available_quantity ?? 0}</td>
+                    <td className="app-td">{money(card.cost_basis_unit)}</td>
+                    <td className="app-td">{money(card.cost_basis_total)}</td>
+                    <td className="app-td">{money(card.estimated_value_total)}</td>
+                    <td className="app-td">
+                      <div className="flex flex-wrap gap-1.5">
                         <Link
                           href={`/app/inventory/${card.id}`}
-                          className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                          className="app-button"
                         >
                           Quick Edit
                         </Link>
@@ -960,7 +962,7 @@ async function BreakCardsAndMetricsSection({
                           <>
                             <Link
                               href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
-                              className="inline-flex rounded-lg border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800"
+                              className="app-button"
                             >
                               Full Edit
                             </Link>
@@ -969,12 +971,12 @@ async function BreakCardsAndMetricsSection({
                               <Link
                                 href={singleDeleteHref}
                                 scroll={false}
-                                className="inline-flex rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-red-200 hover:bg-red-950"
+                                className="app-button-danger"
                               >
                                 Delete
                               </Link>
                             ) : (
-                              <span className="inline-flex rounded-lg border border-yellow-800 bg-yellow-950/30 px-3 py-1.5 text-yellow-200">
+                              <span className="app-button-warning">
                                 Has Sale
                               </span>
                             )}
@@ -988,7 +990,7 @@ async function BreakCardsAndMetricsSection({
 
               {breakCards.length === 0 && (
                 <tr>
-                  <td colSpan={reversedAt ? 9 : 10} className="px-4 py-10 text-center text-zinc-400">
+                  <td colSpan={reversedAt ? 9 : 10} className="px-4 py-8 text-center text-zinc-400">
                     No cards have been added from this break yet.
                   </td>
                 </tr>
@@ -998,12 +1000,12 @@ async function BreakCardsAndMetricsSection({
         </div>
 
         {!reversedAt ? (
-          <div className="border-t border-zinc-800 px-5 py-4">
-            <div className="flex flex-wrap justify-end gap-3">
+          <div className="border-t border-zinc-800 px-4 py-3">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="submit"
                 form={bulkSelectionFormId}
-                className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-1.5 text-sm text-red-200 hover:bg-red-950"
+                className="app-button-danger"
               >
                 Delete Selected
               </button>
@@ -1104,19 +1106,19 @@ export default async function BreakDetailPage({
   const declaredCardsReceived = Number(item.cards_received ?? 0)
 
   return (
-    <div>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">Break Details</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Break Details</h1>
+          <p className="app-subtitle">
             {item.product_name || 'Untitled break'}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           <Link
             href="/app/breaks"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+            className="app-button"
           >
             All Breaks
           </Link>
@@ -1125,19 +1127,19 @@ export default async function BreakDetailPage({
             <>
               <Link
                 href={`/app/breaks/${item.id}/edit`}
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+                className="app-button"
               >
                 Edit Break
               </Link>
               <Link
                 href={`/app/breaks/${item.id}/add-cards`}
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+                className="app-button"
               >
                 Add Cards
               </Link>
               <Link
                 href="/app/breaks/new"
-                className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+                className="app-button-primary"
               >
                 Add Another Break
               </Link>
@@ -1147,19 +1149,19 @@ export default async function BreakDetailPage({
       </div>
 
       {errorMessage ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="app-alert-error mt-4">
           {errorMessage}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="mt-6 rounded-xl border border-emerald-900 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-300">
+        <div className="app-alert-success mt-4">
           {successMessage}
         </div>
       ) : null}
 
       {item.reversed_at ? (
-        <div className="mt-6 rounded-2xl border border-yellow-900 bg-yellow-950/30 p-5">
+        <div className="app-alert-warning mt-4">
           <div className="text-sm text-yellow-300">Break Reversed</div>
           <div className="mt-2 text-lg font-semibold text-yellow-100">
             This break has been rolled back and should be treated as inactive.
@@ -1174,29 +1176,29 @@ export default async function BreakDetailPage({
           ) : null}
         </div>
       ) : (
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="app-section mt-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm text-zinc-400">Safety</div>
-              <div className="mt-2 text-lg font-semibold">Roll back this break</div>
+              <div className="mt-1 text-lg font-semibold">Roll back this break</div>
               <div className="mt-2 max-w-2xl text-sm text-zinc-400">
                 This removes inventory created from this break, unlinks related Whatnot orders, and marks the break as reversed.
                 Rollback is blocked if any active sale exists from an item in this break.
               </div>
             </div>
 
-            <form action={rollbackBreakAction} className="w-full max-w-md space-y-3">
+            <form action={rollbackBreakAction} className="w-full max-w-md space-y-2">
               <input type="hidden" name="break_id" value={item.id} />
               <textarea
                 name="reversal_reason"
                 rows={3}
                 placeholder="Optional rollback reason"
-                className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+                className="app-textarea"
               />
               <button
                 type="submit"
                 disabled={!!item.reversed_at}
-                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-50"
+                className="app-button-danger disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Roll Back Break
               </button>
@@ -1205,87 +1207,87 @@ export default async function BreakDetailPage({
         </div>
       )}
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Break Date</div>
-          <div className="mt-2 text-xl font-semibold">{item.break_date}</div>
+          <div className="mt-1 text-xl font-semibold">{item.break_date}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Source / Breaker</div>
-          <div className="mt-2 text-xl font-semibold">
+          <div className="mt-1 text-xl font-semibold">
             {item.source_name || '—'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Order #</div>
-          <div className="mt-2 text-xl font-semibold">
+          <div className="mt-1 text-xl font-semibold">
             {item.order_number || '—'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Format</div>
-          <div className="mt-2 text-xl font-semibold">
+          <div className="mt-1 text-xl font-semibold">
             {item.format_type || '—'}
           </div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Purchase Price</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(item.purchase_price)}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Sales Tax</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(item.sales_tax)}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Shipping</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(item.shipping_cost)}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Other Fees</div>
-          <div className="mt-2 text-2xl font-semibold">
+          <div className="mt-1 text-2xl font-semibold">
             {money(item.other_fees)}
           </div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Total Cost</div>
-          <div className="mt-2 text-3xl font-semibold">{money(item.total_cost)}</div>
+          <div className="mt-1 text-3xl font-semibold">{money(item.total_cost)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Allocation Method</div>
-          <div className="mt-2 text-xl font-semibold capitalize">
+          <div className="mt-1 text-xl font-semibold capitalize">
             {(item.allocation_method || '—').replaceAll('_', ' ')}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Teams / Spots</div>
-          <div className="mt-2 text-xl font-semibold">
+          <div className="mt-1 text-xl font-semibold">
             {item.teams && item.teams.length ? item.teams.join(', ') : '—'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-metric-card">
           <div className="text-sm text-zinc-400">Created</div>
-          <div className="mt-2 text-xl font-semibold">
+          <div className="mt-1 text-xl font-semibold">
             {item.created_at
               ? new Date(item.created_at).toLocaleDateString('en-US')
               : '—'}
@@ -1294,7 +1296,7 @@ export default async function BreakDetailPage({
       </div>
 
       {item.notes ? (
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="app-section mt-4">
           <div className="text-sm text-zinc-400">Notes</div>
           <div className="mt-2 whitespace-pre-wrap">{item.notes}</div>
         </div>
