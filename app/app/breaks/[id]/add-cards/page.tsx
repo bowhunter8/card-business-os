@@ -140,7 +140,7 @@ export default async function AddBreakCardsPage({
 
   if (!user) return null
 
-  const [breakResponse, linkedOrdersResponse] = await Promise.all([
+  const [breakResponse, linkedOrdersResponse, existingItemsResponse] = await Promise.all([
     supabase
       .from('breaks')
       .select(`
@@ -167,6 +167,13 @@ export default async function AddBreakCardsPage({
       `)
       .eq('user_id', user.id)
       .eq('break_id', id),
+
+    supabase
+      .from('inventory_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('source_type', 'break')
+      .eq('source_break_id', id),
   ])
 
   if (breakResponse.error || !breakResponse.data) {
@@ -202,6 +209,9 @@ export default async function AddBreakCardsPage({
   const droppedOversizedRestore =
     Boolean(pageParams?.restore) && safeRestore == null
 
+  const existingItemsCount = Math.max(0, Number(existingItemsResponse.count ?? 0))
+  const hasExistingItems = existingItemsCount > 0
+
   return (
     <div className="max-w-7xl">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -232,6 +242,12 @@ export default async function AddBreakCardsPage({
         <div className="mt-4 rounded-xl border border-yellow-900 bg-yellow-950/40 px-4 py-3 text-sm text-yellow-200">
           A previous restore payload was too large to safely reload on this page.
           Your break still exists, but large card-entry recovery should not rely on the URL.
+        </div>
+      ) : null}
+
+      {hasExistingItems ? (
+        <div className="mt-4 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
+          This break already has items entered. This page now opens as a fresh add-more form so old autosaved rows do not get reloaded on top of your existing items.
         </div>
       ) : null}
 
@@ -324,6 +340,7 @@ export default async function AddBreakCardsPage({
           defaultYear={defaultYear}
           defaultSet={defaultSet}
           initialRows={restoredRows}
+          forceFresh={hasExistingItems}
         />
 
         <div className="mt-5 flex justify-end gap-3">

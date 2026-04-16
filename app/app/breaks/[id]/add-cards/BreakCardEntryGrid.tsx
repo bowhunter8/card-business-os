@@ -19,6 +19,7 @@ type Props = {
   defaultYear: string
   defaultSet: string
   initialRows?: EntryRow[]
+  forceFresh?: boolean
 }
 
 const STORAGE_PREFIX = 'break_add_cards_draft_'
@@ -85,6 +86,7 @@ export default function BreakCardEntryGrid({
   defaultYear,
   defaultSet,
   initialRows = [],
+  forceFresh = false,
 }: Props) {
   const playerRefs = useRef<Array<HTMLInputElement | null>>([])
   const saveTimerRef = useRef<number | null>(null)
@@ -108,14 +110,18 @@ export default function BreakCardEntryGrid({
     let loadedDraft = false
 
     try {
-      const raw = window.localStorage.getItem(storageKey)
-      if (raw) {
-        const parsed = JSON.parse(raw) as { rows?: EntryRow[] }
-        if (Array.isArray(parsed?.rows) && parsed.rows.length > 0) {
-          nextRows = Array.from({ length: rowCount }).map((_, index) =>
-            getInitialRow(parsed.rows, index, defaultYear, defaultSet)
-          )
-          loadedDraft = true
+      if (forceFresh) {
+        window.localStorage.removeItem(storageKey)
+      } else {
+        const raw = window.localStorage.getItem(storageKey)
+        if (raw) {
+          const parsed = JSON.parse(raw) as { rows?: EntryRow[] }
+          if (Array.isArray(parsed?.rows) && parsed.rows.length > 0) {
+            nextRows = Array.from({ length: rowCount }).map((_, index) =>
+              getInitialRow(parsed.rows, index, defaultYear, defaultSet)
+            )
+            loadedDraft = true
+          }
         }
       }
     } catch {
@@ -124,7 +130,7 @@ export default function BreakCardEntryGrid({
 
     setRows((current) => (rowsMatch(current, nextRows) ? current : nextRows))
     setIsDraftLoaded(loadedDraft)
-  }, [storageKey, fallbackRows, rowCount, defaultYear, defaultSet])
+  }, [storageKey, fallbackRows, rowCount, defaultYear, defaultSet, forceFresh])
 
   useEffect(() => {
     playerRefs.current[0]?.focus()
@@ -240,7 +246,11 @@ export default function BreakCardEntryGrid({
     <div>
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="text-sm text-zinc-400">
-          {isDraftLoaded ? 'Autosaved draft loaded for this break.' : 'Autosave is active for this break.'}
+          {forceFresh
+            ? 'Fresh add-more form loaded for this break.'
+            : isDraftLoaded
+              ? 'Autosaved draft loaded for this break.'
+              : 'Autosave is active for this break.'}
           {lastSavedText ? ` ${lastSavedText}.` : ''}
         </div>
 

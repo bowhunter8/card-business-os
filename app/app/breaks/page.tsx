@@ -452,19 +452,29 @@ export default async function BreaksPage({
             <tbody>
               {breaks.map((item) => (
                 <tr key={item.id} className="app-tr">
-                  <td className="app-td whitespace-nowrap">{item.break_date}</td>
-                  <td className="app-td font-medium">
-                    <div className="leading-snug">{item.product_name || 'Untitled break'}</div>
-                    <div className="mt-0.5 text-xs text-zinc-500">
+                  <td className="app-td whitespace-nowrap text-sm">
+                    {item.break_date}
+                  </td>
+
+                  <td className="app-td">
+                    <div className="font-medium leading-tight">
+                      {item.product_name || 'Untitled break'}
+                    </div>
+                    <div className="text-[11px] text-zinc-500">
                       {item.format_type || '—'}
                     </div>
                   </td>
-                  <td className="app-td">{item.source_name || '—'}</td>
+
+                  <td className="app-td text-sm">
+                    {item.source_name || '—'}
+                  </td>
+
                   <td className="app-td">
-                    <div className="max-w-[300px] break-words leading-snug">
+                    <div className="max-w-[220px] truncate text-sm">
                       {item.order_number || '—'}
                     </div>
                   </td>
+
                   <td className="app-td">
                     {item.completionStatus === 'Complete' ? (
                       <span className="app-badge app-badge-success">Complete</span>
@@ -476,22 +486,28 @@ export default async function BreaksPage({
                       <span className="app-badge app-badge-warning">Open</span>
                     )}
                   </td>
-                  <td className="app-td">{item.entered}</td>
-                  <td className="app-td">{item.received}</td>
-                  <td className="app-td">{item.remaining}</td>
-                  <td className="app-td whitespace-nowrap">{money(item.total_cost)}</td>
+
+                  <td className="app-td text-sm">{item.entered}</td>
+                  <td className="app-td text-sm">{item.received}</td>
+                  <td className="app-td text-sm">{item.remaining}</td>
+
+                  <td className="app-td whitespace-nowrap text-sm">
+                    {money(item.total_cost)}
+                  </td>
+
                   <td className="app-td">
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex flex-wrap gap-1">
                       <Link href={`/app/breaks/${item.id}`} className="app-button">
                         Details
                       </Link>
+
                       {!item.reversed_at ? (
                         <>
                           <Link href={`/app/breaks/${item.id}/edit`} className="app-button">
                             Edit
                           </Link>
                           <Link href={`/app/breaks/${item.id}/add-cards`} className="app-button">
-                            Add Cards
+                            Add
                           </Link>
                         </>
                       ) : null}
@@ -502,7 +518,7 @@ export default async function BreaksPage({
 
               {breaks.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-zinc-400">
+                  <td colSpan={10} className="px-4 py-6 text-center text-zinc-400">
                     No breaks found for this view.
                   </td>
                 </tr>
