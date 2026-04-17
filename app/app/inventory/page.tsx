@@ -70,6 +70,10 @@ function getCardDisplay(item: InventoryRow) {
     .join(' • ')
 }
 
+function getPrimaryTitle(item: InventoryRow) {
+  return item.title || item.player_name || 'Untitled item'
+}
+
 function getSortValue(item: InventoryRow, key: SortKey) {
   switch (key) {
     case 'created_at':
@@ -108,11 +112,7 @@ function compareValues(a: string | number, b: string | number) {
 
 function sortRows(rows: InventoryRow[], sortKey: SortKey, sortDir: SortDir) {
   return [...rows].sort((left, right) => {
-    const result = compareValues(
-      getSortValue(left, sortKey),
-      getSortValue(right, sortKey)
-    )
-
+    const result = compareValues(getSortValue(left, sortKey), getSortValue(right, sortKey))
     return sortDir === 'asc' ? result : -result
   })
 }
@@ -125,6 +125,48 @@ function getNextSortDir(currentKey: SortKey, currentDir: SortDir, nextKey: SortK
 function getSortIndicator(currentKey: SortKey, currentSortDir: SortDir, key: SortKey) {
   if (currentKey !== key) return '↕'
   return currentSortDir === 'asc' ? '↑' : '↓'
+}
+
+function renderStatusPill(status: string | null) {
+  if (status === 'available') {
+    return <span className="app-badge app-badge-success">For Sale</span>
+  }
+
+  if (status === 'personal') {
+    return <span className="app-badge app-badge-info">Personal</span>
+  }
+
+  if (status === 'junk') {
+    return <span className="app-badge app-badge-neutral">Junk</span>
+  }
+
+  if (status === 'listed') {
+    return <span className="app-badge app-badge-info">Listed</span>
+  }
+
+  if (status === 'sold') {
+    return <span className="app-badge app-badge-warning">Sold</span>
+  }
+
+  return (
+    <span className="text-xs capitalize text-zinc-400">
+      {(status || '—').replaceAll('_', ' ')}
+    </span>
+  )
+}
+
+function getFilterHref(filter: '' | 'listed' | 'junk' | 'personal', sortKey: SortKey, sortDir: SortDir) {
+  const params = new URLSearchParams()
+
+  if (filter) {
+    params.set('q', filter)
+  }
+
+  params.set('sort', sortKey)
+  params.set('dir', sortDir)
+
+  const query = params.toString()
+  return query ? `/app/inventory?${query}` : '/app/inventory'
 }
 
 function SortHeader({
@@ -155,8 +197,23 @@ function SortHeader({
       className="inline-flex items-center gap-1 hover:text-zinc-100"
     >
       <span>{label}</span>
-      <span className="text-xs">{getSortIndicator(currentSortKey, currentSortDir, sortKey)}</span>
+      <span className="text-[10px]">{getSortIndicator(currentSortKey, currentSortDir, sortKey)}</span>
     </Link>
+  )
+}
+
+function SummaryCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <div className="app-card-tight p-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
+    </div>
   )
 }
 
@@ -230,6 +287,8 @@ export default async function InventoryPage({
     query = query.eq('status', 'listed')
   } else if (qNormalized === 'junk') {
     query = query.eq('status', 'junk')
+  } else if (qNormalized === 'personal') {
+    query = query.eq('status', 'personal')
   } else if (q) {
     query = query.or(
       [
@@ -284,70 +343,77 @@ export default async function InventoryPage({
       ? 'Showing listed inventory items.'
       : qNormalized === 'junk'
         ? 'Showing junk items you are not planning to sell.'
-        : 'View and manage your card inventory.'
+        : qNormalized === 'personal'
+          ? 'Showing personal collection items.'
+          : 'View and manage your card inventory.'
 
   const showingSearchText =
-    q && qNormalized !== 'listed' && qNormalized !== 'junk'
+    q && qNormalized !== 'listed' && qNormalized !== 'junk' && qNormalized !== 'personal'
       ? `Showing results for "${q}"`
       : qNormalized === 'listed'
         ? 'Showing listed inventory.'
         : qNormalized === 'junk'
           ? 'Showing junk inventory.'
-          : ''
+          : qNormalized === 'personal'
+            ? 'Showing personal inventory.'
+            : ''
+
+  const totalItems = items.length
+  const totalAvailableUnits = items.reduce((sum, item) => sum + Number(item.available_quantity ?? 0), 0)
+  const totalCost = items.reduce((sum, item) => sum + Number(item.cost_basis_total ?? 0), 0)
+  const totalEstimatedValue = items.reduce(
+    (sum, item) => sum + Number(item.estimated_value_total ?? 0),
+    0
+  )
 
   return (
-    <div className="app-page-wide">
-      <div className="app-page-header">
-        <div>
+    <div className="app-page-wide space-y-3">
+      <div className="app-page-header gap-3">
+        <div className="min-w-0">
           <h1 className="app-title">Inventory</h1>
           <p className="app-subtitle">{pageDescription}</p>
         </div>
 
-        <Link
-          href="/app/inventory/new"
-          className="app-button-primary"
-        >
+        <Link href="/app/inventory/new" className="app-button-primary">
           Add Inventory
         </Link>
       </div>
 
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="Rows" value={totalItems} />
+        <SummaryCard label="Available Units" value={totalAvailableUnits} />
+        <SummaryCard label="Total Cost" value={money(totalCost)} />
+        <SummaryCard label="Est. Value" value={money(totalEstimatedValue)} />
+      </div>
+
       <div className="flex flex-wrap gap-2">
         <Link
-          href="/app/inventory"
-          className={`app-chip ${
-            q === ''
-              ? 'app-chip-active'
-              : 'app-chip-idle'
-          }`}
+          href={getFilterHref('', sortKey, sortDir)}
+          className={`app-chip ${q === '' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           All
         </Link>
         <Link
-          href="/app/inventory?q=listed"
-          className={`app-chip ${
-            qNormalized === 'listed'
-              ? 'app-chip-active'
-              : 'app-chip-idle'
-          }`}
+          href={getFilterHref('listed', sortKey, sortDir)}
+          className={`app-chip ${qNormalized === 'listed' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Listed
         </Link>
         <Link
-          href="/app/inventory?q=junk"
-          className={`app-chip ${
-            qNormalized === 'junk'
-              ? 'app-chip-active'
-              : 'app-chip-idle'
-          }`}
+          href={getFilterHref('personal', sortKey, sortDir)}
+          className={`app-chip ${qNormalized === 'personal' ? 'app-chip-active' : 'app-chip-idle'}`}
+        >
+          Personal
+        </Link>
+        <Link
+          href={getFilterHref('junk', sortKey, sortDir)}
+          className={`app-chip ${qNormalized === 'junk' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Junk
         </Link>
       </div>
 
-      <form
-        method="get"
-        className="app-search-panel"
-      >
+      <form method="get" className="app-search-panel">
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
@@ -356,18 +422,14 @@ export default async function InventoryPage({
             placeholder="Search player, title, set, card #, team, notes..."
             className="app-input"
           />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
           <div className="flex gap-2">
-            <button
-              type="submit"
-              className="app-button-primary"
-            >
+            <button type="submit" className="app-button-primary">
               Search
             </button>
             {q ? (
-              <Link
-                href="/app/inventory"
-                className="app-button"
-              >
+              <Link href={`/app/inventory?sort=${sortKey}&dir=${sortDir}`} className="app-button">
                 Clear
               </Link>
             ) : null}
@@ -375,24 +437,18 @@ export default async function InventoryPage({
         </div>
 
         {showingSearchText ? (
-          <div className="mt-2 text-xs text-zinc-400">
-            {showingSearchText}
-          </div>
+          <div className="mt-2 text-xs text-zinc-400">{showingSearchText}</div>
         ) : null}
       </form>
 
-      {error ? (
-        <div className="app-alert-error">
-          Error loading inventory: {error.message}
-        </div>
-      ) : null}
+      {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 
       <div className="app-table-wrap">
         <div className="app-table-scroll">
           <table className="app-table">
             <thead className="app-thead">
               <tr>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Card"
                     sortKey="card"
@@ -401,7 +457,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Status"
                     sortKey="status"
@@ -410,7 +466,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Qty"
                     sortKey="quantity"
@@ -419,7 +475,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Available"
                     sortKey="available_quantity"
@@ -428,7 +484,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Unit Cost"
                     sortKey="cost_basis_unit"
@@ -437,7 +493,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Total Cost"
                     sortKey="cost_basis_total"
@@ -446,7 +502,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Est. Value"
                     sortKey="estimated_value_total"
@@ -455,7 +511,7 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">
+                <th className="app-th py-2">
                   <SortHeader
                     label="Location"
                     sortKey="storage_location"
@@ -464,80 +520,69 @@ export default async function InventoryPage({
                     q={q}
                   />
                 </th>
-                <th className="app-th">Actions</th>
+                <th className="app-th py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item) => {
                 const itemLine = getCardDisplay(item)
-                const hasAvailable = Number(item.available_quantity ?? 0) > 0
+                const quantity = Number(item.quantity ?? 0)
+                const available = Number(item.available_quantity ?? 0)
+                const hasAvailable = available > 0
+                const isLotLike = quantity > 1 || available > 1
                 const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
 
                 return (
                   <tr key={item.id} className="app-tr">
-                    <td className="app-td">
-                      <div className="font-medium leading-snug">
-                        {item.title || item.player_name || 'Untitled item'}
-                      </div>
-                      <div className="mt-0.5 text-xs leading-snug text-zinc-400">
-                        {itemLine}
+                    <td className="app-td py-2.5">
+                      <div className="min-w-[240px]">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <div className="font-medium leading-tight">{getPrimaryTitle(item)}</div>
+                          {isLotLike ? (
+                            <span className="app-badge app-badge-warning">Lot / Multi Qty</span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-xs leading-snug text-zinc-400">{itemLine}</div>
                       </div>
                     </td>
 
-                    <td className="app-td">
-                      {item.status === 'available' ? (
-                        <span className="app-badge app-badge-success">
-                          For Sale
-                        </span>
-                      ) : item.status === 'personal' ? (
-                        <span className="app-badge app-badge-info">
-                          Personal
-                        </span>
-                      ) : item.status === 'junk' ? (
-                        <span className="app-badge app-badge-neutral">
-                          Junk
-                        </span>
-                      ) : item.status === 'listed' ? (
-                        <span className="app-badge app-badge-info">
-                          Listed
-                        </span>
-                      ) : (
-                        <span className="capitalize text-zinc-400">
-                          {(item.status || '—').replaceAll('_', ' ')}
-                        </span>
-                      )}
+                    <td className="app-td py-2.5">{renderStatusPill(item.status)}</td>
+
+                    <td className="app-td py-2.5">{item.quantity ?? 0}</td>
+                    <td className="app-td py-2.5">
+                      <div className="font-medium leading-tight">{item.available_quantity ?? 0}</div>
+                      {hasAvailable && isLotLike ? (
+                        <div className="mt-0.5 text-[11px] text-zinc-500">partial sell ready</div>
+                      ) : null}
+                    </td>
+                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.cost_basis_unit)}</td>
+                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.cost_basis_total)}</td>
+                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.estimated_value_total)}</td>
+                    <td className="app-td py-2.5">
+                      <div className="max-w-[140px] truncate">{item.storage_location || '—'}</div>
                     </td>
 
-                    <td className="app-td">{item.quantity ?? 0}</td>
-                    <td className="app-td">{item.available_quantity ?? 0}</td>
-                    <td className="app-td whitespace-nowrap">{money(item.cost_basis_unit)}</td>
-                    <td className="app-td whitespace-nowrap">{money(item.cost_basis_total)}</td>
-                    <td className="app-td whitespace-nowrap">{money(item.estimated_value_total)}</td>
-                    <td className="app-td">{item.storage_location || '—'}</td>
-
-                    <td className="app-td">
+                    <td className="app-td py-2.5">
                       <div className="flex flex-wrap gap-1.5">
-                        <Link
-                          href={`/app/inventory/${item.id}`}
-                          className="app-button"
-                        >
+                        <Link href={`/app/inventory/${item.id}`} className="app-button">
                           Details
                         </Link>
 
-                        <Link
-                          href={`/app/inventory/${item.id}/edit`}
-                          className="app-button"
-                        >
+                        <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
                           Edit
                         </Link>
 
                         {hasAvailable ? (
-                          <Link
-                            href={`/app/inventory/${item.id}/sell`}
-                            className="app-button"
-                          >
-                            Sell
-                          </Link>
+                          <>
+                            <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
+                              Sell
+                            </Link>
+                            {isLotLike ? (
+                              <Link href={`/app/inventory/${item.id}/sell`} className="app-button">
+                                Sell Qty
+                              </Link>
+                            ) : null}
+                          </>
                         ) : latestActiveSale ? (
                           <form action={reverseSaleAction}>
                             <input type="hidden" name="sale_id" value={latestActiveSale.id} />
@@ -547,10 +592,7 @@ export default async function InventoryPage({
                               name="reversal_reason"
                               value="Quick reverse from inventory list"
                             />
-                            <button
-                              type="submit"
-                              className="app-button-danger"
-                            >
+                            <button type="submit" className="app-button-danger">
                               Reverse Sale
                             </button>
                           </form>

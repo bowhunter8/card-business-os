@@ -231,11 +231,11 @@ function SectionLoading({
 function MetricsLoading() {
   return (
     <div className="animate-pulse">
-      <div className="mt-6 grid gap-3 md:grid-cols-4">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={`metrics-a-${i}`}
-            className="app-metric-card"
+            className="app-metric-card py-2 px-3"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
             <div className="mt-3 h-8 w-20 rounded bg-zinc-800" />
@@ -243,11 +243,11 @@ function MetricsLoading() {
         ))}
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={`metrics-b-${i}`}
-            className="app-metric-card"
+            className="app-metric-card py-2 px-3"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
             <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
@@ -255,11 +255,11 @@ function MetricsLoading() {
         ))}
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-5">
+      <div className="mt-3 grid gap-3 md:grid-cols-5">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={`metrics-c-${i}`}
-            className="app-metric-card"
+            className="app-metric-card py-2 px-3"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
             <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
@@ -267,11 +267,11 @@ function MetricsLoading() {
         ))}
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <div
             key={`metrics-d-${i}`}
-            className="app-metric-card"
+            className="app-metric-card py-2 px-3"
           >
             <div className="h-4 w-28 rounded bg-zinc-800" />
             <div className="mt-3 h-8 w-24 rounded bg-zinc-800" />
@@ -355,7 +355,7 @@ async function LinkedWhatnotOrdersSection({
   )
 
   return (
-    <div className="app-section mt-4">
+    <div className="app-section mt-3 py-3">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold">Linked Whatnot Orders</h2>
@@ -673,93 +673,93 @@ async function BreakCardsAndMetricsSection({
         </div>
       ) : null}
 
-      <div className="mt-6 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Cards Received</div>
           <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Cards Entered</div>
           <div className="mt-1 text-2xl font-semibold">{cardsEntered}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Remaining To Enter</div>
           <div className="mt-1 text-2xl font-semibold">{remainingToEnter}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Cards Available</div>
           <div className="mt-1 text-2xl font-semibold">{availableCards}</div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Allocated Cost</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(totalAllocatedCost)}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Estimated Value</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(totalEstimatedValue)}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Cards Sold</div>
           <div className="mt-1 text-2xl font-semibold">{cardsSold}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">ROI</div>
           <div className="mt-1 text-2xl font-semibold">{percent(breakROI)}</div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-5">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-5">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Total Sales</div>
           <div className="mt-1 text-2xl font-semibold">{money(totalSales)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Total Fees</div>
           <div className="mt-1 text-2xl font-semibold">{money(totalFees)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Net Proceeds</div>
           <div className="mt-1 text-2xl font-semibold">{money(totalNetProceeds)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Realized COGS</div>
           <div className="mt-1 text-2xl font-semibold">{money(realizedCOGS)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Net Profit</div>
           <div className="mt-1 text-2xl font-semibold">{money(realizedProfit)}</div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Remaining Value</div>
           <div className="mt-1 text-2xl font-semibold">{money(remainingEstimatedValue)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Projected Profit</div>
           <div className="mt-1 text-2xl font-semibold">{money(projectedProfit)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Projected ROI</div>
           <div className="mt-1 text-2xl font-semibold">{percent(projectedROI)}</div>
         </div>
@@ -780,7 +780,7 @@ async function BreakCardsAndMetricsSection({
       </div>
 
       <div className="mt-6 app-table-wrap">
-        <div className="flex flex-col gap-3 border-b border-zinc-800 px-4 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-2 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold">Cards From This Break</h2>
             {!reversedAt ? (
@@ -1000,7 +1000,7 @@ async function BreakCardsAndMetricsSection({
         </div>
 
         {!reversedAt ? (
-          <div className="border-t border-zinc-800 px-4 py-3">
+          <div className="border-t border-zinc-800 px-3 py-2">
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="submit"
@@ -1176,7 +1176,7 @@ export default async function BreakDetailPage({
           ) : null}
         </div>
       ) : (
-        <div className="app-section mt-4">
+        <div className="app-section mt-3 py-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="text-sm text-zinc-400">Safety</div>
@@ -1191,7 +1191,7 @@ export default async function BreakDetailPage({
               <input type="hidden" name="break_id" value={item.id} />
               <textarea
                 name="reversal_reason"
-                rows={3}
+                rows={2}
                 placeholder="Optional rollback reason"
                 className="app-textarea"
               />
@@ -1207,27 +1207,27 @@ export default async function BreakDetailPage({
         </div>
       )}
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Break Date</div>
           <div className="mt-1 text-xl font-semibold">{item.break_date}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Source / Breaker</div>
           <div className="mt-1 text-xl font-semibold">
             {item.source_name || '—'}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Order #</div>
           <div className="mt-1 text-xl font-semibold">
             {item.order_number || '—'}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Format</div>
           <div className="mt-1 text-xl font-semibold">
             {item.format_type || '—'}
@@ -1235,29 +1235,29 @@ export default async function BreakDetailPage({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Purchase Price</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(item.purchase_price)}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Sales Tax</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(item.sales_tax)}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Shipping</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(item.shipping_cost)}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Other Fees</div>
           <div className="mt-1 text-2xl font-semibold">
             {money(item.other_fees)}
@@ -1265,27 +1265,27 @@ export default async function BreakDetailPage({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card">
+      <div className="mt-3 grid gap-3 md:grid-cols-4">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Total Cost</div>
           <div className="mt-1 text-3xl font-semibold">{money(item.total_cost)}</div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Allocation Method</div>
           <div className="mt-1 text-xl font-semibold capitalize">
             {(item.allocation_method || '—').replaceAll('_', ' ')}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Teams / Spots</div>
           <div className="mt-1 text-xl font-semibold">
             {item.teams && item.teams.length ? item.teams.join(', ') : '—'}
           </div>
         </div>
 
-        <div className="app-metric-card">
+        <div className="app-metric-card py-2 px-3">
           <div className="text-sm text-zinc-400">Created</div>
           <div className="mt-1 text-xl font-semibold">
             {item.created_at
@@ -1296,7 +1296,7 @@ export default async function BreakDetailPage({
       </div>
 
       {item.notes ? (
-        <div className="app-section mt-4">
+        <div className="app-section mt-3 py-3">
           <div className="text-sm text-zinc-400">Notes</div>
           <div className="mt-2 whitespace-pre-wrap">{item.notes}</div>
         </div>

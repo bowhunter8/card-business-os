@@ -12,6 +12,10 @@ function safeNumber(value: FormDataEntryValue | null) {
   return Number.isFinite(num) ? num : 0
 }
 
+function roundMoney(value: number) {
+  return Number(value.toFixed(2))
+}
+
 async function requireUser() {
   const supabase = await createClient()
 
@@ -24,6 +28,222 @@ async function requireUser() {
   }
 
   return { supabase, user }
+}
+
+type SaleCalculationInput = {
+  itemSalePrice: number
+  shippingCharged: number
+  platformFees: number
+  shippingCost: number
+  suppliesCost: number
+  otherCosts: number
+  unitCost: number
+  quantitySold: number
+}
+
+function calculateSaleNumbers(input: SaleCalculationInput) {
+  const grossSale = roundMoney(input.itemSalePrice + input.shippingCharged)
+  const shippingTotalCosts = roundMoney(input.shippingCost + input.suppliesCost)
+  const totalSellingCosts = roundMoney(
+    input.platformFees + shippingTotalCosts + input.otherCosts
+  )
+  const netProceeds = roundMoney(grossSale - totalSellingCosts)
+  const cogs = roundMoney(input.unitCost * input.quantitySold)
+  const profit = roundMoney(netProceeds - cogs)
+
+  return {
+    grossSale,
+    shippingTotalCosts,
+    totalSellingCosts,
+    netProceeds,
+    cogs,
+    profit,
+  }
+}
+
+async function getShippingDefaults({
+  supabase,
+  userId,
+  shippingProfileId,
+  shippingChargedInput,
+  shippingCostInput,
+  suppliesCostInput,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  shippingProfileId: string
+  shippingChargedInput: number
+  shippingCostInput: number
+  suppliesCostInput: number
+}) {
+  let shippingCharged = shippingChargedInput
+  let shippingCost = shippingCostInput
+  let suppliesCost = suppliesCostInput
+
+  if (shippingProfileId) {
+    const shippingProfileRes = await supabase
+      .from('shipping_profiles')
+      .select('shipping_charged_default, supplies_cost_default')
+      .eq('id', shippingProfileId)
+      .eq('user_id', userId)
+      .single()
+
+    if (!shippingProfileRes.error && shippingProfileRes.data) {
+      shippingCharged = Number(shippingProfileRes.data.shipping_charged_default ?? 0)
+      suppliesCost = Number(shippingProfileRes.data.supplies_cost_default ?? 0)
+      // Actual postage stays manual per sale by design.
+      shippingCost = shippingCostInput
+    }
+  }
+
+  return {
+    shippingCharged,
+    shippingCost,
+    suppliesCost,
+  }
+}
+
+async function getInventoryItemForSale({
+  supabase,
+  userId,
+  inventoryItemId,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  inventoryItemId: string
+}) {
+  const itemResponse = await supabase
+    .from('inventory_items')
+    .select(`
+      id,
+      title,
+      player_name,
+      year,
+      set_name,
+      card_number,
+      notes,
+      status,
+      quantity,
+      available_quantity,
+      cost_basis_unit,
+      cost_basis_total,
+      source_type,
+      source_break_id
+    `)
+    .eq('id', inventoryItemId)
+    .eq('user_id', userId)
+    .single()
+
+  if (itemResponse.error || !itemResponse.data) {
+    return null
+  }
+
+  return itemResponse.data
+}
+
+async function insertSaleAndUpdateInventory({
+  supabase,
+  userId,
+  inventoryItemId,
+  saleDate,
+  quantitySold,
+  grossSale,
+  platformFees,
+  shippingTotalCosts,
+  otherCosts,
+  netProceeds,
+  cogs,
+  profit,
+  platform,
+  notes,
+  newAvailableQty,
+  nextStatus,
+  shippingCharged,
+  shippingCost,
+  suppliesCost,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  inventoryItemId: string
+  saleDate: string
+  quantitySold: number
+  grossSale: number
+  platformFees: number
+  shippingTotalCosts: number
+  otherCosts: number
+  netProceeds: number
+  cogs: number
+  profit: number
+  platform: string
+  notes: string
+  newAvailableQty: number
+  nextStatus: string
+  shippingCharged: number
+  shippingCost: number
+  suppliesCost: number
+}) {
+  const saleInsert = await supabase
+    .from('sales')
+    .insert({
+      user_id: userId,
+      inventory_item_id: inventoryItemId,
+      sale_date: saleDate,
+      quantity_sold: quantitySold,
+      gross_sale: grossSale,
+      platform_fees: platformFees,
+      shipping_cost: shippingTotalCosts,
+      other_costs: otherCosts,
+      net_proceeds: netProceeds,
+      cost_of_goods_sold: cogs,
+      profit,
+      platform: platform || null,
+      notes: notes || null,
+    })
+    .select('id')
+    .single()
+
+  if (saleInsert.error || !saleInsert.data) {
+    return {
+      ok: false as const,
+      error: saleInsert.error?.message ?? 'Could not record sale',
+    }
+  }
+
+  const updateInventory = await supabase
+    .from('inventory_items')
+    .update({
+      available_quantity: newAvailableQty,
+      status: nextStatus,
+    })
+    .eq('id', inventoryItemId)
+    .eq('user_id', userId)
+
+  if (updateInventory.error) {
+    return {
+      ok: false as const,
+      error: updateInventory.error.message,
+    }
+  }
+
+  await supabase.from('inventory_transactions').insert({
+    user_id: userId,
+    inventory_item_id: inventoryItemId,
+    transaction_type: 'sale',
+    quantity_change: -quantitySold,
+    to_status: nextStatus,
+    linked_entity_type: 'sale',
+    linked_entity_id: saleInsert.data.id,
+    amount: grossSale,
+    event_date: saleDate,
+    notes:
+      notes ||
+      `Recorded sale. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}.`,
+  })
+
+  return {
+    ok: true as const,
+    saleId: saleInsert.data.id,
+  }
 }
 
 export async function createSaleAction(formData: FormData) {
@@ -56,52 +276,25 @@ export async function createSaleAction(formData: FormData) {
     redirect(`/app/sales/new?inventory_item_id=${inventoryItemId}&error=Quantity sold must be at least 1`)
   }
 
-  let shippingCharged = shippingChargedInput
-  let shippingCost = shippingCostInput
-  let suppliesCost = suppliesCostInput
+  const { shippingCharged, shippingCost, suppliesCost } = await getShippingDefaults({
+    supabase,
+    userId: user.id,
+    shippingProfileId,
+    shippingChargedInput,
+    shippingCostInput,
+    suppliesCostInput,
+  })
 
-  if (shippingProfileId) {
-    const shippingProfileRes = await supabase
-      .from('shipping_profiles')
-      .select('shipping_charged_default, cost, supplies_cost_default')
-      .eq('id', shippingProfileId)
-      .eq('user_id', user.id)
-      .single()
+  const item = await getInventoryItemForSale({
+    supabase,
+    userId: user.id,
+    inventoryItemId,
+  })
 
-    if (!shippingProfileRes.error && shippingProfileRes.data) {
-      shippingCharged = Number(shippingProfileRes.data.shipping_charged_default ?? 0)
-      shippingCost = Number(shippingProfileRes.data.cost ?? 0)
-      suppliesCost = Number(shippingProfileRes.data.supplies_cost_default ?? 0)
-    }
-  }
-
-  const itemResponse = await supabase
-    .from('inventory_items')
-    .select(`
-      id,
-      title,
-      player_name,
-      year,
-      set_name,
-      card_number,
-      notes,
-      status,
-      quantity,
-      available_quantity,
-      cost_basis_unit,
-      cost_basis_total,
-      source_type,
-      source_break_id
-    `)
-    .eq('id', inventoryItemId)
-    .eq('user_id', user.id)
-    .single()
-
-  if (itemResponse.error || !itemResponse.data) {
+  if (!item) {
     redirect('/app/inventory?error=Inventory item not found')
   }
 
-  const item = itemResponse.data
   const availableQty = Number(item.available_quantity ?? 0)
 
   if (quantitySold > availableQty) {
@@ -110,81 +303,150 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  const grossSale = Number((itemSalePrice + shippingCharged).toFixed(2))
-  const shippingTotalCosts = Number((shippingCost + suppliesCost).toFixed(2))
-  const totalSellingCosts = Number(
-    (platformFees + shippingTotalCosts + otherCosts).toFixed(2)
-  )
-  const netProceeds = Number((grossSale - totalSellingCosts).toFixed(2))
-
   const unitCost = Number(item.cost_basis_unit ?? 0)
-  const cogs = Number((unitCost * quantitySold).toFixed(2))
-  const profit = Number((netProceeds - cogs).toFixed(2))
+
+  const {
+    grossSale,
+    shippingTotalCosts,
+    netProceeds,
+    cogs,
+    profit,
+  } = calculateSaleNumbers({
+    itemSalePrice,
+    shippingCharged,
+    platformFees,
+    shippingCost,
+    suppliesCost,
+    otherCosts,
+    unitCost,
+    quantitySold,
+  })
 
   const newAvailableQty = availableQty - quantitySold
   const nextStatus = newAvailableQty > 0 ? 'available' : 'sold'
 
-  const saleInsert = await supabase
-    .from('sales')
-    .insert({
-      user_id: user.id,
-      inventory_item_id: inventoryItemId,
-      sale_date: saleDate,
-      quantity_sold: quantitySold,
-      gross_sale: grossSale,
-      platform_fees: platformFees,
-      shipping_cost: shippingTotalCosts,
-      other_costs: otherCosts,
-      net_proceeds: netProceeds,
-      cost_of_goods_sold: cogs,
-      profit,
-      platform: platform || null,
-      notes: notes || null,
-    })
-    .select('id')
-    .single()
-
-  if (saleInsert.error || !saleInsert.data) {
-    redirect(
-      `/app/sales/new?inventory_item_id=${inventoryItemId}&error=${encodeURIComponent(
-        saleInsert.error?.message ?? 'Could not record sale'
-      )}`
-    )
-  }
-
-  const updateInventory = await supabase
-    .from('inventory_items')
-    .update({
-      available_quantity: newAvailableQty,
-      status: nextStatus,
-    })
-    .eq('id', inventoryItemId)
-    .eq('user_id', user.id)
-
-  if (updateInventory.error) {
-    redirect(
-      `/app/sales/new?inventory_item_id=${inventoryItemId}&error=${encodeURIComponent(
-        updateInventory.error.message
-      )}`
-    )
-  }
-
-  await supabase.from('inventory_transactions').insert({
-    user_id: user.id,
-    inventory_item_id: inventoryItemId,
-    transaction_type: 'sale',
-    quantity_change: -quantitySold,
-    to_status: nextStatus,
-    linked_entity_type: 'sale',
-    linked_entity_id: saleInsert.data.id,
-    amount: grossSale,
-    event_date: saleDate,
-    notes:
-      notes ||
-      `Recorded sale. Shipping charged ${shippingCharged.toFixed(2)}, shipping cost ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}.`,
+  const result = await insertSaleAndUpdateInventory({
+    supabase,
+    userId: user.id,
+    inventoryItemId,
+    saleDate,
+    quantitySold,
+    grossSale,
+    platformFees,
+    shippingTotalCosts,
+    otherCosts,
+    netProceeds,
+    cogs,
+    profit,
+    platform,
+    notes,
+    newAvailableQty,
+    nextStatus,
+    shippingCharged,
+    shippingCost,
+    suppliesCost,
   })
 
+  if (!result.ok) {
+    redirect(
+      `/app/sales/new?inventory_item_id=${inventoryItemId}&error=${encodeURIComponent(result.error)}`
+    )
+  }
+
   redirect('/app/sales?saved=1')
+}
+
+export async function quickSellAction(formData: FormData) {
+  const { supabase, user } = await requireUser()
+
+  const inventoryItemId = safeText(formData.get('inventory_item_id'))
+  const mode = safeText(formData.get('mode'))
+  const saleDate = safeText(formData.get('sale_date')) || new Date().toISOString().slice(0, 10)
+
+  const itemSalePrice = safeNumber(formData.get('gross_sale'))
+  const shippingCharged = safeNumber(formData.get('shipping_charged'))
+  const platformFees = safeNumber(formData.get('platform_fees'))
+  const shippingCost = safeNumber(formData.get('shipping_cost'))
+  const suppliesCost = safeNumber(formData.get('supplies_cost'))
+  const otherCosts = safeNumber(formData.get('other_costs'))
+
+  const platform = safeText(formData.get('platform'))
+  const notes = safeText(formData.get('notes'))
+
+  if (!inventoryItemId) {
+    redirect('/app/inventory?error=Missing inventory item id')
+  }
+
+  const item = await getInventoryItemForSale({
+    supabase,
+    userId: user.id,
+    inventoryItemId,
+  })
+
+  if (!item) {
+    redirect('/app/inventory?error=Inventory item not found')
+  }
+
+  const availableQty = Number(item.available_quantity ?? 0)
+
+  if (availableQty < 1) {
+    redirect('/app/inventory?error=No available quantity to sell')
+  }
+
+  const quantitySold =
+    mode === 'sell_all'
+      ? availableQty
+      : Math.min(Math.max(safeNumber(formData.get('quantity_sold')) || 1, 1), availableQty)
+
+  const unitCost = Number(item.cost_basis_unit ?? 0)
+
+  const {
+    grossSale,
+    shippingTotalCosts,
+    netProceeds,
+    cogs,
+    profit,
+  } = calculateSaleNumbers({
+    itemSalePrice,
+    shippingCharged,
+    platformFees,
+    shippingCost,
+    suppliesCost,
+    otherCosts,
+    unitCost,
+    quantitySold,
+  })
+
+  const newAvailableQty = availableQty - quantitySold
+  const nextStatus = newAvailableQty > 0 ? 'available' : 'sold'
+
+  const result = await insertSaleAndUpdateInventory({
+    supabase,
+    userId: user.id,
+    inventoryItemId,
+    saleDate,
+    quantitySold,
+    grossSale,
+    platformFees,
+    shippingTotalCosts,
+    otherCosts,
+    netProceeds,
+    cogs,
+    profit,
+    platform,
+    notes,
+    newAvailableQty,
+    nextStatus,
+    shippingCharged,
+    shippingCost,
+    suppliesCost,
+  })
+
+  if (!result.ok) {
+    redirect(`/app/inventory?error=${encodeURIComponent(result.error)}`)
+  }
+
+  redirect('/app/inventory?saved=1')
 }
 
 export async function updateSaleAction(formData: FormData) {
@@ -275,11 +537,9 @@ export async function updateSaleAction(formData: FormData) {
   }
 
   const unitCost = Number(item.cost_basis_unit ?? 0)
-  const netProceeds = Number(
-    (grossSale - platformFees - shippingCost - otherCosts).toFixed(2)
-  )
-  const cogs = Number((unitCost * quantitySold).toFixed(2))
-  const profit = Number((netProceeds - cogs).toFixed(2))
+  const netProceeds = roundMoney(grossSale - platformFees - shippingCost - otherCosts)
+  const cogs = roundMoney(unitCost * quantitySold)
+  const profit = roundMoney(netProceeds - cogs)
 
   const restoredAvailableQty = currentAvailableQty + oldQtySold
   const newAvailableQty = restoredAvailableQty - quantitySold
@@ -331,9 +591,7 @@ export async function updateSaleAction(formData: FormData) {
     linked_entity_id: saleId,
     amount: grossSale,
     event_date: saleDate,
-    notes:
-      notes ||
-      `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}.`,
+    notes: notes || `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}.`,
   })
 
   redirect(`/app/inventory/${inventoryItemId}?updatedSale=1`)

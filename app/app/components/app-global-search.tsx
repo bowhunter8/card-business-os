@@ -29,6 +29,7 @@ export default function AppGlobalSearch() {
     const clean = value.trim()
 
     if (!clean) {
+      setQuery('')
       router.push('/app/search')
       return
     }
@@ -36,6 +37,7 @@ export default function AppGlobalSearch() {
     const params = new URLSearchParams()
     params.set('q', clean)
 
+    setQuery('')
     router.push(`/app/search?${params.toString()}`)
   }
 
@@ -77,11 +79,10 @@ export default function AppGlobalSearch() {
       }
 
       const numbers = extractOrderNumbers(extractedText)
-      const finalQuery =
-        numbers.length > 0 ? numbers.join('\n') : extractedText
+      const finalQuery = numbers.length > 0 ? numbers.join('\n') : extractedText
 
-      setQuery(finalQuery)
       setStatus('Opening search...')
+      setQuery('')
 
       startTransition(() => {
         submitSearch(finalQuery)
@@ -104,7 +105,7 @@ export default function AppGlobalSearch() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search: paste orders, email text, player, set, card #, breaker, team, notes..."
+            placeholder="Search: paste orders, email text, player, set, item / card #, breaker, team, notes..."
             className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500"
           />
 
@@ -129,9 +130,7 @@ export default function AppGlobalSearch() {
           Paste order numbers, copied email text, or upload a screenshot.
         </div>
 
-        {status ? (
-          <div className="text-[11px] text-zinc-400">{status}</div>
-        ) : null}
+        {status ? <div className="text-[11px] text-zinc-400">{status}</div> : null}
 
         <input
           ref={fileInputRef}
