@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
+import { quickSellAction } from '@/app/actions/sales'
 
 type InventoryRow = {
   id: string
@@ -220,12 +221,13 @@ function SummaryCard({
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; sort?: string; dir?: string }>
+  searchParams?: Promise<{ q?: string; sort?: string; dir?: string; saved?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '')
   const q = cleanSearchTerm(qRaw)
   const qNormalized = q.toLowerCase()
+  const saved = String(params?.saved ?? '')
 
   const requestedSort = String(params?.sort ?? 'created_at').trim() as SortKey
   const requestedDir = String(params?.dir ?? 'desc').trim() as SortDir
@@ -345,7 +347,7 @@ export default async function InventoryPage({
         ? 'Showing junk items you are not planning to sell.'
         : qNormalized === 'personal'
           ? 'Showing personal collection items.'
-          : 'View and manage your card inventory.'
+          : 'View and manage your inventory items.'
 
   const showingSearchText =
     q && qNormalized !== 'listed' && qNormalized !== 'junk' && qNormalized !== 'personal'
@@ -378,6 +380,12 @@ export default async function InventoryPage({
           Add Inventory
         </Link>
       </div>
+
+      {saved === '1' ? (
+        <div className="app-alert-success">
+          Quick sale recorded and inventory updated.
+        </div>
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Rows" value={totalItems} />
@@ -419,7 +427,7 @@ export default async function InventoryPage({
             type="text"
             name="q"
             defaultValue={q}
-            placeholder="Search player, title, set, card #, team, notes..."
+            placeholder="Search player, title, set, item / card #, team, notes..."
             className="app-input"
           />
           <input type="hidden" name="sort" value={sortKey} />
@@ -450,7 +458,7 @@ export default async function InventoryPage({
               <tr>
                 <th className="app-th py-2">
                   <SortHeader
-                    label="Card"
+                    label="Item"
                     sortKey="card"
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
@@ -534,8 +542,8 @@ export default async function InventoryPage({
 
                 return (
                   <tr key={item.id} className="app-tr">
-                    <td className="app-td py-2.5">
-                      <div className="min-w-[240px]">
+                    <td className="app-td py-2">
+                      <div className="min-w-[220px]">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <div className="font-medium leading-tight">{getPrimaryTitle(item)}</div>
                           {isLotLike ? (
@@ -546,23 +554,23 @@ export default async function InventoryPage({
                       </div>
                     </td>
 
-                    <td className="app-td py-2.5">{renderStatusPill(item.status)}</td>
+                    <td className="app-td py-2">{renderStatusPill(item.status)}</td>
 
-                    <td className="app-td py-2.5">{item.quantity ?? 0}</td>
-                    <td className="app-td py-2.5">
+                    <td className="app-td py-2">{item.quantity ?? 0}</td>
+                    <td className="app-td py-2">
                       <div className="font-medium leading-tight">{item.available_quantity ?? 0}</div>
                       {hasAvailable && isLotLike ? (
                         <div className="mt-0.5 text-[11px] text-zinc-500">partial sell ready</div>
                       ) : null}
                     </td>
-                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.cost_basis_unit)}</td>
-                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.cost_basis_total)}</td>
-                    <td className="app-td py-2.5 whitespace-nowrap">{money(item.estimated_value_total)}</td>
-                    <td className="app-td py-2.5">
+                    <td className="app-td py-2 whitespace-nowrap">{money(item.cost_basis_unit)}</td>
+                    <td className="app-td py-2 whitespace-nowrap">{money(item.cost_basis_total)}</td>
+                    <td className="app-td py-2 whitespace-nowrap">{money(item.estimated_value_total)}</td>
+                    <td className="app-td py-2">
                       <div className="max-w-[140px] truncate">{item.storage_location || '—'}</div>
                     </td>
 
-                    <td className="app-td py-2.5">
+                    <td className="app-td py-2">
                       <div className="flex flex-wrap gap-1.5">
                         <Link href={`/app/inventory/${item.id}`} className="app-button">
                           Details
@@ -582,6 +590,168 @@ export default async function InventoryPage({
                                 Sell Qty
                               </Link>
                             ) : null}
+
+                            <details className="w-full rounded-lg border border-zinc-800 bg-zinc-950/80 p-2">
+                              <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-wide text-zinc-300">
+                                Inline Quick Sell
+                              </summary>
+
+                              <div className="mt-1 text-[11px] leading-snug text-zinc-500">
+                                Fast entry for simple sales. For more detail, use the full Sell page.
+                              </div>
+
+                              <form action={quickSellAction} className="mt-2 space-y-2">
+                                <input type="hidden" name="inventory_item_id" value={item.id} />
+                                <input type="hidden" name="sale_date" value={new Date().toISOString().slice(0, 10)} />
+
+                                <div className="grid gap-2 md:grid-cols-2">
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Qty
+                                    </label>
+                                    <input
+                                      name="quantity_sold"
+                                      type="number"
+                                      min={1}
+                                      max={available}
+                                      defaultValue={1}
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Item Sale Price
+                                    </label>
+                                    <input
+                                      name="gross_sale"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue=""
+                                      placeholder="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Shipping Charged
+                                    </label>
+                                    <input
+                                      name="shipping_charged"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Platform Fees
+                                    </label>
+                                    <input
+                                      name="platform_fees"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Postage
+                                    </label>
+                                    <input
+                                      name="shipping_cost"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Supplies
+                                    </label>
+                                    <input
+                                      name="supplies_cost"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Other Costs
+                                    </label>
+                                    <input
+                                      name="other_costs"
+                                      type="number"
+                                      min={0}
+                                      step="0.01"
+                                      defaultValue="0.00"
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Platform
+                                    </label>
+                                    <input
+                                      name="platform"
+                                      type="text"
+                                      placeholder="eBay, Whatnot, local..."
+                                      className="app-input"
+                                    />
+                                  </div>
+
+                                  <div className="md:col-span-2">
+                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+                                      Sale Notes
+                                    </label>
+                                    <textarea
+                                      name="notes"
+                                      rows={2}
+                                      placeholder="Optional: which item from lot, condition, bundle note..."
+                                      className="app-textarea"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2 pt-1">
+                                  <button
+                                    type="submit"
+                                    name="mode"
+                                    value="sell_one"
+                                    className="app-button-primary"
+                                  >
+                                    Sell 1 Now
+                                  </button>
+
+                                  {isLotLike ? (
+                                    <button
+                                      type="submit"
+                                      name="mode"
+                                      value="sell_all"
+                                      className="app-button"
+                                    >
+                                      Sell All Now
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </form>
+                            </details>
                           </>
                         ) : latestActiveSale ? (
                           <form action={reverseSaleAction}>
