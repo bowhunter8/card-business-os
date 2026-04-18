@@ -1,5 +1,11 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+
+type TaxYearSettingsRow = {
+  year: number
+  beginning_inventory: number | null
+}
 
 type TaxSaleRow = {
   sale_date: string | null
@@ -107,10 +113,46 @@ function getYearBounds(year: number) {
   }
 }
 
+async function saveBeginningInventoryAction(formData: FormData) {
+  'use server'
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return
+
+  const year = Number(String(formData.get('year') ?? '0'))
+  const beginningInventory = Number(String(formData.get('beginning_inventory') ?? '0'))
+
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return
+  }
+
+  const safeBeginningInventory = Number.isFinite(beginningInventory)
+    ? Number(beginningInventory.toFixed(2))
+    : 0
+
+  await supabase.from('tax_year_settings').upsert(
+    {
+      user_id: user.id,
+      year,
+      beginning_inventory: safeBeginningInventory,
+    },
+    {
+      onConflict: 'user_id,year',
+    }
+  )
+
+  revalidatePath('/app/reports/tax/summary')
+}
+
 export default async function TaxSummaryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year?: string }>
+  searchParams?: Promise<{ year?: string; saved?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const currentYear = new Date().getFullYear()
@@ -119,6 +161,7 @@ export default async function TaxSummaryPage({
     Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= currentYear + 1
       ? parsedYear
       : currentYear
+  const saved = String(params?.saved ?? '') === 'beginning_inventory'
 
   const supabase = await createClient()
 
@@ -130,7 +173,7 @@ export default async function TaxSummaryPage({
 
   const { start, end } = getYearBounds(selectedYear)
 
-  const [salesRes, inventoryRes] = await Promise.all([
+  const [salesRes, inventoryRes, yearSettingsRes] = await Promise.all([
     supabase
       .from('sales')
       .select(`
@@ -177,10 +220,23 @@ export default async function TaxSummaryPage({
         created_at
       `)
       .eq('user_id', user.id),
+
+    supabase
+      .from('tax_year_settings')
+      .select(`
+        year,
+        beginning_inventory
+      `)
+      .eq('user_id', user.id)
+      .eq('year', selectedYear)
+      .maybeSingle(),
   ])
 
   const sales = ((salesRes.data ?? []) as TaxSaleRow[]).filter((s) => !s.reversed_at)
   const inventory = (inventoryRes.data ?? []) as TaxInventoryRow[]
+  const yearSettings = (yearSettingsRes.data ?? null) as TaxYearSettingsRow | null
+
+  const beginningInventory = Number(yearSettings?.beginning_inventory ?? 0)
 
   const grossRevenue = sales.reduce((sum, s) => sum + Number(s.gross_sale ?? 0), 0)
   const platformFees = sales.reduce((sum, s) => sum + Number(s.platform_fees ?? 0), 0)
@@ -203,6 +259,7 @@ export default async function TaxSummaryPage({
   const summaryRows = [
     {
       year: selectedYear,
+      beginning_inventory: beginningInventory.toFixed(2),
       gross_revenue: grossRevenue.toFixed(2),
       cost_of_goods_sold: totalCOGS.toFixed(2),
       platform_fees: platformFees.toFixed(2),
@@ -292,6 +349,12 @@ export default async function TaxSummaryPage({
         </div>
       </div>
 
+      {saved ? (
+        <div className="app-alert-success">
+          Beginning inventory saved for tax year {selectedYear}.
+        </div>
+      ) : null}
+
       <form method="get" className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-end">
           <div className="w-full max-w-[180px]">
@@ -320,6 +383,50 @@ export default async function TaxSummaryPage({
         <div className="mt-2 text-xs text-zinc-400">
           Sales are filtered to the selected year. Inventory is a current live snapshot based on
           available quantity and cost basis still on hand.
+        </div>
+      </form>
+
+      <form action={saveBeginningInventoryAction} className="app-section p-4">
+        <h2 className="text-xl font-semibold">Beginning Inventory Input</h2>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-[180px_220px_auto] md:items-end">
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Tax Year
+            </label>
+            <input
+              type="number"
+              name="year"
+              value={selectedYear}
+              readOnly
+              className="app-input bg-zinc-900"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Beginning Inventory
+            </label>
+            <input
+              type="number"
+              name="beginning_inventory"
+              min="0"
+              step="0.01"
+              defaultValue={beginningInventory.toFixed(2)}
+              className="app-input"
+            />
+          </div>
+
+          <div className="flex">
+            <button type="submit" className="app-button-primary">
+              Save Beginning Inventory
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-2 text-xs text-zinc-400">
+          Enter the starting inventory value for the selected tax year. This should usually match
+          the prior year ending inventory or your starting inventory records.
         </div>
       </form>
 
@@ -353,11 +460,9 @@ export default async function TaxSummaryPage({
       <div className="app-section p-4">
         <h2 className="text-xl font-semibold">Inventory Snapshot</h2>
 
-        <div className="mt-3">
-          <Stat
-            label="Current Inventory Value"
-            value={money(endingInventory)}
-          />
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <Stat label="Beginning Inventory" value={money(beginningInventory)} />
+          <Stat label="Current Inventory Value" value={money(endingInventory)} />
         </div>
 
         <div className="mt-2 text-xs text-zinc-400">
@@ -379,16 +484,20 @@ export default async function TaxSummaryPage({
             shipping expense, and other expenses as support for your deductions and business records.
           </p>
           <p>
-            3. Export the summary CSV for your year totals and export the detailed sales CSV as
+            3. Use <span className="font-semibold text-zinc-100">Beginning Inventory</span> as your
+            starting inventory amount for the selected tax year.
+          </p>
+          <p>
+            4. Export the summary CSV for your year totals and export the detailed sales CSV as
             line-by-line backup.
           </p>
           <p>
-            4. Export the inventory CSV as support for what is still on hand, but remember this page
+            5. Export the inventory CSV as support for what is still on hand, but remember this page
             currently shows a live inventory snapshot rather than a locked historical year-end
             snapshot.
           </p>
           <p>
-            5. Keep receipts, purchase records, and platform statements with these exports before
+            6. Keep receipts, purchase records, and platform statements with these exports before
             filing.
           </p>
         </div>
@@ -396,8 +505,9 @@ export default async function TaxSummaryPage({
 
       <div className="app-alert-warning">
         This report is based on recorded sales and current inventory data. Confirm totals before
-        filing. For a fully historical year-end inventory number, you will want a locked beginning
-        inventory and ending inventory workflow.
+        filing. Beginning inventory is pulled from your yearly tax settings table if entered. For a
+        fully historical year-end inventory number, you will still want a locked beginning inventory
+        and ending inventory workflow.
       </div>
     </div>
   )
