@@ -20,6 +20,13 @@ type WhatnotOrderRow = {
   source_file_name: string | null
 }
 
+type WhatnotOrderSummaryRow = {
+  break_id: string | null
+  subtotal: number | null
+  shipping_price: number | null
+  total: number | null
+}
+
 type SuggestedGroup = {
   key: string
   seller: string
@@ -108,7 +115,7 @@ export default async function WhatnotOrdersPage({
 
   if (!user) return null
 
-  const { data, error } = await supabase
+  let filteredQuery = supabase
     .from('whatnot_orders')
     .select(`
       id,
@@ -129,39 +136,84 @@ export default async function WhatnotOrdersPage({
       source_file_name
     `)
     .eq('user_id', user.id)
-    .order('processed_date', { ascending: false })
 
-  const allOrders = (data ?? []) as WhatnotOrderRow[]
+  if (qRaw === 'unassigned') {
+    filteredQuery = filteredQuery.is('break_id', null)
+  } else if (qRaw === 'assigned') {
+    filteredQuery = filteredQuery.not('break_id', 'is', null)
+  }
+
+  const summaryQuery = supabase
+    .from('whatnot_orders')
+    .select(`
+      break_id,
+      subtotal,
+      shipping_price,
+      total
+    `)
+    .eq('user_id', user.id)
+
+  const shouldLoadSuggestions = qRaw !== 'assigned'
+
+  const suggestionsQuery = shouldLoadSuggestions
+    ? supabase
+        .from('whatnot_orders')
+        .select(`
+          id,
+          break_id,
+          order_id,
+          order_numeric_id,
+          buyer,
+          seller,
+          product_name,
+          processed_date,
+          processed_date_display,
+          order_status,
+          quantity,
+          subtotal,
+          shipping_price,
+          taxes,
+          total,
+          source_file_name
+        `)
+        .eq('user_id', user.id)
+        .is('break_id', null)
+        .order('processed_date', { ascending: false })
+    : null
+
+  const [filteredRes, summaryRes, suggestionsRes] = await Promise.all([
+    filteredQuery.order('processed_date', { ascending: false }),
+    summaryQuery,
+    suggestionsQuery,
+  ])
+
+  const filteredOrders = (filteredRes.data ?? []) as WhatnotOrderRow[]
+  const summaryRows = (summaryRes.data ?? []) as WhatnotOrderSummaryRow[]
+  const suggestedSourceOrders = ((suggestionsRes?.data ?? []) as WhatnotOrderRow[])
 
   let totalOrders = 0
   let subtotalTotal = 0
   let shippingTotal = 0
   let totalPaid = 0
+  let unassignedCount = 0
+  let assignedCount = 0
 
-  const unassignedOrders: WhatnotOrderRow[] = []
-  const assignedOrders: WhatnotOrderRow[] = []
-
-  for (const order of allOrders) {
+  for (const order of summaryRows) {
     totalOrders += 1
     subtotalTotal += Number(order.subtotal ?? 0)
     shippingTotal += Number(order.shipping_price ?? 0)
     totalPaid += Number(order.total ?? 0)
 
     if (!order.break_id) {
-      unassignedOrders.push(order)
+      unassignedCount += 1
     } else {
-      assignedOrders.push(order)
+      assignedCount += 1
     }
   }
 
-  const filteredOrders =
-    qRaw === 'unassigned'
-      ? unassignedOrders
-      : qRaw === 'assigned'
-        ? assignedOrders
-        : allOrders
-
-  const suggestedGroups = buildSuggestedGroups(unassignedOrders)
+  const suggestedGroups = shouldLoadSuggestions
+    ? buildSuggestedGroups(suggestedSourceOrders)
+    : []
 
   const pageTitle =
     qRaw === 'unassigned'
@@ -216,9 +268,9 @@ export default async function WhatnotOrdersPage({
         </Link>
       </div>
 
-      {error ? (
+      {filteredRes.error ? (
         <div className="app-alert-error">
-          Order load error: {error.message}
+          Order load error: {filteredRes.error.message}
         </div>
       ) : null}
 
@@ -233,7 +285,7 @@ export default async function WhatnotOrdersPage({
           className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Unassigned</div>
-          <div className="mt-1 text-2xl font-semibold">{unassignedOrders.length}</div>
+          <div className="mt-1 text-2xl font-semibold">{unassignedCount}</div>
         </Link>
 
         <Link
@@ -241,7 +293,7 @@ export default async function WhatnotOrdersPage({
           className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Assigned to Break</div>
-          <div className="mt-1 text-2xl font-semibold">{assignedOrders.length}</div>
+          <div className="mt-1 text-2xl font-semibold">{assignedCount}</div>
         </Link>
 
         <div className="app-metric-card">

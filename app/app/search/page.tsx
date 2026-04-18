@@ -53,6 +53,40 @@ type InventoryItemRow = {
   source_type: string | null
 }
 
+type SaleInventoryItemRow = {
+  id: string
+  source_break_id: string | null
+  title: string | null
+  player_name: string | null
+  year: number | null
+  brand: string | null
+  set_name: string | null
+  card_number: string | null
+  parallel_name: string | null
+  team: string | null
+  status: string | null
+  item_type: string | null
+  notes: string | null
+}
+
+type SaleSearchRow = {
+  id: string
+  sale_date: string | null
+  quantity_sold: number | null
+  gross_sale: number | null
+  platform_fees: number | null
+  shipping_cost: number | null
+  other_costs: number | null
+  net_proceeds: number | null
+  cost_of_goods_sold: number | null
+  profit: number | null
+  platform: string | null
+  notes: string | null
+  reversed_at: string | null
+  inventory_item_id: string | null
+  inventory_items?: SaleInventoryItemRow | null
+}
+
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -96,6 +130,22 @@ function buildBreakDisplay(breakRow: BreakRow) {
   return breakRow.product_name || breakRow.source_name || breakRow.order_number || 'Untitled break'
 }
 
+function buildSoldItemDisplay(sale: SaleSearchRow) {
+  const item = sale.inventory_items
+  if (!item) return 'Untitled sold item'
+
+  const parts = [
+    item.year,
+    item.set_name,
+    item.player_name || item.title,
+    item.card_number ? `#${item.card_number}` : null,
+    item.parallel_name,
+    item.team,
+  ]
+
+  return parts.filter(Boolean).join(' • ') || item.title || item.player_name || 'Untitled sold item'
+}
+
 export default async function GlobalSearchPage({
   searchParams,
 }: {
@@ -118,9 +168,11 @@ export default async function GlobalSearchPage({
   let matchingOrders: WhatnotOrderRow[] = []
   let matchingBreaks: BreakRow[] = []
   let matchingInventory: InventoryItemRow[] = []
+  let matchingSales: SaleSearchRow[] = []
   let ordersError: string | null = null
   let breaksError: string | null = null
   let inventoryError: string | null = null
+  let salesError: string | null = null
 
   if (qRaw) {
     if (isMultiOrderSearch) {
@@ -154,8 +206,15 @@ export default async function GlobalSearchPage({
       const orderQuery = `%${q}%`
       const breakQuery = `%${q}%`
       const inventoryQuery = `%${q}%`
+      const salesQuery = `%${q}%`
 
-      const [ordersResponse, breaksResponse, inventoryResponse] = await Promise.all([
+      const [
+        ordersResponse,
+        breaksResponse,
+        inventoryResponse,
+        soldInventoryResponse,
+        salesDirectResponse,
+      ] = await Promise.all([
         supabase
           .from('whatnot_orders')
           .select(`
@@ -253,26 +312,192 @@ export default async function GlobalSearchPage({
             ].join(',')
           )
           .limit(100),
+
+        supabase
+          .from('inventory_items')
+          .select(`
+            id,
+            source_break_id,
+            title,
+            player_name,
+            year,
+            brand,
+            set_name,
+            card_number,
+            parallel_name,
+            team,
+            quantity,
+            available_quantity,
+            cost_basis_total,
+            estimated_value_total,
+            status,
+            item_type,
+            notes,
+            source_type
+          `)
+          .eq('user_id', user.id)
+          .eq('status', 'sold')
+          .or(
+            [
+              `title.ilike.${inventoryQuery}`,
+              `player_name.ilike.${inventoryQuery}`,
+              `brand.ilike.${inventoryQuery}`,
+              `set_name.ilike.${inventoryQuery}`,
+              `card_number.ilike.${inventoryQuery}`,
+              `parallel_name.ilike.${inventoryQuery}`,
+              `team.ilike.${inventoryQuery}`,
+              `item_type.ilike.${inventoryQuery}`,
+              `notes.ilike.${inventoryQuery}`,
+            ].join(',')
+          )
+          .limit(100),
+
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            quantity_sold,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            reversed_at,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null)
+          .or(
+            [
+              `platform.ilike.${salesQuery}`,
+              `notes.ilike.${salesQuery}`,
+            ].join(',')
+          )
+          .order('sale_date', { ascending: false })
+          .limit(100),
       ])
 
       matchingOrders = (ordersResponse.data ?? []) as WhatnotOrderRow[]
       matchingBreaks = (breaksResponse.data ?? []) as BreakRow[]
       matchingInventory = (inventoryResponse.data ?? []) as InventoryItemRow[]
 
+      const soldInventoryMatches = (soldInventoryResponse.data ?? []) as InventoryItemRow[]
+      const soldInventoryIds = soldInventoryMatches.map((item) => item.id)
+
+      const salesDirectMatches = (salesDirectResponse.data ?? []) as SaleSearchRow[]
+      let salesFromInventoryMatches: SaleSearchRow[] = []
+
+      if (soldInventoryIds.length > 0) {
+        const salesFromInventoryResponse = await supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            quantity_sold,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            reversed_at,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null)
+          .in('inventory_item_id', soldInventoryIds)
+          .order('sale_date', { ascending: false })
+          .limit(100)
+
+        salesFromInventoryMatches = (salesFromInventoryResponse.data ?? []) as SaleSearchRow[]
+        salesError = salesFromInventoryResponse.error?.message ?? null
+      }
+
+      const salesMap = new Map<string, SaleSearchRow>()
+
+      for (const sale of [...salesDirectMatches, ...salesFromInventoryMatches]) {
+        salesMap.set(sale.id, sale)
+      }
+
+      matchingSales = Array.from(salesMap.values())
+
+      const salesInventoryIds = Array.from(
+        new Set(
+          matchingSales
+            .map((sale) => sale.inventory_item_id)
+            .filter((value): value is string => Boolean(value))
+        )
+      )
+
+      if (salesInventoryIds.length > 0) {
+        const relatedInventoryResponse = await supabase
+          .from('inventory_items')
+          .select(`
+            id,
+            source_break_id,
+            title,
+            player_name,
+            year,
+            brand,
+            set_name,
+            card_number,
+            parallel_name,
+            team,
+            status,
+            item_type,
+            notes
+          `)
+          .eq('user_id', user.id)
+          .in('id', salesInventoryIds)
+
+        const relatedInventoryRows = (relatedInventoryResponse.data ?? []) as SaleInventoryItemRow[]
+        const relatedInventoryMap = new Map<string, SaleInventoryItemRow>()
+
+        for (const item of relatedInventoryRows) {
+          relatedInventoryMap.set(item.id, item)
+        }
+
+        matchingSales = matchingSales.map((sale) => ({
+          ...sale,
+          inventory_items: sale.inventory_item_id
+            ? relatedInventoryMap.get(sale.inventory_item_id) ?? null
+            : null,
+        }))
+
+        salesError = salesError || relatedInventoryResponse.error?.message || null
+      }
+
       if (/^\d{4}$/.test(qRaw)) {
         matchingInventory = matchingInventory.filter(
           (item) => String(item.year ?? '') === qRaw
+        )
+
+        matchingSales = matchingSales.filter(
+          (sale) => String(sale.inventory_items?.year ?? '') === qRaw
         )
       }
 
       ordersError = ordersResponse.error?.message ?? null
       breaksError = breaksResponse.error?.message ?? null
       inventoryError = inventoryResponse.error?.message ?? null
+      salesError =
+        salesError ||
+        salesDirectResponse.error?.message ||
+        soldInventoryResponse.error?.message ||
+        null
     }
   }
 
   const totalHits =
-    matchingOrders.length + matchingBreaks.length + matchingInventory.length
+    matchingOrders.length + matchingBreaks.length + matchingInventory.length + matchingSales.length
 
   return (
     <div className="max-w-7xl space-y-6">
@@ -280,7 +505,7 @@ export default async function GlobalSearchPage({
         <div>
           <h1 className="text-3xl font-semibold">Search</h1>
           <p className="mt-2 text-zinc-400">
-            Paste order numbers, copied email text, or search normally across orders, breaks, and inventory.
+            Paste order numbers, copied email text, or search normally across orders, breaks, inventory, and sold items.
           </p>
         </div>
 
@@ -339,7 +564,7 @@ export default async function GlobalSearchPage({
 
         {qRaw ? (
           <div className="mt-3 text-sm text-zinc-400">
-            {ordersError || breaksError || inventoryError
+            {ordersError || breaksError || inventoryError || salesError
               ? 'Search ran with an error.'
               : `Found ${totalHits} result(s) for "${qRaw}"`}
           </div>
@@ -368,10 +593,17 @@ export default async function GlobalSearchPage({
         </div>
       ) : null}
 
+      {salesError ? (
+        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          Sold item search error: {salesError}
+        </div>
+      ) : null}
+
       {qRaw &&
       !ordersError &&
       !breaksError &&
       !inventoryError &&
+      !salesError &&
       totalHits === 0 ? (
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 text-sm text-zinc-400">
           No matching results found.
@@ -647,6 +879,111 @@ export default async function GlobalSearchPage({
                         Source Break
                       </Link>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!isMultiOrderSearch && matchingSales.length > 0 ? (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Matching Sold Items / Sales</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Search hits from sold item details, sold item notes, sale notes, and platform fields.
+              </p>
+            </div>
+
+            <div className="text-sm text-zinc-500">
+              {matchingSales.length} hit(s)
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4">
+            {matchingSales.map((sale) => (
+              <div
+                key={sale.id}
+                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
+                        Sold
+                      </span>
+
+                      {sale.inventory_items?.status ? (
+                        <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+                          {sale.inventory_items.status}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-2 text-lg font-semibold">
+                      {buildSoldItemDisplay(sale)}
+                    </div>
+
+                    <div className="mt-2 text-sm text-zinc-300">
+                      Sale date: {sale.sale_date || '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Qty sold: {sale.quantity_sold ?? '—'}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Gross sale: {money(sale.gross_sale)}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Profit: {money(sale.profit)}
+                    </div>
+
+                    <div className="mt-1 text-sm text-zinc-300">
+                      Platform: {sale.platform || '—'}
+                    </div>
+
+                    {sale.inventory_items?.notes ? (
+                      <div className="mt-2 text-sm text-zinc-400">
+                        Item notes: {sale.inventory_items.notes}
+                      </div>
+                    ) : null}
+
+                    {sale.notes ? (
+                      <div className="mt-1 text-sm text-zinc-400">
+                        Sale notes: {sale.notes}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {sale.inventory_item_id ? (
+                      <Link
+                        href={`/app/inventory/${sale.inventory_item_id}`}
+                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                      >
+                        Open Item
+                      </Link>
+                    ) : null}
+
+                    {sale.inventory_items?.source_break_id ? (
+                      <Link
+                        href={`/app/breaks/${sale.inventory_items.source_break_id}`}
+                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                      >
+                        Source Break
+                      </Link>
+                    ) : null}
+
+                    <Link
+                      href="/app/inventory"
+                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+                    >
+                      Open Inventory
+                    </Link>
                   </div>
                 </div>
               </div>
