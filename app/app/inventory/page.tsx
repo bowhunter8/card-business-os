@@ -383,7 +383,7 @@ export default async function InventoryPage({
 
       {saved === '1' ? (
         <div className="app-alert-success">
-          Quick sale recorded and inventory updated.
+          Quick sale recorded, inventory updated, and tax tracking kept in sync.
         </div>
       ) : null}
 
@@ -592,12 +592,31 @@ export default async function InventoryPage({
                             ) : null}
 
                             <details className="w-full rounded-lg border border-zinc-800 bg-zinc-950/80 p-2">
-                              <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-wide text-zinc-300">
-                                Inline Quick Sell
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium uppercase tracking-wide text-zinc-300">
+                                <span>Inline Quick Sell</span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {isLotLike ? `${available} available` : 'single item'}
+                                </span>
                               </summary>
 
-                              <div className="mt-1 text-[11px] leading-snug text-zinc-500">
-                                Fast entry for simple sales. For more detail, use the full Sell page.
+                              <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/70 p-2">
+                                <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
+                                  <span>
+                                    Available to sell: <span className="text-zinc-200">{available}</span>
+                                  </span>
+                                  <span>
+                                    Unit cost: <span className="text-zinc-200">{money(item.cost_basis_unit)}</span>
+                                  </span>
+                                  {isLotLike ? (
+                                    <span className="text-zinc-500">
+                                      Add a note for which item or part of the lot sold.
+                                    </span>
+                                  ) : (
+                                    <span className="text-zinc-500">
+                                      Use the full Sell page when you want a more detailed entry flow.
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <form action={quickSellAction} className="mt-2 space-y-2">
@@ -746,9 +765,13 @@ export default async function InventoryPage({
                                       value="sell_all"
                                       className="app-button"
                                     >
-                                      Sell All Now
+                                      Sell All Remaining
                                     </button>
                                   ) : null}
+
+                                  <Link href={`/app/inventory/${item.id}/sell`} className="app-button">
+                                    Open Full Sell Page
+                                  </Link>
                                 </div>
                               </form>
                             </details>

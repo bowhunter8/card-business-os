@@ -45,6 +45,14 @@ type TaxInventoryRow = {
   created_at?: string | null
 }
 
+type ExpenseRow = {
+  expense_date: string | null
+  category: string | null
+  vendor: string | null
+  amount: number | null
+  notes: string | null
+}
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -173,7 +181,7 @@ export default async function TaxSummaryPage({
 
   const { start, end } = getYearBounds(selectedYear)
 
-  const [salesRes, inventoryRes, yearSettingsRes] = await Promise.all([
+  const [salesRes, inventoryRes, yearSettingsRes, expensesRes] = await Promise.all([
     supabase
       .from('sales')
       .select(`
@@ -230,20 +238,49 @@ export default async function TaxSummaryPage({
       .eq('user_id', user.id)
       .eq('year', selectedYear)
       .maybeSingle(),
+
+    supabase
+      .from('expenses')
+      .select(`
+        expense_date,
+        category,
+        vendor,
+        amount,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .gte('expense_date', start)
+      .lt('expense_date', end)
+      .order('expense_date', { ascending: true }),
   ])
 
   const sales = ((salesRes.data ?? []) as TaxSaleRow[]).filter((s) => !s.reversed_at)
   const inventory = (inventoryRes.data ?? []) as TaxInventoryRow[]
   const yearSettings = (yearSettingsRes.data ?? null) as TaxYearSettingsRow | null
+  const expenses = (expensesRes.data ?? []) as ExpenseRow[]
 
   const beginningInventory = Number(yearSettings?.beginning_inventory ?? 0)
 
   const grossRevenue = sales.reduce((sum, s) => sum + Number(s.gross_sale ?? 0), 0)
   const platformFees = sales.reduce((sum, s) => sum + Number(s.platform_fees ?? 0), 0)
   const shippingExpense = sales.reduce((sum, s) => sum + Number(s.shipping_cost ?? 0), 0)
-  const otherExpenses = sales.reduce((sum, s) => sum + Number(s.other_costs ?? 0), 0)
+  const saleLevelOtherExpenses = sales.reduce((sum, s) => sum + Number(s.other_costs ?? 0), 0)
   const totalCOGS = sales.reduce((sum, s) => sum + Number(s.cost_of_goods_sold ?? 0), 0)
   const netProfit = sales.reduce((sum, s) => sum + Number(s.profit ?? 0), 0)
+
+  const trackedExpensesTotal = expenses.reduce((sum, expense) => {
+    return sum + Number(expense.amount ?? 0)
+  }, 0)
+
+  const trackedSuppliesTotal = expenses.reduce((sum, expense) => {
+    const category = String(expense.category ?? '').toLowerCase()
+    if (category.includes('suppl')) {
+      return sum + Number(expense.amount ?? 0)
+    }
+    return sum
+  }, 0)
+
+  const totalOtherExpenses = saleLevelOtherExpenses + trackedExpensesTotal
 
   const endingInventory = inventory.reduce((sum, item) => {
     const qty = Number(item.quantity ?? 0)
@@ -264,7 +301,10 @@ export default async function TaxSummaryPage({
       cost_of_goods_sold: totalCOGS.toFixed(2),
       platform_fees: platformFees.toFixed(2),
       shipping_expense: shippingExpense.toFixed(2),
-      other_expenses: otherExpenses.toFixed(2),
+      sale_level_other_expenses: saleLevelOtherExpenses.toFixed(2),
+      tracked_expenses_total: trackedExpensesTotal.toFixed(2),
+      tracked_supplies_total: trackedSuppliesTotal.toFixed(2),
+      total_other_expenses: totalOtherExpenses.toFixed(2),
       net_profit: netProfit.toFixed(2),
       current_inventory_snapshot_value: endingInventory.toFixed(2),
       note:
@@ -284,6 +324,14 @@ export default async function TaxSummaryPage({
     profit: Number(sale.profit ?? 0).toFixed(2),
     platform: sale.platform ?? '',
     notes: sale.notes ?? '',
+  }))
+
+  const expenseDetailRows = expenses.map((expense) => ({
+    expense_date: formatDate(expense.expense_date),
+    category: expense.category ?? '',
+    vendor: expense.vendor ?? '',
+    amount: Number(expense.amount ?? 0).toFixed(2),
+    notes: expense.notes ?? '',
   }))
 
   const inventoryDetailRows = inventory
@@ -308,6 +356,7 @@ export default async function TaxSummaryPage({
 
   const summaryCsvHref = makeDownloadHref(buildCsv(summaryRows))
   const salesCsvHref = makeDownloadHref(buildCsv(salesDetailRows))
+  const expenseCsvHref = makeDownloadHref(buildCsv(expenseDetailRows))
   const inventoryCsvHref = makeDownloadHref(buildCsv(inventoryDetailRows))
 
   const yearOptions = Array.from({ length: Math.max(currentYear - 2023 + 1, 1) }, (_, index) => {
@@ -338,6 +387,13 @@ export default async function TaxSummaryPage({
             className="app-button"
           >
             Export Sales Detail CSV
+          </a>
+          <a
+            href={expenseCsvHref}
+            download={`tax-expenses-${selectedYear}.csv`}
+            className="app-button"
+          >
+            Export Expense CSV
           </a>
           <a
             href={inventoryCsvHref}
@@ -374,6 +430,9 @@ export default async function TaxSummaryPage({
             <button type="submit" className="app-button-primary">
               Update
             </button>
+            <Link href="/app/expenses" className="app-button">
+              Supplies & Expenses
+            </Link>
             <Link href="/app/utilities" className="app-button">
               Back to Utilities
             </Link>
@@ -381,8 +440,8 @@ export default async function TaxSummaryPage({
         </div>
 
         <div className="mt-2 text-xs text-zinc-400">
-          Sales are filtered to the selected year. Inventory is a current live snapshot based on
-          available quantity and cost basis still on hand.
+          Sales and tracked expenses are filtered to the selected year. Inventory is a current live
+          snapshot based on available quantity and cost basis still on hand.
         </div>
       </form>
 
@@ -445,7 +504,14 @@ export default async function TaxSummaryPage({
           <Stat label="Cost of Goods Sold (COGS)" value={money(totalCOGS)} />
           <Stat label="Platform Fees" value={money(platformFees)} />
           <Stat label="Shipping Expense" value={money(shippingExpense)} />
-          <Stat label="Other Expenses / Supplies" value={money(otherExpenses)} />
+          <Stat label="Sale-Level Other Expenses" value={money(saleLevelOtherExpenses)} />
+          <Stat label="Tracked Expenses" value={money(trackedExpensesTotal)} />
+          <Stat label="Tracked Supplies" value={money(trackedSuppliesTotal)} />
+        </div>
+
+        <div className="mt-2 text-xs text-zinc-400">
+          Tracked expenses come from your Supplies & Expense Tracker and are shown separately from
+          sale-level costs already entered during individual sales.
         </div>
       </div>
 
@@ -481,33 +547,30 @@ export default async function TaxSummaryPage({
           </p>
           <p>
             2. Use <span className="font-semibold text-zinc-100">COGS</span>, platform fees,
-            shipping expense, and other expenses as support for your deductions and business records.
+            shipping expense, sale-level other expenses, and tracked expenses as support for your
+            deductions and business records.
           </p>
           <p>
             3. Use <span className="font-semibold text-zinc-100">Beginning Inventory</span> as your
             starting inventory amount for the selected tax year.
           </p>
           <p>
-            4. Export the summary CSV for your year totals and export the detailed sales CSV as
-            line-by-line backup.
+            4. Export the summary CSV for year totals, the sales detail CSV for item-level sales,
+            the expense CSV for supply and expense purchases, and the inventory CSV for on-hand
+            support.
           </p>
           <p>
-            5. Export the inventory CSV as support for what is still on hand, but remember this page
-            currently shows a live inventory snapshot rather than a locked historical year-end
-            snapshot.
-          </p>
-          <p>
-            6. Keep receipts, purchase records, and platform statements with these exports before
+            5. Keep receipts, purchase records, and platform statements with these exports before
             filing.
           </p>
         </div>
       </div>
 
       <div className="app-alert-warning">
-        This report is based on recorded sales and current inventory data. Confirm totals before
-        filing. Beginning inventory is pulled from your yearly tax settings table if entered. For a
-        fully historical year-end inventory number, you will still want a locked beginning inventory
-        and ending inventory workflow.
+        This report is based on recorded sales, tracked expenses, and current inventory data.
+        Confirm totals before filing. Beginning inventory is pulled from your yearly tax settings
+        table if entered. For a fully historical year-end inventory number, you will still want a
+        locked beginning inventory and ending inventory workflow.
       </div>
     </div>
   )
