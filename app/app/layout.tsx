@@ -4,6 +4,23 @@ import { createClient } from '@/lib/supabase/server'
 import { signOutAction } from '@/app/actions/auth'
 import AppGlobalSearch from './components/app-global-search'
 
+function NavLink({
+  href,
+  label,
+}: {
+  href: string
+  label: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
+    >
+      {label}
+    </Link>
+  )
+}
+
 export default async function AppLayout({
   children,
 }: {
@@ -32,40 +49,11 @@ export default async function AppLayout({
           </div>
 
           <nav className="space-y-1">
-            <Link
-              href="/app"
-              className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
-            >
-              Dashboard
-            </Link>
-
-            <Link
-              href="/app/inventory"
-              className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
-            >
-              Inventory
-            </Link>
-
-            <Link
-              href="/app/breaks"
-              className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
-            >
-              Breaks
-            </Link>
-
-            <Link
-              href="/app/whatnot-orders"
-              className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
-            >
-              Whatnot Orders
-            </Link>
-
-            <Link
-              href="/app/utilities"
-              className="block rounded-lg border border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-800"
-            >
-              Utilities
-            </Link>
+            <NavLink href="/app" label="Dashboard" />
+            <NavLink href="/app/inventory" label="Inventory" />
+            <NavLink href="/app/breaks" label="Breaks" />
+            <NavLink href="/app/whatnot-orders" label="Whatnot Orders" />
+            <NavLink href="/app/utilities" label="Utilities" />
           </nav>
 
           <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/70 p-2.5">

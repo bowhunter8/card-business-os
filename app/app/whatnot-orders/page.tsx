@@ -153,7 +153,7 @@ export default async function WhatnotOrdersPage({
     `)
     .eq('user_id', user.id)
 
-  const shouldLoadSuggestions = qRaw !== 'assigned'
+  const shouldLoadSuggestions = qRaw !== 'assigned' && qRaw !== 'unassigned'
 
   const suggestionsQuery = shouldLoadSuggestions
     ? supabase
@@ -189,7 +189,11 @@ export default async function WhatnotOrdersPage({
 
   const filteredOrders = (filteredRes.data ?? []) as WhatnotOrderRow[]
   const summaryRows = (summaryRes.data ?? []) as WhatnotOrderSummaryRow[]
-  const suggestedSourceOrders = ((suggestionsRes?.data ?? []) as WhatnotOrderRow[])
+
+  const suggestedSourceOrders =
+    qRaw === 'unassigned'
+      ? filteredOrders
+      : ((suggestionsRes?.data ?? []) as WhatnotOrderRow[])
 
   let totalOrders = 0
   let subtotalTotal = 0
@@ -211,9 +215,10 @@ export default async function WhatnotOrdersPage({
     }
   }
 
-  const suggestedGroups = shouldLoadSuggestions
-    ? buildSuggestedGroups(suggestedSourceOrders)
-    : []
+  const suggestedGroups =
+    qRaw === 'assigned'
+      ? []
+      : buildSuggestedGroups(suggestedSourceOrders)
 
   const pageTitle =
     qRaw === 'unassigned'

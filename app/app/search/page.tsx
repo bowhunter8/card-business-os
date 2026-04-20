@@ -146,6 +146,33 @@ function buildSoldItemDisplay(sale: SaleSearchRow) {
   return parts.filter(Boolean).join(' • ') || item.title || item.player_name || 'Untitled sold item'
 }
 
+function ResultSection({
+  title,
+  subtitle,
+  count,
+  children,
+}: {
+  title: string
+  subtitle: string
+  count: number
+  children: React.ReactNode
+}) {
+  return (
+    <div className="app-section p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <p className="mt-0.5 text-sm text-zinc-400">{subtitle}</p>
+        </div>
+
+        <div className="text-xs text-zinc-500">{count} hit(s)</div>
+      </div>
+
+      <div className="mt-4 grid gap-3">{children}</div>
+    </div>
+  )
+}
+
 export default async function GlobalSearchPage({
   searchParams,
 }: {
@@ -500,104 +527,56 @@ export default async function GlobalSearchPage({
     matchingOrders.length + matchingBreaks.length + matchingInventory.length + matchingSales.length
 
   return (
-    <div className="max-w-7xl space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide space-y-3">
+      <div className="app-page-header gap-3">
         <div>
-          <h1 className="text-3xl font-semibold">Search</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Search</h1>
+          <p className="app-subtitle">
             Paste order numbers, copied email text, or search normally across orders, breaks, inventory, and sold items.
           </p>
         </div>
 
-        <div className="flex gap-3">
-          <Link
-            href="/app/whatnot-orders"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+        <div className="flex flex-wrap gap-2">
+          <Link href="/app/whatnot-orders" className="app-button">
             Whatnot Orders
           </Link>
-          <Link
-            href="/app/breaks"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href="/app/breaks" className="app-button">
             Breaks
           </Link>
-          <Link
-            href="/app/inventory"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
+          <Link href="/app/inventory" className="app-button">
             Inventory
           </Link>
         </div>
       </div>
 
-      <form
-        method="get"
-        action="/app/search"
-        className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4"
-      >
-        <div className="flex flex-col gap-3 md:flex-row">
-          <input
-            type="text"
-            name="q"
-            defaultValue={qRaw}
-            placeholder="Paste order numbers, copied email text, or search breaker, player, set, item #, notes..."
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-2"
-          />
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-            >
-              Search
-            </button>
-            {qRaw ? (
-              <Link
-                href="/app/search"
-                className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-              >
-                Clear
-              </Link>
-            ) : null}
-          </div>
-        </div>
-
-        {qRaw ? (
-          <div className="mt-3 text-sm text-zinc-400">
+      {qRaw ? (
+        <div className="app-section p-4">
+          <div className="text-sm text-zinc-300">
             {ordersError || breaksError || inventoryError || salesError
               ? 'Search ran with an error.'
               : `Found ${totalHits} result(s) for "${qRaw}"`}
           </div>
-        ) : (
-          <div className="mt-3 text-sm text-zinc-500">
-            Paste order numbers or email text, or type a normal search term and press Search.
+          <div className="mt-1 text-xs text-zinc-500">
+            Use the global search bar at the top of the app to run a new search.
           </div>
-        )}
-      </form>
-
-      {ordersError ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Order search error: {ordersError}
+          <div className="mt-3">
+            <Link href="/app/search" className="app-button">
+              Clear Results
+            </Link>
+          </div>
         </div>
-      ) : null}
-
-      {breaksError ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Break search error: {breaksError}
+      ) : (
+        <div className="app-section p-4">
+          <div className="text-sm text-zinc-300">
+            Use the global search bar at the top of the app to search across orders, breaks, inventory, and sold items.
+          </div>
         </div>
-      ) : null}
+      )}
 
-      {inventoryError ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Inventory search error: {inventoryError}
-        </div>
-      ) : null}
-
-      {salesError ? (
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Sold item search error: {salesError}
-        </div>
-      ) : null}
+      {ordersError ? <div className="app-alert-error">Order search error: {ordersError}</div> : null}
+      {breaksError ? <div className="app-alert-error">Break search error: {breaksError}</div> : null}
+      {inventoryError ? <div className="app-alert-error">Inventory search error: {inventoryError}</div> : null}
+      {salesError ? <div className="app-alert-error">Sold item search error: {salesError}</div> : null}
 
       {qRaw &&
       !ordersError &&
@@ -605,391 +584,269 @@ export default async function GlobalSearchPage({
       !inventoryError &&
       !salesError &&
       totalHits === 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8 text-sm text-zinc-400">
-          No matching results found.
-        </div>
+        <div className="app-empty">No matching results found.</div>
       ) : null}
 
       {matchingOrders.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold">Matching Whatnot Orders</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                {isMultiOrderSearch
-                  ? 'Exact order-number matches from pasted order text.'
-                  : 'Matching staging and linked Whatnot orders.'}
-              </p>
-            </div>
-
-            <div className="text-sm text-zinc-500">
-              {matchingOrders.length} hit(s)
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4">
-            {matchingOrders.map((order) => (
-              <div
-                key={order.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {order.break_id ? (
-                        <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                          Linked
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                          Staging
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-2 text-lg font-semibold">
-                      {order.product_name || 'Untitled order'}
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-300">
-                      Seller: {order.seller || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Buyer: {order.buyer || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Order #: {order.order_numeric_id || order.order_id || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Date: {order.processed_date_display || order.processed_date || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Status: {order.order_status || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Qty: {order.quantity ?? '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Total: {money(order.total)}
-                    </div>
-
-                    {order.source_file_name ? (
-                      <div className="mt-1 text-xs text-zinc-500">
-                        Source file: {order.source_file_name}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      href={buildFocusHref(order)}
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
-                      Open Order
-                    </Link>
-
+        <ResultSection
+          title="Matching Whatnot Orders"
+          subtitle={
+            isMultiOrderSearch
+              ? 'Exact order-number matches from pasted order text.'
+              : 'Matching staging and linked Whatnot orders.'
+          }
+          count={matchingOrders.length}
+        >
+          {matchingOrders.map((order) => (
+            <div key={order.id} className="app-card-tight p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     {order.break_id ? (
-                      <>
-                        <Link
-                          href={`/app/breaks/${order.break_id}`}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                        >
-                          Break Details
-                        </Link>
-                        <Link
-                          href={`/app/breaks/${order.break_id}/edit`}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                        >
-                          Edit Break
-                        </Link>
-                      </>
-                    ) : null}
+                      <span className="app-badge app-badge-success">Linked</span>
+                    ) : (
+                      <span className="app-badge app-badge-warning">Staging</span>
+                    )}
                   </div>
+
+                  <div className="mt-2 text-lg font-semibold">
+                    {order.product_name || 'Untitled order'}
+                  </div>
+
+                  <div className="mt-2 text-sm text-zinc-300">Seller: {order.seller || '—'}</div>
+                  <div className="mt-1 text-sm text-zinc-300">Buyer: {order.buyer || '—'}</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Order #: {order.order_numeric_id || order.order_id || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Date: {order.processed_date_display || order.processed_date || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Status: {order.order_status || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">Qty: {order.quantity ?? '—'}</div>
+                  <div className="mt-1 text-sm text-zinc-300">Total: {money(order.total)}</div>
+
+                  {order.source_file_name ? (
+                    <div className="mt-1 text-xs text-zinc-500">
+                      Source file: {order.source_file_name}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Link href={buildFocusHref(order)} className="app-button">
+                    Open Order
+                  </Link>
+
+                  {order.break_id ? (
+                    <>
+                      <Link href={`/app/breaks/${order.break_id}`} className="app-button">
+                        Break Details
+                      </Link>
+                      <Link href={`/app/breaks/${order.break_id}/edit`} className="app-button">
+                        Edit Break
+                      </Link>
+                    </>
+                  ) : null}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          ))}
+        </ResultSection>
       ) : null}
 
       {!isMultiOrderSearch && matchingBreaks.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold">Matching Breaks</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Search hits from order number, breaker/source, product, format, and notes.
-              </p>
-            </div>
-
-            <div className="text-sm text-zinc-500">
-              {matchingBreaks.length} hit(s)
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4">
-            {matchingBreaks.map((breakRow) => (
-              <div
-                key={breakRow.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {breakRow.reversed_at ? (
-                        <span className="rounded-full border border-red-800 bg-red-950/40 px-2 py-1 text-xs text-red-300">
-                          Reversed
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
-                          Active
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-2 text-lg font-semibold">
-                      {buildBreakDisplay(breakRow)}
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-300">
-                      Breaker / Source: {breakRow.source_name || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Order #: {breakRow.order_number || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Format: {breakRow.format_type || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Break date: {breakRow.break_date || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Cost: {money(breakRow.total_cost)}
-                    </div>
-
-                    {breakRow.notes ? (
-                      <div className="mt-2 text-sm text-zinc-400">
-                        Notes: {breakRow.notes}
-                      </div>
-                    ) : null}
+        <ResultSection
+          title="Matching Breaks"
+          subtitle="Search hits from order number, breaker/source, product, format, and notes."
+          count={matchingBreaks.length}
+        >
+          {matchingBreaks.map((breakRow) => (
+            <div key={breakRow.id} className="app-card-tight p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {breakRow.reversed_at ? (
+                      <span className="app-badge app-badge-danger">Reversed</span>
+                    ) : (
+                      <span className="app-badge app-badge-info">Active</span>
+                    )}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      href={`/app/breaks/${breakRow.id}`}
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
-                      Break Details
-                    </Link>
-                    <Link
-                      href={`/app/breaks/${breakRow.id}/edit`}
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
-                      Edit Break
-                    </Link>
+                  <div className="mt-2 text-lg font-semibold">
+                    {buildBreakDisplay(breakRow)}
                   </div>
+
+                  <div className="mt-2 text-sm text-zinc-300">
+                    Breaker / Source: {breakRow.source_name || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Order #: {breakRow.order_number || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Format: {breakRow.format_type || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Break date: {breakRow.break_date || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Cost: {money(breakRow.total_cost)}
+                  </div>
+
+                  {breakRow.notes ? (
+                    <div className="mt-2 text-sm text-zinc-400">
+                      Notes: {breakRow.notes}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Link href={`/app/breaks/${breakRow.id}`} className="app-button">
+                    Break Details
+                  </Link>
+                  <Link href={`/app/breaks/${breakRow.id}/edit`} className="app-button">
+                    Edit Break
+                  </Link>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          ))}
+        </ResultSection>
       ) : null}
 
       {!isMultiOrderSearch && matchingInventory.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold">Matching Inventory Items</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Search hits from item title, player name, set, item number, team, notes, and related inventory fields.
-              </p>
-            </div>
-
-            <div className="text-sm text-zinc-500">
-              {matchingInventory.length} hit(s)
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4">
-            {matchingInventory.map((item) => (
-              <div
-                key={item.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="mt-0 text-lg font-semibold">
-                      {buildInventoryDisplay(item) || item.title || 'Untitled inventory item'}
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-300">
-                      Type: {item.item_type || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Status: {item.status || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Qty: {item.quantity ?? '—'} / Available: {item.available_quantity ?? '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Cost basis: {money(item.cost_basis_total)}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Est. value: {money(item.estimated_value_total)}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Source type: {item.source_type || '—'}
-                    </div>
-
-                    {item.notes ? (
-                      <div className="mt-2 text-sm text-zinc-400">
-                        Notes: {item.notes}
-                      </div>
-                    ) : null}
+        <ResultSection
+          title="Matching Inventory Items"
+          subtitle="Search hits from item title, player name, set, item number, team, notes, and related inventory fields."
+          count={matchingInventory.length}
+        >
+          {matchingInventory.map((item) => (
+            <div key={item.id} className="app-card-tight p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="text-lg font-semibold">
+                    {buildInventoryDisplay(item) || item.title || 'Untitled inventory item'}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      href="/app/inventory"
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
-                      Open Inventory
+                  <div className="mt-2 text-sm text-zinc-300">Type: {item.item_type || '—'}</div>
+                  <div className="mt-1 text-sm text-zinc-300">Status: {item.status || '—'}</div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Qty: {item.quantity ?? '—'} / Available: {item.available_quantity ?? '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Cost basis: {money(item.cost_basis_total)}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Est. value: {money(item.estimated_value_total)}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Source type: {item.source_type || '—'}
+                  </div>
+
+                  {item.notes ? (
+                    <div className="mt-2 text-sm text-zinc-400">Notes: {item.notes}</div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Link href={`/app/inventory/${item.id}`} className="app-button">
+                    Open Item
+                  </Link>
+
+                  <Link href="/app/inventory" className="app-button">
+                    Open Inventory
+                  </Link>
+
+                  {item.source_break_id ? (
+                    <Link href={`/app/breaks/${item.source_break_id}`} className="app-button">
+                      Source Break
                     </Link>
-
-                    {item.source_break_id ? (
-                      <Link
-                        href={`/app/breaks/${item.source_break_id}`}
-                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                      >
-                        Source Break
-                      </Link>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          ))}
+        </ResultSection>
       ) : null}
 
       {!isMultiOrderSearch && matchingSales.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold">Matching Sold Items / Sales</h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                Search hits from sold item details, sold item notes, sale notes, and platform fields.
-              </p>
-            </div>
+        <ResultSection
+          title="Matching Sold Items / Sales"
+          subtitle="Search hits from sold item details, sold item notes, sale notes, and platform fields."
+          count={matchingSales.length}
+        >
+          {matchingSales.map((sale) => (
+            <div key={sale.id} className="app-card-tight p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="app-badge app-badge-success">Sold</span>
 
-            <div className="text-sm text-zinc-500">
-              {matchingSales.length} hit(s)
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4">
-            {matchingSales.map((sale) => (
-              <div
-                key={sale.id}
-                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                        Sold
+                    {sale.inventory_items?.status ? (
+                      <span className="app-badge app-badge-neutral">
+                        {sale.inventory_items.status}
                       </span>
-
-                      {sale.inventory_items?.status ? (
-                        <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
-                          {sale.inventory_items.status}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-2 text-lg font-semibold">
-                      {buildSoldItemDisplay(sale)}
-                    </div>
-
-                    <div className="mt-2 text-sm text-zinc-300">
-                      Sale date: {sale.sale_date || '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Qty sold: {sale.quantity_sold ?? '—'}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Gross sale: {money(sale.gross_sale)}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Profit: {money(sale.profit)}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Platform: {sale.platform || '—'}
-                    </div>
-
-                    {sale.inventory_items?.notes ? (
-                      <div className="mt-2 text-sm text-zinc-400">
-                        Item notes: {sale.inventory_items.notes}
-                      </div>
-                    ) : null}
-
-                    {sale.notes ? (
-                      <div className="mt-1 text-sm text-zinc-400">
-                        Sale notes: {sale.notes}
-                      </div>
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {sale.inventory_item_id ? (
-                      <Link
-                        href={`/app/inventory/${sale.inventory_item_id}`}
-                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                      >
-                        Open Item
-                      </Link>
-                    ) : null}
+                  <div className="mt-2 text-lg font-semibold">
+                    {buildSoldItemDisplay(sale)}
+                  </div>
 
-                    {sale.inventory_items?.source_break_id ? (
-                      <Link
-                        href={`/app/breaks/${sale.inventory_items.source_break_id}`}
-                        className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                      >
-                        Source Break
-                      </Link>
-                    ) : null}
+                  <div className="mt-2 text-sm text-zinc-300">
+                    Sale date: {sale.sale_date || '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Qty sold: {sale.quantity_sold ?? '—'}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Gross sale: {money(sale.gross_sale)}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Profit: {money(sale.profit)}
+                  </div>
+                  <div className="mt-1 text-sm text-zinc-300">
+                    Platform: {sale.platform || '—'}
+                  </div>
 
-                    <Link
-                      href="/app/inventory"
-                      className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
-                    >
-                      Open Inventory
+                  {sale.inventory_items?.notes ? (
+                    <div className="mt-2 text-sm text-zinc-400">
+                      Item notes: {sale.inventory_items.notes}
+                    </div>
+                  ) : null}
+
+                  {sale.notes ? (
+                    <div className="mt-1 text-sm text-zinc-400">
+                      Sale notes: {sale.notes}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {sale.inventory_item_id ? (
+                    <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button">
+                      Open Item
                     </Link>
-                  </div>
+                  ) : null}
+
+                  {sale.inventory_items?.source_break_id ? (
+                    <Link
+                      href={`/app/breaks/${sale.inventory_items.source_break_id}`}
+                      className="app-button"
+                    >
+                      Source Break
+                    </Link>
+                  ) : null}
+
+                  <Link href="/app/inventory" className="app-button">
+                    Open Inventory
+                  </Link>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          ))}
+        </ResultSection>
       ) : null}
     </div>
   )

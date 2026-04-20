@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
-import { quickSellAction } from '@/app/actions/sales'
 
 type InventoryRow = {
   id: string
@@ -45,6 +44,9 @@ type SortKey =
   | 'storage_location'
 
 type SortDir = 'asc' | 'desc'
+
+const DEFAULT_LIMIT = 25
+const LIMIT_OPTIONS = [10, 25, 50] as const
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -156,7 +158,39 @@ function renderStatusPill(status: string | null) {
   )
 }
 
-function getFilterHref(filter: '' | 'listed' | 'junk' | 'personal', sortKey: SortKey, sortDir: SortDir) {
+function buildInventoryHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+
+  return `/app/inventory?${params.toString()}`
+}
+
+function getFilterHref(
+  filter: '' | 'listed' | 'junk' | 'personal',
+  sortKey: SortKey,
+  sortDir: SortDir,
+  limit: number
+) {
   const params = new URLSearchParams()
 
   if (filter) {
@@ -165,9 +199,36 @@ function getFilterHref(filter: '' | 'listed' | 'junk' | 'personal', sortKey: Sor
 
   params.set('sort', sortKey)
   params.set('dir', sortDir)
+  params.set('page', '1')
+  params.set('limit', String(limit))
 
   const query = params.toString()
   return query ? `/app/inventory?${query}` : '/app/inventory'
+}
+
+function buildLimitHref({
+  q,
+  sort,
+  dir,
+  limit,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  limit: number
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', '1')
+  params.set('limit', String(limit))
+
+  return `/app/inventory?${params.toString()}`
 }
 
 function SortHeader({
@@ -176,12 +237,14 @@ function SortHeader({
   currentSortKey,
   currentSortDir,
   q,
+  limit,
 }: {
   label: string
   sortKey: SortKey
   currentSortKey: SortKey
   currentSortDir: SortDir
   q: string
+  limit: number
 }) {
   const params = new URLSearchParams()
 
@@ -191,6 +254,8 @@ function SortHeader({
 
   params.set('sort', sortKey)
   params.set('dir', getNextSortDir(currentSortKey, currentSortDir, sortKey))
+  params.set('page', '1')
+  params.set('limit', String(limit))
 
   return (
     <Link
@@ -221,13 +286,20 @@ function SummaryCard({
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; sort?: string; dir?: string; saved?: string }>
+  searchParams?: Promise<{ q?: string; sort?: string; dir?: string; saved?: string; page?: string; limit?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '')
   const q = cleanSearchTerm(qRaw)
   const qNormalized = q.toLowerCase()
   const saved = String(params?.saved ?? '')
+  const requestedPage = Number(String(params?.page ?? '1'))
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
+
+  const requestedLimit = Number(String(params?.limit ?? String(DEFAULT_LIMIT)))
+  const limit = LIMIT_OPTIONS.includes(requestedLimit as (typeof LIMIT_OPTIONS)[number])
+    ? requestedLimit
+    : DEFAULT_LIMIT
 
   const requestedSort = String(params?.sort ?? 'created_at').trim() as SortKey
   const requestedDir = String(params?.dir ?? 'desc').trim() as SortDir
@@ -307,17 +379,29 @@ export default async function InventoryPage({
     )
   }
 
-  const response = await query.order('created_at', { ascending: false })
+  const dbSortKey =
+    sortKey === 'card'
+      ? 'created_at'
+      : sortKey
+
+  const from = (page - 1) * limit
+  const to = from + limit - 1
+
+  const response = await query
+    .order(dbSortKey, { ascending: sortDir === 'asc' })
+    .range(from, to)
 
   const rawItems = (response.data ?? []) as InventoryRow[]
-  const items = sortRows(rawItems, sortKey, sortDir)
+  const items = sortKey === 'card' ? sortRows(rawItems, sortKey, sortDir) : rawItems
   const error = response.error
 
-  const itemIds = items.map((item) => item.id)
+  const soldOutItemIds = items
+    .filter((item) => Number(item.available_quantity ?? 0) <= 0)
+    .map((item) => item.id)
 
   const latestActiveSaleByItemId = new Map<string, SaleRow>()
 
-  if (itemIds.length > 0) {
+  if (soldOutItemIds.length > 0) {
     const salesResponse = await supabase
       .from('sales')
       .select(`
@@ -328,7 +412,7 @@ export default async function InventoryPage({
         reversed_at
       `)
       .eq('user_id', user.id)
-      .in('inventory_item_id', itemIds)
+      .in('inventory_item_id', soldOutItemIds)
       .order('sale_date', { ascending: false })
 
     const salesRows = (salesResponse.data ?? []) as SaleRow[]
@@ -368,6 +452,9 @@ export default async function InventoryPage({
     0
   )
 
+  const hasPreviousPage = page > 1
+  const hasNextPage = items.length === limit
+
   return (
     <div className="app-page-wide space-y-3">
       <div className="app-page-header gap-3">
@@ -388,7 +475,7 @@ export default async function InventoryPage({
       ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Rows" value={totalItems} />
+        <SummaryCard label="Rows On This Page" value={totalItems} />
         <SummaryCard label="Available Units" value={totalAvailableUnits} />
         <SummaryCard label="Total Cost" value={money(totalCost)} />
         <SummaryCard label="Est. Value" value={money(totalEstimatedValue)} />
@@ -396,58 +483,64 @@ export default async function InventoryPage({
 
       <div className="flex flex-wrap gap-2">
         <Link
-          href={getFilterHref('', sortKey, sortDir)}
+          href={getFilterHref('', sortKey, sortDir, limit)}
           className={`app-chip ${q === '' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           All
         </Link>
         <Link
-          href={getFilterHref('listed', sortKey, sortDir)}
+          href={getFilterHref('listed', sortKey, sortDir, limit)}
           className={`app-chip ${qNormalized === 'listed' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Listed
         </Link>
         <Link
-          href={getFilterHref('personal', sortKey, sortDir)}
+          href={getFilterHref('personal', sortKey, sortDir, limit)}
           className={`app-chip ${qNormalized === 'personal' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Personal
         </Link>
         <Link
-          href={getFilterHref('junk', sortKey, sortDir)}
+          href={getFilterHref('junk', sortKey, sortDir, limit)}
           className={`app-chip ${qNormalized === 'junk' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Junk
         </Link>
       </div>
 
-      <form method="get" className="app-search-panel">
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            type="text"
-            name="q"
-            defaultValue={q}
-            placeholder="Search player, title, set, item / card #, team, notes..."
-            className="app-input"
-          />
-          <input type="hidden" name="sort" value={sortKey} />
-          <input type="hidden" name="dir" value={sortDir} />
-          <div className="flex gap-2">
-            <button type="submit" className="app-button-primary">
-              Search
-            </button>
-            {q ? (
-              <Link href={`/app/inventory?sort=${sortKey}&dir=${sortDir}`} className="app-button">
-                Clear
+      <div className="app-section p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            {showingSearchText ? (
+              <div className="text-xs text-zinc-400">{showingSearchText}</div>
+            ) : (
+              <div className="text-xs text-zinc-500">
+                Use the global search bar at the top for new searches.
+              </div>
+            )}
+            <div className="mt-1 text-xs text-zinc-500">
+              Page {page}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {LIMIT_OPTIONS.map((option) => (
+              <Link
+                key={option}
+                href={buildLimitHref({
+                  q,
+                  sort: sortKey,
+                  dir: sortDir,
+                  limit: option,
+                })}
+                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+              >
+                {option} rows
               </Link>
-            ) : null}
+            ))}
           </div>
         </div>
-
-        {showingSearchText ? (
-          <div className="mt-2 text-xs text-zinc-400">{showingSearchText}</div>
-        ) : null}
-      </form>
+      </div>
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 
@@ -463,6 +556,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -472,6 +566,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -481,6 +576,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -490,6 +586,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -499,6 +596,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -508,6 +606,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -517,6 +616,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">
@@ -526,6 +626,7 @@ export default async function InventoryPage({
                     currentSortKey={sortKey}
                     currentSortDir={sortDir}
                     q={q}
+                    limit={limit}
                   />
                 </th>
                 <th className="app-th py-2">Actions</th>
@@ -590,191 +691,6 @@ export default async function InventoryPage({
                                 Sell Qty
                               </Link>
                             ) : null}
-
-                            <details className="w-full rounded-lg border border-zinc-800 bg-zinc-950/80 p-2">
-                              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium uppercase tracking-wide text-zinc-300">
-                                <span>Inline Quick Sell</span>
-                                <span className="text-[10px] text-zinc-500">
-                                  {isLotLike ? `${available} available` : 'single item'}
-                                </span>
-                              </summary>
-
-                              <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/70 p-2">
-                                <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
-                                  <span>
-                                    Available to sell: <span className="text-zinc-200">{available}</span>
-                                  </span>
-                                  <span>
-                                    Unit cost: <span className="text-zinc-200">{money(item.cost_basis_unit)}</span>
-                                  </span>
-                                  {isLotLike ? (
-                                    <span className="text-zinc-500">
-                                      Add a note for which item or part of the lot sold.
-                                    </span>
-                                  ) : (
-                                    <span className="text-zinc-500">
-                                      Use the full Sell page when you want a more detailed entry flow.
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <form action={quickSellAction} className="mt-2 space-y-2">
-                                <input type="hidden" name="inventory_item_id" value={item.id} />
-                                <input type="hidden" name="sale_date" value={new Date().toISOString().slice(0, 10)} />
-
-                                <div className="grid gap-2 md:grid-cols-2">
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Qty
-                                    </label>
-                                    <input
-                                      name="quantity_sold"
-                                      type="number"
-                                      min={1}
-                                      max={available}
-                                      defaultValue={1}
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Item Sale Price
-                                    </label>
-                                    <input
-                                      name="gross_sale"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue=""
-                                      placeholder="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Shipping Charged
-                                    </label>
-                                    <input
-                                      name="shipping_charged"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Platform Fees
-                                    </label>
-                                    <input
-                                      name="platform_fees"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Postage
-                                    </label>
-                                    <input
-                                      name="shipping_cost"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Supplies
-                                    </label>
-                                    <input
-                                      name="supplies_cost"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Other Costs
-                                    </label>
-                                    <input
-                                      name="other_costs"
-                                      type="number"
-                                      min={0}
-                                      step="0.01"
-                                      defaultValue="0.00"
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Platform
-                                    </label>
-                                    <input
-                                      name="platform"
-                                      type="text"
-                                      placeholder="eBay, Whatnot, local..."
-                                      className="app-input"
-                                    />
-                                  </div>
-
-                                  <div className="md:col-span-2">
-                                    <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
-                                      Sale Notes
-                                    </label>
-                                    <textarea
-                                      name="notes"
-                                      rows={2}
-                                      placeholder="Optional: which item from lot, condition, bundle note..."
-                                      className="app-textarea"
-                                    />
-                                  </div>
-                                </div>
-
-                                <div className="flex flex-wrap gap-2 pt-1">
-                                  <button
-                                    type="submit"
-                                    name="mode"
-                                    value="sell_one"
-                                    className="app-button-primary"
-                                  >
-                                    Sell 1 Now
-                                  </button>
-
-                                  {isLotLike ? (
-                                    <button
-                                      type="submit"
-                                      name="mode"
-                                      value="sell_all"
-                                      className="app-button"
-                                    >
-                                      Sell All Remaining
-                                    </button>
-                                  ) : null}
-
-                                  <Link href={`/app/inventory/${item.id}/sell`} className="app-button">
-                                    Open Full Sell Page
-                                  </Link>
-                                </div>
-                              </form>
-                            </details>
                           </>
                         ) : latestActiveSale ? (
                           <form action={reverseSaleAction}>
@@ -805,6 +721,50 @@ export default async function InventoryPage({
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="app-section p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-zinc-300">
+            Showing page {page} with up to {limit} rows.
+          </div>
+
+          <div className="flex gap-2">
+            {hasPreviousPage ? (
+              <Link
+                href={buildInventoryHref({
+                  q,
+                  sort: sortKey,
+                  dir: sortDir,
+                  page: page - 1,
+                  limit,
+                })}
+                className="app-button"
+              >
+                Previous
+              </Link>
+            ) : (
+              <span className="app-button opacity-50 pointer-events-none">Previous</span>
+            )}
+
+            {hasNextPage ? (
+              <Link
+                href={buildInventoryHref({
+                  q,
+                  sort: sortKey,
+                  dir: sortDir,
+                  page: page + 1,
+                  limit,
+                })}
+                className="app-button-primary"
+              >
+                Next
+              </Link>
+            ) : (
+              <span className="app-button-primary opacity-50 pointer-events-none">Next</span>
+            )}
+          </div>
         </div>
       </div>
     </div>

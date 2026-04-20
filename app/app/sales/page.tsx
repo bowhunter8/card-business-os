@@ -1,6 +1,17 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 
+type SaleInventoryItemRow = {
+  title: string | null
+  player_name: string | null
+  year: number | null
+  brand: string | null
+  set_name: string | null
+  card_number: string | null
+  parallel_name: string | null
+  team: string | null
+}
+
 type SaleRow = {
   id: string
   inventory_item_id: string | null
@@ -15,16 +26,7 @@ type SaleRow = {
   profit: number | null
   platform: string | null
   notes: string | null
-  inventory_items?: {
-    title: string | null
-    player_name: string | null
-    year: number | null
-    brand: string | null
-    set_name: string | null
-    card_number: string | null
-    parallel_name: string | null
-    team: string | null
-  } | null
+  inventory_items?: SaleInventoryItemRow | SaleInventoryItemRow[] | null
 }
 
 function money(value: number | null) {
@@ -34,8 +36,15 @@ function money(value: number | null) {
   }).format(Number(value ?? 0))
 }
 
+function getSaleItem(sale: SaleRow): SaleInventoryItemRow | null {
+  if (!sale.inventory_items) return null
+  return Array.isArray(sale.inventory_items)
+    ? (sale.inventory_items[0] ?? null)
+    : sale.inventory_items
+}
+
 function getItemName(sale: SaleRow) {
-  const item = sale.inventory_items
+  const item = getSaleItem(sale)
 
   if (!item) return 'Unknown item'
 
@@ -91,7 +100,7 @@ export default async function SalesPage() {
     .eq('user_id', user.id)
     .order('sale_date', { ascending: false })
 
-  const sales: SaleRow[] = (response.data ?? []) as SaleRow[]
+  const sales = (response.data ?? []) as unknown as SaleRow[]
   const error = response.error
 
   const totalGross = sales.reduce((sum, row) => sum + Number(row.gross_sale ?? 0), 0)
