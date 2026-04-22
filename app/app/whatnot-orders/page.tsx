@@ -28,13 +28,18 @@ type WhatnotOrderSummaryRow = {
 }
 
 type SuggestedGroup = {
-  key: string
+  id: string
   seller: string
-  dateLabel: string
-  orderCount: number
-  total: number
-  orders: WhatnotOrderRow[]
+  date_key: string
+  date_label: string
+  order_count: number
+  total_paid: number
 }
+
+type PageLimit = 10 | 25 | 100
+
+const DEFAULT_LIMIT: PageLimit = 10
+const LIMIT_OPTIONS: PageLimit[] = [10, 25, 100]
 
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
@@ -53,59 +58,43 @@ function buildFocusHref(order: WhatnotOrderRow) {
   return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
-function buildDateLabel(order: WhatnotOrderRow) {
-  const raw = order.processed_date_display || order.processed_date || ''
-  if (!raw) return 'No date'
-  return raw
-}
+function buildOrdersHref({
+  q,
+  page,
+  limit,
+}: {
+  q?: string
+  page: number
+  limit: number
+}) {
+  const params = new URLSearchParams()
 
-function normalizeDateKey(order: WhatnotOrderRow) {
-  const raw = order.processed_date || order.processed_date_display || ''
-  if (!raw) return 'no-date'
-  return raw.slice(0, 10)
-}
-
-function buildSuggestedGroups(orders: WhatnotOrderRow[]): SuggestedGroup[] {
-  const map = new Map<string, SuggestedGroup>()
-
-  for (const order of orders) {
-    const seller = (order.seller || 'Unknown seller').trim()
-    const dateKey = normalizeDateKey(order)
-    const dateLabel = buildDateLabel(order)
-    const key = `${seller}__${dateKey}`
-
-    const existing = map.get(key)
-    if (existing) {
-      existing.orderCount += 1
-      existing.total += Number(order.total ?? 0)
-      existing.orders.push(order)
-    } else {
-      map.set(key, {
-        key,
-        seller,
-        dateLabel,
-        orderCount: 1,
-        total: Number(order.total ?? 0),
-        orders: [order],
-      })
-    }
+  if (q) {
+    params.set('q', q)
   }
 
-  return Array.from(map.values())
-    .filter((group) => group.orderCount >= 2)
-    .sort((a, b) => {
-      if (b.orderCount !== a.orderCount) return b.orderCount - a.orderCount
-      return b.total - a.total
-    })
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+
+  const query = params.toString()
+  return query ? `/app/whatnot-orders?${query}` : '/app/whatnot-orders'
 }
 
 export default async function WhatnotOrdersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>
+  searchParams?: Promise<{ q?: string; page?: string; limit?: string }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim().toLowerCase()
+
+  const requestedPage = Number(String(params?.page ?? '1'))
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
+
+  const requestedLimit = Number(String(params?.limit ?? String(DEFAULT_LIMIT)))
+  const limit: PageLimit = LIMIT_OPTIONS.includes(requestedLimit as PageLimit)
+    ? (requestedLimit as PageLimit)
+    : DEFAULT_LIMIT
 
   const supabase = await createClient()
 
@@ -153,47 +142,36 @@ export default async function WhatnotOrdersPage({
     `)
     .eq('user_id', user.id)
 
-  const shouldLoadSuggestions = qRaw !== 'assigned' && qRaw !== 'unassigned'
+  const suggestionsQuery =
+    qRaw === 'assigned'
+      ? null
+      : supabase
+          .from('whatnot_order_group_suggestions')
+          .select(`
+            id,
+            seller,
+            date_key,
+            date_label,
+            order_count,
+            total_paid
+          `)
+          .eq('user_id', user.id)
+          .order('order_count', { ascending: false })
+          .order('total_paid', { ascending: false })
+          .limit(20)
 
-  const suggestionsQuery = shouldLoadSuggestions
-    ? supabase
-        .from('whatnot_orders')
-        .select(`
-          id,
-          break_id,
-          order_id,
-          order_numeric_id,
-          buyer,
-          seller,
-          product_name,
-          processed_date,
-          processed_date_display,
-          order_status,
-          quantity,
-          subtotal,
-          shipping_price,
-          taxes,
-          total,
-          source_file_name
-        `)
-        .eq('user_id', user.id)
-        .is('break_id', null)
-        .order('processed_date', { ascending: false })
-    : null
+  const from = (page - 1) * limit
+  const to = from + limit - 1
 
   const [filteredRes, summaryRes, suggestionsRes] = await Promise.all([
-    filteredQuery.order('processed_date', { ascending: false }),
+    filteredQuery.order('processed_date', { ascending: false }).range(from, to),
     summaryQuery,
     suggestionsQuery,
   ])
 
   const filteredOrders = (filteredRes.data ?? []) as WhatnotOrderRow[]
   const summaryRows = (summaryRes.data ?? []) as WhatnotOrderSummaryRow[]
-
-  const suggestedSourceOrders =
-    qRaw === 'unassigned'
-      ? filteredOrders
-      : ((suggestionsRes?.data ?? []) as WhatnotOrderRow[])
+  const suggestedGroups = (suggestionsRes?.data ?? []) as SuggestedGroup[]
 
   let totalOrders = 0
   let subtotalTotal = 0
@@ -215,24 +193,22 @@ export default async function WhatnotOrdersPage({
     }
   }
 
-  const suggestedGroups =
-    qRaw === 'assigned'
-      ? []
-      : buildSuggestedGroups(suggestedSourceOrders)
-
   const pageTitle =
     qRaw === 'unassigned'
-      ? 'Whatnot Orders — Unassigned'
+      ? 'Imported Orders — Unassigned'
       : qRaw === 'assigned'
-        ? 'Whatnot Orders — Assigned'
-        : 'Whatnot Orders'
+        ? 'Imported Orders — Assigned'
+        : 'Imported Orders'
 
   const pageDescription =
     qRaw === 'unassigned'
-      ? 'Showing only Whatnot orders that have not yet been grouped into a break.'
+      ? 'Showing only imported orders that have not yet been grouped into a break.'
       : qRaw === 'assigned'
-        ? 'Showing only Whatnot orders that are already linked to a break.'
-        : 'Imported Whatnot buyer orders. This is your staging area before grouping orders into breaks.'
+        ? 'Showing only imported orders that are already linked to a break.'
+        : 'Imported orders are shown here as a staging area before grouping them into breaks or other purchase batches.'
+
+  const hasPreviousPage = page > 1
+  const hasNextPage = filteredOrders.length === limit
 
   return (
     <div className="app-page-wide">
@@ -254,19 +230,19 @@ export default async function WhatnotOrdersPage({
 
       <div className="flex flex-wrap gap-2">
         <Link
-          href="/app/whatnot-orders"
+          href={buildOrdersHref({ q: '', page: 1, limit })}
           className={`app-chip ${qRaw === '' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           All Orders
         </Link>
         <Link
-          href="/app/whatnot-orders?q=unassigned"
+          href={buildOrdersHref({ q: 'unassigned', page: 1, limit })}
           className={`app-chip ${qRaw === 'unassigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Unassigned
         </Link>
         <Link
-          href="/app/whatnot-orders?q=assigned"
+          href={buildOrdersHref({ q: 'assigned', page: 1, limit })}
           className={`app-chip ${qRaw === 'assigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Assigned
@@ -286,7 +262,7 @@ export default async function WhatnotOrdersPage({
         </div>
 
         <Link
-          href="/app/whatnot-orders?q=unassigned"
+          href={buildOrdersHref({ q: 'unassigned', page: 1, limit })}
           className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Unassigned</div>
@@ -294,7 +270,7 @@ export default async function WhatnotOrdersPage({
         </Link>
 
         <Link
-          href="/app/whatnot-orders?q=assigned"
+          href={buildOrdersHref({ q: 'assigned', page: 1, limit })}
           className="app-metric-card transition hover:bg-zinc-800"
         >
           <div className="text-sm text-zinc-400">Assigned to Break</div>
@@ -317,13 +293,33 @@ export default async function WhatnotOrdersPage({
         </div>
       </div>
 
+      <div className="app-section p-4 mt-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-xs text-zinc-500">
+            Page {page} • Suggested groups are loaded from cached database records.
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {LIMIT_OPTIONS.map((option) => (
+              <Link
+                key={option}
+                href={buildOrdersHref({ q: qRaw, page: 1, limit: option })}
+                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+              >
+                {option} rows
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {suggestedGroups.length > 0 ? (
         <div className="app-section">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Suggested Groups</h2>
               <p className="mt-0.5 text-sm text-zinc-400">
-                Auto-grouped by seller and date. These are suggestions only.
+                Auto-grouped by seller and date. These are cached suggestions.
               </p>
             </div>
 
@@ -334,17 +330,17 @@ export default async function WhatnotOrdersPage({
 
           <div className="mt-4 grid gap-3">
             {suggestedGroups.map((group) => (
-              <div key={group.key} className="app-card-tight">
+              <div key={group.id} className="app-card-tight">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
                     <div className="text-lg font-semibold leading-snug">
-                      {group.seller} — {group.dateLabel}
+                      {group.seller} — {group.date_label}
                     </div>
                     <div className="mt-1 text-sm text-zinc-400">
-                      {group.orderCount} orders suggested for one break
+                      {group.order_count} orders suggested for one break
                     </div>
                     <div className="mt-0.5 text-sm text-zinc-500">
-                      Total paid {money(group.total)}
+                      Total paid {money(group.total_paid)}
                     </div>
                   </div>
 
@@ -372,7 +368,7 @@ export default async function WhatnotOrdersPage({
                 ? 'Showing only unassigned orders.'
                 : qRaw === 'assigned'
                   ? 'Showing only assigned orders.'
-                  : 'Showing all imported Whatnot orders.'}
+                  : 'Showing all imported orders.'}
             </p>
           </div>
 
@@ -386,91 +382,86 @@ export default async function WhatnotOrdersPage({
             No orders found for this view.
           </div>
         ) : (
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 divide-y divide-zinc-800">
             {filteredOrders.map((order) => (
-              <div key={order.id} className="app-card-tight">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <Link
+                key={order.id}
+                href={buildFocusHref(order)}
+                className="block transition hover:bg-zinc-900/60"
+              >
+                <div className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+                      <span className="text-zinc-300">
+                        {order.processed_date_display || order.processed_date || '—'}
+                      </span>
+
+                      <span className="text-zinc-500">•</span>
+
+                      <span className="text-zinc-300 break-words">
+                        {order.order_numeric_id || order.order_id || '—'}
+                      </span>
+
                       {order.break_id ? (
                         <span className="app-badge app-badge-success">Linked</span>
                       ) : (
                         <span className="app-badge app-badge-warning">Unassigned</span>
                       )}
-
-                      {order.order_status ? (
-                        <span className="app-badge app-badge-neutral">
-                          {order.order_status}
-                        </span>
-                      ) : null}
                     </div>
 
-                    <div className="mt-1.5 text-base font-semibold leading-snug">
-                      {order.product_name || 'Untitled order'}
+                    <div className="mt-1 text-sm text-zinc-400 truncate">
+                      {order.seller || 'Unknown Seller'}
                     </div>
-
-                    <div className="mt-1 text-sm text-zinc-300">
-                      Seller: {order.seller || '—'}
-                    </div>
-
-                    <div className="mt-0.5 text-sm text-zinc-300">
-                      Buyer: {order.buyer || '—'}
-                    </div>
-
-                    <div className="mt-0.5 text-sm text-zinc-300 break-words">
-                      Order #: {order.order_numeric_id || order.order_id || '—'}
-                    </div>
-
-                    <div className="mt-0.5 text-sm text-zinc-300">
-                      Date: {order.processed_date_display || order.processed_date || '—'}
-                    </div>
-
-                    <div className="mt-0.5 text-sm text-zinc-300">
-                      Qty: {order.quantity ?? '—'}
-                    </div>
-
-                    <div className="mt-0.5 text-sm text-zinc-300">
-                      Total: {money(order.total)}
-                    </div>
-
-                    {order.source_file_name ? (
-                      <div className="mt-0.5 text-xs text-zinc-500 break-words">
-                        Source file: {order.source_file_name}
-                      </div>
-                    ) : null}
                   </div>
 
-                  <div className="flex flex-wrap gap-1.5">
-                    <Link href={buildFocusHref(order)} className="app-button">
-                      Open Order
-                    </Link>
-
-                    {order.break_id ? (
-                      <>
-                        <Link href={`/app/breaks/${order.break_id}`} className="app-button">
-                          Break Details
-                        </Link>
-
-                        <Link href={`/app/breaks/${order.break_id}/edit`} className="app-button">
-                          Edit Break
-                        </Link>
-                      </>
-                    ) : (
-                      <Link
-                        href={`/app/search?q=${encodeURIComponent(
-                          order.order_numeric_id || order.order_id || order.seller || ''
-                        )}`}
-                        className="app-button"
-                      >
-                        Search Related
-                      </Link>
-                    )}
+                  <div className="shrink-0 text-sm font-semibold text-zinc-100">
+                    {money(order.total)}
                   </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
+      </div>
+
+      <div className="app-section p-4 mt-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-zinc-300">
+            Showing page {page} with up to {limit} orders.
+          </div>
+
+          <div className="flex gap-2">
+            {hasPreviousPage ? (
+              <Link
+                href={buildOrdersHref({
+                  q: qRaw,
+                  page: page - 1,
+                  limit,
+                })}
+                className="app-button"
+              >
+                Previous
+              </Link>
+            ) : (
+              <span className="app-button opacity-50 pointer-events-none">Previous</span>
+            )}
+
+            {hasNextPage ? (
+              <Link
+                href={buildOrdersHref({
+                  q: qRaw,
+                  page: page + 1,
+                  limit,
+                })}
+                className="app-button-primary"
+              >
+                Next
+              </Link>
+            ) : (
+              <span className="app-button-primary opacity-50 pointer-events-none">Next</span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

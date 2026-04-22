@@ -5,14 +5,14 @@ import { useState } from 'react'
 
 export default function WhatnotImportPage() {
   const [fileName, setFileName] = useState('')
-  const [csvText, setCsvText] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [lastImportedCount, setLastImportedCount] = useState<number | null>(null)
   const [lastDuplicateCount, setLastDuplicateCount] = useState<number | null>(null)
 
-  async function onFileChange(file: File | null) {
+  function onFileChange(file: File | null) {
     setError('')
     setSuccess('')
     setLastImportedCount(null)
@@ -20,18 +20,17 @@ export default function WhatnotImportPage() {
 
     if (!file) {
       setFileName('')
-      setCsvText('')
+      setSelectedFile(null)
       return
     }
 
     setFileName(file.name)
-    const text = await file.text()
-    setCsvText(text)
+    setSelectedFile(file)
   }
 
   async function runImport() {
-    if (!csvText) {
-      setError('Upload a Whatnot CSV file first.')
+    if (!selectedFile) {
+      setError('Upload an order CSV file first.')
       return
     }
 
@@ -39,6 +38,8 @@ export default function WhatnotImportPage() {
       setImporting(true)
       setError('')
       setSuccess('')
+
+      const csvText = await selectedFile.text()
 
       const response = await fetch('/api/imports/whatnot', {
         method: 'POST',
@@ -61,7 +62,7 @@ export default function WhatnotImportPage() {
       setLastImportedCount(Number(json.imported ?? 0))
       setLastDuplicateCount(Number(json.skippedDuplicates ?? 0))
       setSuccess(
-        `Imported ${json.imported} Whatnot order stub(s). Skipped ${json.skippedDuplicates} duplicate(s).`
+        `Imported ${json.imported} order stub(s). Skipped ${json.skippedDuplicates} duplicate(s).`
       )
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
@@ -74,10 +75,11 @@ export default function WhatnotImportPage() {
     <div className="app-page max-w-5xl">
       <div className="app-page-header">
         <div>
-          <h1 className="app-title">Whatnot Import</h1>
+          <h1 className="app-title">Order CSV Import</h1>
           <p className="app-subtitle">
-            Import buyer order history from Whatnot into separate order stubs. Each
-            order stays preserved so you can group them into breaks later.
+            Import order history from a CSV file into separate order stubs. Each
+            order stays preserved so you can group related orders into a purchase
+            batch later.
           </p>
         </div>
 
@@ -95,8 +97,8 @@ export default function WhatnotImportPage() {
           <div>
             <div className="text-lg font-semibold">Import File</div>
             <p className="mt-0.5 text-sm text-zinc-400">
-              Select your Whatnot CSV export and import it directly. No preview
-              step needed.
+              Select your order CSV export and import it directly. No preview step
+              needed.
             </p>
           </div>
 
@@ -117,7 +119,7 @@ export default function WhatnotImportPage() {
             <button
               type="button"
               onClick={runImport}
-              disabled={importing || !csvText}
+              disabled={importing || !selectedFile}
               className="app-button-primary disabled:opacity-50"
             >
               {importing ? 'Importing...' : 'Import Orders'}
@@ -129,8 +131,8 @@ export default function WhatnotImportPage() {
             <div className="mt-2 space-y-1">
               <p>Order ID</p>
               <p>Numeric order ID</p>
-              <p>Seller</p>
-              <p>Product</p>
+              <p>Seller / Source</p>
+              <p>Product / Description</p>
               <p>Subtotal</p>
               <p>Shipping</p>
               <p>Taxes</p>
@@ -143,9 +145,9 @@ export default function WhatnotImportPage() {
           <div>
             <div className="text-lg font-semibold">Import Flow</div>
             <p className="mt-0.5 text-sm text-zinc-400">
-              The importer creates separate Whatnot order stubs first. Then you can
-              go to Whatnot Orders and combine them into one break when the package
-              arrives.
+              The importer creates separate order stubs first. Then you can review
+              and combine related orders into a break, batch, or other grouped
+              purchase workflow when the items arrive.
             </p>
           </div>
 
@@ -153,12 +155,12 @@ export default function WhatnotImportPage() {
             <div className="app-card-tight">
               <div className="text-sm text-zinc-400">After Import</div>
               <div className="mt-2 text-sm text-zinc-300">
-                Go to <span className="font-medium">Whatnot Orders</span> to review
-                and combine orders into breaks.
+                Go to <span className="font-medium">Orders</span> to review and
+                combine imported orders into your inventory workflow.
               </div>
               <div className="mt-3">
                 <Link href="/app/whatnot-orders" className="app-button">
-                  View Whatnot Orders
+                  View Imported Orders
                 </Link>
               </div>
             </div>
@@ -183,8 +185,8 @@ export default function WhatnotImportPage() {
           </div>
 
           <div className="app-card-tight mt-4 text-sm text-zinc-400">
-            Recommended flow: export from Whatnot → import here → combine related
-            orders into one break → enter cards when they arrive.
+            Recommended flow: export order history → import here → combine related
+            orders into one batch or break → enter items when they arrive.
           </div>
         </div>
       </div>

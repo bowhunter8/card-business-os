@@ -27,6 +27,11 @@ type StartingInventoryRow = {
   created_at: string | null
 }
 
+type PageLimit = 10 | 25 | 50
+
+const DEFAULT_LIMIT: PageLimit = 25
+const LIMIT_OPTIONS: PageLimit[] = [10, 25, 50]
+
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -42,6 +47,33 @@ function formatLabel(value: string | null | undefined) {
   return (value || '—').replaceAll('_', ' ')
 }
 
+function buildStartingInventoryHref({
+  q,
+  status,
+  page,
+  limit,
+}: {
+  q?: string
+  status?: string
+  page: number
+  limit: number
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  if (status) {
+    params.set('status', status)
+  }
+
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+
+  return `/app/starting-inventory?${params.toString()}`
+}
+
 export default async function StartingInventoryPage({
   searchParams,
 }: {
@@ -52,6 +84,8 @@ export default async function StartingInventoryPage({
     created?: string
     updated?: string
     archived?: string
+    page?: string
+    limit?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -61,6 +95,14 @@ export default async function StartingInventoryPage({
   const createdId = params?.created
   const updated = params?.updated
   const archived = params?.archived
+
+  const requestedPage = Number(String(params?.page ?? '1'))
+  const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
+
+  const requestedLimit = Number(String(params?.limit ?? String(DEFAULT_LIMIT)))
+  const limit: PageLimit = LIMIT_OPTIONS.includes(requestedLimit as PageLimit)
+    ? (requestedLimit as PageLimit)
+    : DEFAULT_LIMIT
 
   const supabase = await createClient()
 
@@ -72,7 +114,27 @@ export default async function StartingInventoryPage({
 
   let query = supabase
     .from('starting_inventory_items')
-    .select('*')
+    .select(`
+      id,
+      status,
+      destination,
+      item_type,
+      title,
+      player_name,
+      year,
+      brand,
+      set_name,
+      card_number,
+      parallel_name,
+      quantity,
+      cost_basis_unit,
+      cost_basis_total,
+      estimated_value_total,
+      storage_location,
+      cost_basis_method,
+      imported_inventory_item_id,
+      created_at
+    `)
     .eq('user_id', user.id)
 
   if (statusFilter) {
@@ -93,13 +155,21 @@ export default async function StartingInventoryPage({
     )
   }
 
-  const response = await query.order('created_at', { ascending: false })
+  const from = (page - 1) * limit
+  const to = from + limit - 1
+
+  const response = await query
+    .order('created_at', { ascending: false })
+    .range(from, to)
+
   const items: StartingInventoryRow[] = (response.data ?? []) as StartingInventoryRow[]
   const error = response.error
 
+  const hasPreviousPage = page > 1
+  const hasNextPage = items.length === limit
+
   return (
     <div className="app-page-wide">
-      {/* HEADER */}
       <div className="app-page-header">
         <div>
           <h1 className="app-title">Starting Inventory</h1>
@@ -116,7 +186,6 @@ export default async function StartingInventoryPage({
         </Link>
       </div>
 
-      {/* ALERTS */}
       {createdId && (
         <div className="app-alert-success">
           Starting inventory item created successfully.
@@ -139,14 +208,16 @@ export default async function StartingInventoryPage({
         <div className="app-alert-error">{errorMessage}</div>
       )}
 
-      {/* SEARCH */}
       <form method="get" className="app-search-panel">
+        <input type="hidden" name="page" value="1" />
+        <input type="hidden" name="limit" value={String(limit)} />
+
         <div className="grid gap-2 md:grid-cols-[1fr_160px_auto]">
           <input
             type="text"
             name="q"
             defaultValue={q}
-            placeholder="Search player, title, set, card #..."
+            placeholder="Search player, title, set, item / card #..."
             className="app-input"
           />
 
@@ -167,7 +238,13 @@ export default async function StartingInventoryPage({
             </button>
 
             {(q || statusFilter) && (
-              <Link href="/app/starting-inventory" className="app-button">
+              <Link
+                href={buildStartingInventoryHref({
+                  page: 1,
+                  limit,
+                })}
+                className="app-button"
+              >
                 Clear
               </Link>
             )}
@@ -175,19 +252,43 @@ export default async function StartingInventoryPage({
         </div>
       </form>
 
+      <div className="app-section p-4 mt-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-xs text-zinc-500">
+            Page {page}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {LIMIT_OPTIONS.map((option) => (
+              <Link
+                key={option}
+                href={buildStartingInventoryHref({
+                  q,
+                  status: statusFilter,
+                  page: 1,
+                  limit: option,
+                })}
+                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+              >
+                {option} rows
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="app-alert-error">
           Error loading starting inventory: {error.message}
         </div>
       )}
 
-      {/* TABLE */}
       <div className="app-table-wrap">
         <div className="app-table-scroll">
           <table className="app-table">
             <thead className="app-thead">
               <tr>
-                <th className="app-th">Card</th>
+                <th className="app-th">Item</th>
                 <th className="app-th">Status</th>
                 <th className="app-th">Destination</th>
                 <th className="app-th">Qty</th>
@@ -300,6 +401,48 @@ export default async function StartingInventoryPage({
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="app-section p-4 mt-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-zinc-300">
+            Showing page {page} with up to {limit} rows.
+          </div>
+
+          <div className="flex gap-2">
+            {hasPreviousPage ? (
+              <Link
+                href={buildStartingInventoryHref({
+                  q,
+                  status: statusFilter,
+                  page: page - 1,
+                  limit,
+                })}
+                className="app-button"
+              >
+                Previous
+              </Link>
+            ) : (
+              <span className="app-button opacity-50 pointer-events-none">Previous</span>
+            )}
+
+            {hasNextPage ? (
+              <Link
+                href={buildStartingInventoryHref({
+                  q,
+                  status: statusFilter,
+                  page: page + 1,
+                  limit,
+                })}
+                className="app-button-primary"
+              >
+                Next
+              </Link>
+            ) : (
+              <span className="app-button-primary opacity-50 pointer-events-none">Next</span>
+            )}
+          </div>
         </div>
       </div>
     </div>
