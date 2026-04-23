@@ -353,7 +353,7 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  redirect('/app/sales?saved=1')
+  redirect(`/app/inventory/${inventoryItemId}?savedSale=1`)
 }
 
 export async function quickSellAction(formData: FormData) {
@@ -446,7 +446,7 @@ export async function quickSellAction(formData: FormData) {
     redirect(`/app/inventory?error=${encodeURIComponent(result.error)}`)
   }
 
-  redirect('/app/inventory?saved=1')
+  redirect(`/app/inventory/${inventoryItemId}?savedSale=1`)
 }
 
 export async function updateSaleAction(formData: FormData) {

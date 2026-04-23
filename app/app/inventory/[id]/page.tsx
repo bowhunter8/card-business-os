@@ -204,12 +204,20 @@ export default async function InventoryDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string; success?: string }>
+  searchParams?: Promise<{ error?: string; success?: string; savedSale?: string; updatedSale?: string; deletedSale?: string }>
 }) {
   const { id } = await params
   const query = searchParams ? await searchParams : undefined
   const errorMessage = query?.error
-  const successMessage = query?.success
+
+  const successMessage =
+    query?.savedSale === '1'
+      ? 'Sale recorded successfully.'
+      : query?.updatedSale === '1'
+        ? 'Sale updated successfully.'
+        : query?.deletedSale === '1'
+          ? 'Sale reversed successfully.'
+          : query?.success
 
   const supabase = await createClient()
 
@@ -372,12 +380,6 @@ export default async function InventoryDetailPage({
 
       {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
       {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
-
-      {!canDelete ? (
-        <div className="app-alert-warning">
-          This item cannot be deleted while it has active sales. Reverse the sale first.
-        </div>
-      ) : null}
 
       {item.status === 'junk' ? (
         <div className="app-alert-info">

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import Script from 'next/script'
-import { createSaleAction } from '@/app/actions/sales'
+import { createSaleAction, quickSellAction } from '@/app/actions/sales'
 import { createClient } from '@/lib/supabase/server'
 
 type ShippingProfile = {
@@ -155,8 +155,55 @@ export default async function SellInventoryPage({
       ) : null}
 
       {isLotLike ? (
-        <div className="app-alert-info">
-          This item has quantity remaining. You can sell part of the lot by choosing how many to sell below.
+        <div className="space-y-2">
+          <div className="app-alert-info">
+            This item has quantity remaining. You can sell part of the lot by choosing how many to sell below.
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <form action={quickSellAction}>
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="mode" value="sell_one" />
+              <input type="hidden" name="quantity_sold" value="1" />
+              <input type="hidden" name="sale_date" value={todayLocalInputValue()} />
+              <input type="hidden" name="gross_sale" value="0" />
+              <input type="hidden" name="shipping_charged" value="0" />
+              <input type="hidden" name="platform_fees" value="0" />
+              <input type="hidden" name="shipping_cost" value="0" />
+              <input type="hidden" name="supplies_cost" value="0" />
+              <input type="hidden" name="other_costs" value="0" />
+              <input type="hidden" name="platform" value="" />
+              <input type="hidden" name="notes" value="" />
+              <button
+                type="submit"
+                className="app-button-primary"
+                disabled={availableQty <= 0}
+              >
+                Quick Sell 1
+              </button>
+            </form>
+
+            <form action={quickSellAction}>
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="mode" value="sell_all" />
+              <input type="hidden" name="sale_date" value={todayLocalInputValue()} />
+              <input type="hidden" name="gross_sale" value="0" />
+              <input type="hidden" name="shipping_charged" value="0" />
+              <input type="hidden" name="platform_fees" value="0" />
+              <input type="hidden" name="shipping_cost" value="0" />
+              <input type="hidden" name="supplies_cost" value="0" />
+              <input type="hidden" name="other_costs" value="0" />
+              <input type="hidden" name="platform" value="" />
+              <input type="hidden" name="notes" value="" />
+              <button
+                type="submit"
+                className="app-button"
+                disabled={availableQty <= 0}
+              >
+                Quick Sell All
+              </button>
+            </form>
+          </div>
         </div>
       ) : null}
 
