@@ -22,6 +22,46 @@ function chunkArray<T>(items: T[], size: number) {
   return chunks
 }
 
+function cleanText(value: unknown) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function decodeCandidate(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function sanitizeOrderIdLike(value: unknown) {
+  const cleaned = cleanText(decodeCandidate(String(value ?? '')))
+
+  if (!cleaned) return null
+  if (cleaned.includes(',')) return null
+  if (/\s/.test(cleaned)) return null
+  if (/UTC|USD|direct_order|completed|imported|subtotal|shipping|tax|seller|product|quantity|category/i.test(cleaned)) {
+    return null
+  }
+
+  return cleaned
+}
+
+function sanitizeNumericOrderId(value: unknown) {
+  const cleaned = cleanText(String(value ?? ''))
+  if (!cleaned) return null
+
+  const digitsOnly = cleaned.replace(/\D/g, '')
+  if (!digitsOnly) return null
+  if (digitsOnly.length < 6) return null
+
+  return digitsOnly
+}
+
 async function readImportBody(request: NextRequest): Promise<ImportBody> {
   const contentType = request.headers.get('content-type') ?? ''
 
@@ -102,15 +142,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const sanitizedRows = parsed.rows
+      .map((row) => {
+        const sanitizedOrderId = sanitizeOrderIdLike(row.orderId)
+        const sanitizedOrderNumericId = sanitizeNumericOrderId(row.orderNumericId)
+
+        return {
+          ...row,
+          orderId: sanitizedOrderId,
+          orderNumericId: sanitizedOrderNumericId,
+        }
+      })
+      .filter((row) => row.orderId)
+
     // First dedupe the incoming CSV rows by order ID so the same import
     // cannot try to insert the same order more than once.
-    const uniqueParsedRows: typeof parsed.rows = []
+    const uniqueParsedRows: typeof sanitizedRows = []
     const seenOrderIds = new Set<string>()
     let skippedCsvDuplicates = 0
 
-    for (const row of parsed.rows) {
-      const orderId =
-        typeof row.orderId === 'string' ? row.orderId.trim() : ''
+    for (const row of sanitizedRows) {
+      const orderId = typeof row.orderId === 'string' ? row.orderId.trim() : ''
 
       if (!orderId) {
         continue
@@ -132,7 +184,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const uniqueOrderIds = uniqueParsedRows.map((row) => row.orderId)
+    const uniqueOrderIds = uniqueParsedRows.map((row) => row.orderId).filter(Boolean) as string[]
     const existingRows: Array<{ order_id: string }> = []
 
     const orderIdChunks = chunkArray(uniqueOrderIds, 100)

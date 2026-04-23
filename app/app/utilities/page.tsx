@@ -42,12 +42,11 @@ export default function UtilitiesPage() {
         <div>
           <h1 className="app-title">Utilities</h1>
           <p className="app-subtitle">
-            Manage imports, shipping settings, tax tools, and system utilities.
+            Manage imports, exports, shipping settings, tax tools, and system utilities.
           </p>
         </div>
       </div>
 
-      {/* Inventory Tools */}
       <section className="space-y-3">
         <div>
           <h2 className="text-base font-semibold">Inventory Tools</h2>
@@ -64,11 +63,10 @@ export default function UtilitiesPage() {
             tone="primary"
           />
 
-          {/* ✅ UPDATED NAME HERE */}
           <UtilityCard
-            href="/app/imports/whatnot"
-            title="Import Orders"
-            description="Upload an order CSV and create order stubs for grouping into breaks or batch purchases."
+            href="/app/imports"
+            title="Imports"
+            description="Import orders, sales, and future record types from different platforms without limiting the app to one source."
           />
 
           <UtilityCard
@@ -78,14 +76,13 @@ export default function UtilitiesPage() {
           />
 
           <UtilityCard
-            href="/app/utilities/backup"
-            title="Backup / Restore"
-            description="Create full app backups and manage restore tools for data safety."
+            href="/app/backup"
+            title="Backup & Export"
+            description="Create full restore-capable backups and export records for accountants, QuickBooks, tax software, or CPA workflows."
           />
         </div>
       </section>
 
-      {/* Shipping & Sales */}
       <section className="space-y-3">
         <div>
           <h2 className="text-base font-semibold">Shipping & Sales Tools</h2>
@@ -109,7 +106,6 @@ export default function UtilitiesPage() {
         </div>
       </section>
 
-      {/* Tax & Reporting */}
       <section className="space-y-3">
         <div>
           <h2 className="text-base font-semibold">Tax & Reporting</h2>

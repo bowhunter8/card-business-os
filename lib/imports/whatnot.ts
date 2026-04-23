@@ -26,6 +26,50 @@ function normalizeHeader(value: string) {
     .trim()
 }
 
+function cleanText(value: unknown) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function decodeCandidate(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function sanitizeOrderIdLike(value: unknown) {
+  const cleaned = cleanText(decodeCandidate(String(value ?? '')))
+
+  if (!cleaned) return null
+  if (cleaned.includes(',')) return null
+  if (/\s/.test(cleaned)) return null
+  if (
+    /UTC|USD|direct_order|completed|imported|subtotal|shipping|tax|seller|product|quantity|category/i.test(
+      cleaned
+    )
+  ) {
+    return null
+  }
+
+  return cleaned
+}
+
+function sanitizeNumericOrderId(value: unknown) {
+  const cleaned = cleanText(String(value ?? ''))
+  if (!cleaned) return null
+
+  const digitsOnly = cleaned.replace(/\D/g, '')
+  if (!digitsOnly) return null
+  if (digitsOnly.length < 6) return null
+
+  return digitsOnly
+}
+
 function parseCsvLine(line: string) {
   const result: string[] = []
   let current = ''
@@ -150,24 +194,24 @@ export function buildWhatnotPreviewRows(text: string) {
 
   const previewRows: WhatnotPreviewRow[] = rows
     .map((row, index) => {
-      const orderId = getValue(row, ['order id'])
+      const orderId = sanitizeOrderIdLike(getValue(row, ['order id']))
       if (!orderId) return null
 
       return {
         rowNumber: index + 2,
         orderId,
-        orderNumericId: getValue(row, ['order numeric id']) || null,
+        orderNumericId: sanitizeNumericOrderId(getValue(row, ['order numeric id'])),
         processedDate: toIsoDate(getValue(row, ['processed date'])),
         processedDateDisplay: toDisplayDate(getValue(row, ['processed date'])),
-        seller: getValue(row, ['seller']) || null,
+        seller: cleanText(getValue(row, ['seller'])) || null,
         productName:
-          getValue(row, ['product name']) || 'Imported Whatnot order',
+          cleanText(getValue(row, ['product name'])) || 'Imported Whatnot order',
         subtotal: parseMoney(getValue(row, ['subtotal'])),
         shippingPrice: parseMoney(getValue(row, ['shipping price'])),
         taxes: parseMoney(getValue(row, ['taxes'])),
         total: parseMoney(getValue(row, ['total'])),
         quantity: parseIntSafe(getValue(row, ['quantity']), 1),
-        orderStatus: getValue(row, ['order status']) || null,
+        orderStatus: cleanText(getValue(row, ['order status'])) || null,
         raw: row,
       }
     })

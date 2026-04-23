@@ -45,8 +45,8 @@ type SortKey =
 
 type SortDir = 'asc' | 'desc'
 
-const DEFAULT_LIMIT = 25
-const LIMIT_OPTIONS = [10, 25, 50] as const
+const DEFAULT_LIMIT = 10
+const LIMIT_OPTIONS = [10, 25, 100] as const
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -61,7 +61,6 @@ function cleanSearchTerm(value: string) {
 
 function getCardDisplay(item: InventoryRow) {
   return [
-    item.title || item.player_name || 'Untitled item',
     item.year,
     item.brand,
     item.set_name,
@@ -82,7 +81,7 @@ function getSortValue(item: InventoryRow, key: SortKey) {
     case 'created_at':
       return item.created_at || ''
     case 'card':
-      return getCardDisplay(item)
+      return `${getPrimaryTitle(item)} ${getCardDisplay(item)}`
     case 'status':
       return item.status || ''
     case 'quantity':
@@ -286,7 +285,14 @@ function SummaryCard({
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; sort?: string; dir?: string; saved?: string; page?: string; limit?: string }>
+  searchParams?: Promise<{
+    q?: string
+    sort?: string
+    dir?: string
+    saved?: string
+    page?: string
+    limit?: string
+  }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '')
@@ -379,10 +385,7 @@ export default async function InventoryPage({
     )
   }
 
-  const dbSortKey =
-    sortKey === 'card'
-      ? 'created_at'
-      : sortKey
+  const dbSortKey = sortKey === 'card' ? 'created_at' : sortKey
 
   const from = (page - 1) * limit
   const to = from + limit - 1
@@ -445,7 +448,10 @@ export default async function InventoryPage({
             : ''
 
   const totalItems = items.length
-  const totalAvailableUnits = items.reduce((sum, item) => sum + Number(item.available_quantity ?? 0), 0)
+  const totalAvailableUnits = items.reduce(
+    (sum, item) => sum + Number(item.available_quantity ?? 0),
+    0
+  )
   const totalCost = items.reduce((sum, item) => sum + Number(item.cost_basis_total ?? 0), 0)
   const totalEstimatedValue = items.reduce(
     (sum, item) => sum + Number(item.estimated_value_total ?? 0),
@@ -518,9 +524,7 @@ export default async function InventoryPage({
                 Use the global search bar at the top for new searches.
               </div>
             )}
-            <div className="mt-1 text-xs text-zinc-500">
-              Page {page}
-            </div>
+            <div className="mt-1 text-xs text-zinc-500">Page {page}</div>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -544,183 +548,207 @@ export default async function InventoryPage({
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 
-      <div className="app-table-wrap">
-        <div className="app-table-scroll">
-          <table className="app-table">
-            <thead className="app-thead">
-              <tr>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Item"
-                    sortKey="card"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Status"
-                    sortKey="status"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Qty"
-                    sortKey="quantity"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Available"
-                    sortKey="available_quantity"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Unit Cost"
-                    sortKey="cost_basis_unit"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Total Cost"
-                    sortKey="cost_basis_total"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Est. Value"
-                    sortKey="estimated_value_total"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">
-                  <SortHeader
-                    label="Location"
-                    sortKey="storage_location"
-                    currentSortKey={sortKey}
-                    currentSortDir={sortDir}
-                    q={q}
-                    limit={limit}
-                  />
-                </th>
-                <th className="app-th py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const itemLine = getCardDisplay(item)
-                const quantity = Number(item.quantity ?? 0)
-                const available = Number(item.available_quantity ?? 0)
-                const hasAvailable = available > 0
-                const isLotLike = quantity > 1 || available > 1
-                const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
+      <div className="app-section">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Inventory</h2>
+            <p className="mt-0.5 text-sm text-zinc-400">
+              One row per item. Open details when you need the full record.
+            </p>
+          </div>
 
-                return (
-                  <tr key={item.id} className="app-tr">
-                    <td className="app-td py-2">
-                      <div className="min-w-[220px]">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <div className="font-medium leading-tight">{getPrimaryTitle(item)}</div>
-                          {isLotLike ? (
-                            <span className="app-badge app-badge-warning">Lot / Multi Qty</span>
+          <div className="text-xs text-zinc-500">{items.length} shown</div>
+        </div>
+
+        <div className="mt-4 app-table-wrap">
+          <div className="app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
+                <tr>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Item"
+                      sortKey="card"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Status"
+                      sortKey="status"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Qty"
+                      sortKey="quantity"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Available"
+                      sortKey="available_quantity"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Unit Cost"
+                      sortKey="cost_basis_unit"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Total Cost"
+                      sortKey="cost_basis_total"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Est. Value"
+                      sortKey="estimated_value_total"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">
+                    <SortHeader
+                      label="Location"
+                      sortKey="storage_location"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      q={q}
+                      limit={limit}
+                    />
+                  </th>
+                  <th className="app-th">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => {
+                  const itemLine = getCardDisplay(item)
+                  const quantity = Number(item.quantity ?? 0)
+                  const available = Number(item.available_quantity ?? 0)
+                  const hasAvailable = available > 0
+                  const isLotLike = quantity > 1 || available > 1
+                  const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
+
+                  return (
+                    <tr key={item.id} className="app-tr">
+                      <td className="app-td whitespace-nowrap">
+                        <div className="min-w-55">
+                          <div className="flex items-center gap-1.5">
+                            <div className="truncate font-medium leading-tight">
+                              {getPrimaryTitle(item)}
+                            </div>
+                            {isLotLike ? (
+                              <span className="app-badge app-badge-warning">Lot / Multi Qty</span>
+                            ) : null}
+                          </div>
+                          <div
+                            className="mt-0.5 truncate text-xs text-zinc-400"
+                            title={itemLine || getPrimaryTitle(item)}
+                          >
+                            {itemLine || '—'}
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="app-td whitespace-nowrap">{renderStatusPill(item.status)}</td>
+                      <td className="app-td whitespace-nowrap">{item.quantity ?? 0}</td>
+
+                      <td className="app-td whitespace-nowrap">
+                        <div className="font-medium leading-tight">{item.available_quantity ?? 0}</div>
+                        {hasAvailable && isLotLike ? (
+                          <div className="mt-0.5 text-[11px] text-zinc-500">partial sell ready</div>
+                        ) : null}
+                      </td>
+
+                      <td className="app-td whitespace-nowrap">{money(item.cost_basis_unit)}</td>
+                      <td className="app-td whitespace-nowrap">{money(item.cost_basis_total)}</td>
+                      <td className="app-td whitespace-nowrap">{money(item.estimated_value_total)}</td>
+
+                      <td className="app-td">
+                        <div className="max-w-35 truncate" title={item.storage_location || '—'}>
+                          {item.storage_location || '—'}
+                        </div>
+                      </td>
+
+                      <td className="app-td">
+                        <div className="flex flex-wrap gap-1.5">
+                          <Link href={`/app/inventory/${item.id}`} className="app-button">
+                            Details
+                          </Link>
+
+                          <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
+                            Edit
+                          </Link>
+
+                          {hasAvailable ? (
+                            <>
+                              <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
+                                Sell
+                              </Link>
+                              {isLotLike ? (
+                                <Link href={`/app/inventory/${item.id}/sell`} className="app-button">
+                                  Sell Qty
+                                </Link>
+                              ) : null}
+                            </>
+                          ) : latestActiveSale ? (
+                            <form action={reverseSaleAction}>
+                              <input type="hidden" name="sale_id" value={latestActiveSale.id} />
+                              <input type="hidden" name="inventory_item_id" value={item.id} />
+                              <input
+                                type="hidden"
+                                name="reversal_reason"
+                                value="Quick reverse from inventory list"
+                              />
+                              <button type="submit" className="app-button-danger">
+                                Reverse Sale
+                              </button>
+                            </form>
                           ) : null}
                         </div>
-                        <div className="mt-0.5 text-xs leading-snug text-zinc-400">{itemLine}</div>
-                      </div>
-                    </td>
+                      </td>
+                    </tr>
+                  )
+                })}
 
-                    <td className="app-td py-2">{renderStatusPill(item.status)}</td>
-
-                    <td className="app-td py-2">{item.quantity ?? 0}</td>
-                    <td className="app-td py-2">
-                      <div className="font-medium leading-tight">{item.available_quantity ?? 0}</div>
-                      {hasAvailable && isLotLike ? (
-                        <div className="mt-0.5 text-[11px] text-zinc-500">partial sell ready</div>
-                      ) : null}
-                    </td>
-                    <td className="app-td py-2 whitespace-nowrap">{money(item.cost_basis_unit)}</td>
-                    <td className="app-td py-2 whitespace-nowrap">{money(item.cost_basis_total)}</td>
-                    <td className="app-td py-2 whitespace-nowrap">{money(item.estimated_value_total)}</td>
-                    <td className="app-td py-2">
-                      <div className="max-w-[140px] truncate">{item.storage_location || '—'}</div>
-                    </td>
-
-                    <td className="app-td py-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        <Link href={`/app/inventory/${item.id}`} className="app-button">
-                          Details
-                        </Link>
-
-                        <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
-                          Edit
-                        </Link>
-
-                        {hasAvailable ? (
-                          <>
-                            <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
-                              Sell
-                            </Link>
-                            {isLotLike ? (
-                              <Link href={`/app/inventory/${item.id}/sell`} className="app-button">
-                                Sell Qty
-                              </Link>
-                            ) : null}
-                          </>
-                        ) : latestActiveSale ? (
-                          <form action={reverseSaleAction}>
-                            <input type="hidden" name="sale_id" value={latestActiveSale.id} />
-                            <input type="hidden" name="inventory_item_id" value={item.id} />
-                            <input
-                              type="hidden"
-                              name="reversal_reason"
-                              value="Quick reverse from inventory list"
-                            />
-                            <button type="submit" className="app-button-danger">
-                              Reverse Sale
-                            </button>
-                          </form>
-                        ) : null}
-                      </div>
+                {items.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-zinc-400">
+                      {q ? 'No inventory items match your search.' : 'No inventory items found.'}
                     </td>
                   </tr>
-                )
-              })}
-
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-zinc-400">
-                    {q ? 'No inventory items match your search.' : 'No inventory items found.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -745,7 +773,7 @@ export default async function InventoryPage({
                 Previous
               </Link>
             ) : (
-              <span className="app-button opacity-50 pointer-events-none">Previous</span>
+              <span className="app-button pointer-events-none opacity-50">Previous</span>
             )}
 
             {hasNextPage ? (
@@ -762,7 +790,7 @@ export default async function InventoryPage({
                 Next
               </Link>
             ) : (
-              <span className="app-button-primary opacity-50 pointer-events-none">Next</span>
+              <span className="app-button-primary pointer-events-none opacity-50">Next</span>
             )}
           </div>
         </div>

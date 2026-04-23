@@ -87,6 +87,8 @@ type SaleSearchRow = {
   inventory_items?: SaleInventoryItemRow | null
 }
 
+const SECTION_LIMIT = 50
+
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -110,7 +112,47 @@ function escapeLike(value: string) {
 
 function extractOrderNumbers(input: string): string[] {
   if (!input) return []
-  return Array.from(new Set(input.match(/\d{6,}/g) || []))
+
+  const cleaned = input
+    .replace(/order\s*id/gi, ' ')
+    .replace(/order\s*date/gi, ' ')
+    .replace(/sold\s*by/gi, ' ')
+    .replace(/quantity/gi, ' ')
+    .replace(/category/gi, ' ')
+    .replace(/subtotal/gi, ' ')
+    .replace(/shipping/gi, ' ')
+    .replace(/tax(?:es)?/gi, ' ')
+    .replace(/total/gi, ' ')
+    .replace(/usd/gi, ' ')
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/[^0-9\s]/g, ' ')
+
+  const matches = cleaned.match(/\d{6,}/g) || []
+  const unique = Array.from(new Set(matches))
+
+  return unique
+    .sort((a, b) => a.length - b.length)
+    .slice(0, 25)
+}
+
+function cleanText(value: string | null | undefined) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—'
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: '2-digit',
+  }).format(parsed)
 }
 
 function buildInventoryDisplay(item: InventoryItemRow) {
@@ -127,7 +169,9 @@ function buildInventoryDisplay(item: InventoryItemRow) {
 }
 
 function buildBreakDisplay(breakRow: BreakRow) {
-  return breakRow.product_name || breakRow.source_name || breakRow.order_number || 'Untitled break'
+  return cleanText(
+    breakRow.product_name || breakRow.source_name || breakRow.order_number || 'Untitled break'
+  )
 }
 
 function buildSoldItemDisplay(sale: SaleSearchRow) {
@@ -146,6 +190,48 @@ function buildSoldItemDisplay(sale: SaleSearchRow) {
   return parts.filter(Boolean).join(' • ') || item.title || item.player_name || 'Untitled sold item'
 }
 
+function statusBadgeClasses(status: string | null | undefined) {
+  const normalized = String(status ?? '').toLowerCase()
+
+  if (normalized === 'linked' || normalized === 'complete' || normalized === 'sold') {
+    return 'app-badge app-badge-success'
+  }
+
+  if (normalized === 'staging' || normalized === 'unassigned' || normalized === 'open') {
+    return 'app-badge app-badge-warning'
+  }
+
+  if (
+    normalized === 'active' ||
+    normalized === 'in progress' ||
+    normalized === 'personal' ||
+    normalized === 'listed'
+  ) {
+    return 'app-badge app-badge-info'
+  }
+
+  if (normalized === 'reversed' || normalized === 'junk') {
+    return 'app-badge app-badge-neutral'
+  }
+
+  return 'app-badge app-badge-neutral'
+}
+
+function SearchSummaryCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <div className="app-card-tight p-2.5">
+      <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
+    </div>
+  )
+}
+
 function ResultSection({
   title,
   subtitle,
@@ -158,8 +244,8 @@ function ResultSection({
   children: React.ReactNode
 }) {
   return (
-    <div className="app-section p-4">
-      <div className="flex items-center justify-between gap-4">
+    <div className="app-section">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-0.5 text-sm text-zinc-400">{subtitle}</p>
@@ -168,7 +254,7 @@ function ResultSection({
         <div className="text-xs text-zinc-500">{count} hit(s)</div>
       </div>
 
-      <div className="mt-4 grid gap-3">{children}</div>
+      <div className="mt-4">{children}</div>
     </div>
   )
 }
@@ -182,7 +268,13 @@ export default async function GlobalSearchPage({
   const qRaw = String(params?.q ?? '').trim()
   const q = escapeLike(qRaw)
   const extractedNumbers = extractOrderNumbers(qRaw)
-  const isMultiOrderSearch = extractedNumbers.length > 0
+
+  const isLikelyReceiptPaste =
+    extractedNumbers.length > 0 &&
+    qRaw.length > 30 &&
+    /order|sold|quantity|date|category/i.test(qRaw)
+
+  const isMultiOrderSearch = extractedNumbers.length > 0 || isLikelyReceiptPaste
 
   const supabase = await createClient()
 
@@ -226,6 +318,7 @@ export default async function GlobalSearchPage({
         .eq('user_id', user.id)
         .in('order_numeric_id', extractedNumbers)
         .order('processed_date', { ascending: false })
+        .limit(SECTION_LIMIT)
 
       matchingOrders = (ordersResponse.data ?? []) as WhatnotOrderRow[]
       ordersError = ordersResponse.error?.message ?? null
@@ -274,7 +367,8 @@ export default async function GlobalSearchPage({
               `source_file_name.ilike.${orderQuery}`,
             ].join(',')
           )
-          .order('processed_date', { ascending: false }),
+          .order('processed_date', { ascending: false })
+          .limit(SECTION_LIMIT),
 
         supabase
           .from('breaks')
@@ -299,7 +393,8 @@ export default async function GlobalSearchPage({
               `notes.ilike.${breakQuery}`,
             ].join(',')
           )
-          .order('break_date', { ascending: false }),
+          .order('break_date', { ascending: false })
+          .limit(SECTION_LIMIT),
 
         supabase
           .from('inventory_items')
@@ -338,7 +433,7 @@ export default async function GlobalSearchPage({
               `notes.ilike.${inventoryQuery}`,
             ].join(',')
           )
-          .limit(100),
+          .limit(SECTION_LIMIT),
 
         supabase
           .from('inventory_items')
@@ -377,7 +472,7 @@ export default async function GlobalSearchPage({
               `notes.ilike.${inventoryQuery}`,
             ].join(',')
           )
-          .limit(100),
+          .limit(SECTION_LIMIT),
 
         supabase
           .from('sales')
@@ -406,7 +501,7 @@ export default async function GlobalSearchPage({
             ].join(',')
           )
           .order('sale_date', { ascending: false })
-          .limit(100),
+          .limit(SECTION_LIMIT),
       ])
 
       matchingOrders = (ordersResponse.data ?? []) as WhatnotOrderRow[]
@@ -442,19 +537,18 @@ export default async function GlobalSearchPage({
           .is('reversed_at', null)
           .in('inventory_item_id', soldInventoryIds)
           .order('sale_date', { ascending: false })
-          .limit(100)
+          .limit(SECTION_LIMIT)
 
         salesFromInventoryMatches = (salesFromInventoryResponse.data ?? []) as SaleSearchRow[]
         salesError = salesFromInventoryResponse.error?.message ?? null
       }
 
       const salesMap = new Map<string, SaleSearchRow>()
-
       for (const sale of [...salesDirectMatches, ...salesFromInventoryMatches]) {
         salesMap.set(sale.id, sale)
       }
 
-      matchingSales = Array.from(salesMap.values())
+      matchingSales = Array.from(salesMap.values()).slice(0, SECTION_LIMIT)
 
       const salesInventoryIds = Array.from(
         new Set(
@@ -532,13 +626,13 @@ export default async function GlobalSearchPage({
         <div>
           <h1 className="app-title">Search</h1>
           <p className="app-subtitle">
-            Paste order numbers, copied email text, or search normally across orders, breaks, inventory, and sold items.
+            Paste order numbers, copied email text, or search across orders, breaks, inventory, and sold items.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Link href="/app/whatnot-orders" className="app-button">
-            Whatnot Orders
+            Imported Orders
           </Link>
           <Link href="/app/breaks" className="app-button">
             Breaks
@@ -550,25 +644,38 @@ export default async function GlobalSearchPage({
       </div>
 
       {qRaw ? (
-        <div className="app-section p-4">
-          <div className="text-sm text-zinc-300">
-            {ordersError || breaksError || inventoryError || salesError
-              ? 'Search ran with an error.'
-              : `Found ${totalHits} result(s) for "${qRaw}"`}
+        <>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            <SearchSummaryCard label="Total Hits" value={totalHits} />
+            <SearchSummaryCard label="Orders" value={matchingOrders.length} />
+            <SearchSummaryCard label="Breaks" value={matchingBreaks.length} />
+            <SearchSummaryCard label="Inventory" value={matchingInventory.length} />
+            <SearchSummaryCard label="Sales" value={matchingSales.length} />
           </div>
-          <div className="mt-1 text-xs text-zinc-500">
-            Use the global search bar at the top of the app to run a new search.
+
+          <div className="app-section p-4">
+            <div className="text-sm text-zinc-300">
+              {ordersError || breaksError || inventoryError || salesError
+                ? 'Search ran with an error.'
+                : `Found ${totalHits} result(s) for "${qRaw}"`}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
+              Use the global search bar at the top of the app to run a new search.
+            </div>
+            <div className="mt-3">
+              <Link href="/app/search" className="app-button">
+                Clear Results
+              </Link>
+            </div>
           </div>
-          <div className="mt-3">
-            <Link href="/app/search" className="app-button">
-              Clear Results
-            </Link>
-          </div>
-        </div>
+        </>
       ) : (
         <div className="app-section p-4">
           <div className="text-sm text-zinc-300">
             Use the global search bar at the top of the app to search across orders, breaks, inventory, and sold items.
+          </div>
+          <div className="mt-1 text-xs text-zinc-500">
+            Multi-order paste search still works. Paste copied order text or a block of order numbers.
           </div>
         </div>
       )}
@@ -589,184 +696,212 @@ export default async function GlobalSearchPage({
 
       {matchingOrders.length > 0 ? (
         <ResultSection
-          title="Matching Whatnot Orders"
+          title="Matching Imported Orders"
           subtitle={
             isMultiOrderSearch
               ? 'Exact order-number matches from pasted order text.'
-              : 'Matching staging and linked Whatnot orders.'
+              : 'Matching staging and linked imported orders.'
           }
           count={matchingOrders.length}
         >
-          {matchingOrders.map((order) => (
-            <div key={order.id} className="app-card-tight p-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {order.break_id ? (
-                      <span className="app-badge app-badge-success">Linked</span>
-                    ) : (
-                      <span className="app-badge app-badge-warning">Staging</span>
-                    )}
-                  </div>
+          <div className="app-table-wrap">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th">Order #</th>
+                    <th className="app-th">Date</th>
+                    <th className="app-th">Purchased From</th>
+                    <th className="app-th">Description</th>
+                    <th className="app-th">Status</th>
+                    <th className="app-th text-right">Total</th>
+                    <th className="app-th">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchingOrders.map((order) => {
+                    const orderNumber = cleanText(order.order_numeric_id || order.order_id || '—')
+                    const seller = cleanText(order.seller || '—')
+                    const description = cleanText(order.product_name || 'Untitled order')
+                    const statusLabel = order.break_id ? 'Linked' : 'Staging'
 
-                  <div className="mt-2 text-lg font-semibold">
-                    {order.product_name || 'Untitled order'}
-                  </div>
-
-                  <div className="mt-2 text-sm text-zinc-300">Seller: {order.seller || '—'}</div>
-                  <div className="mt-1 text-sm text-zinc-300">Buyer: {order.buyer || '—'}</div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Order #: {order.order_numeric_id || order.order_id || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Date: {order.processed_date_display || order.processed_date || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Status: {order.order_status || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">Qty: {order.quantity ?? '—'}</div>
-                  <div className="mt-1 text-sm text-zinc-300">Total: {money(order.total)}</div>
-
-                  {order.source_file_name ? (
-                    <div className="mt-1 text-xs text-zinc-500">
-                      Source file: {order.source_file_name}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Link href={buildFocusHref(order)} className="app-button">
-                    Open Order
-                  </Link>
-
-                  {order.break_id ? (
-                    <>
-                      <Link href={`/app/breaks/${order.break_id}`} className="app-button">
-                        Break Details
-                      </Link>
-                      <Link href={`/app/breaks/${order.break_id}/edit`} className="app-button">
-                        Edit Break
-                      </Link>
-                    </>
-                  ) : null}
-                </div>
-              </div>
+                    return (
+                      <tr key={order.id} className="app-tr">
+                        <td className="app-td whitespace-nowrap">{orderNumber || '—'}</td>
+                        <td className="app-td whitespace-nowrap">
+                          {formatDate(order.processed_date_display || order.processed_date)}
+                        </td>
+                        <td className="app-td">
+                          <div className="max-w-40 truncate" title={seller}>
+                            {seller || '—'}
+                          </div>
+                        </td>
+                        <td className="app-td">
+                          <div className="max-w-80 truncate" title={description}>
+                            {description}
+                          </div>
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
+                        </td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(order.total)}
+                        </td>
+                        <td className="app-td">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Link href={buildFocusHref(order)} className="app-button">
+                              Open
+                            </Link>
+                            {order.break_id ? (
+                              <Link href={`/app/breaks/${order.break_id}`} className="app-button">
+                                Break
+                              </Link>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
+          </div>
         </ResultSection>
       ) : null}
 
       {!isMultiOrderSearch && matchingBreaks.length > 0 ? (
         <ResultSection
           title="Matching Breaks"
-          subtitle="Search hits from order number, breaker/source, product, format, and notes."
+          subtitle="Search hits from order number, source, product, format, and notes."
           count={matchingBreaks.length}
         >
-          {matchingBreaks.map((breakRow) => (
-            <div key={breakRow.id} className="app-card-tight p-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {breakRow.reversed_at ? (
-                      <span className="app-badge app-badge-danger">Reversed</span>
-                    ) : (
-                      <span className="app-badge app-badge-info">Active</span>
-                    )}
-                  </div>
+          <div className="app-table-wrap">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th">Date</th>
+                    <th className="app-th">Break</th>
+                    <th className="app-th">Source</th>
+                    <th className="app-th">Order #</th>
+                    <th className="app-th">Status</th>
+                    <th className="app-th text-right">Cost</th>
+                    <th className="app-th">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchingBreaks.map((breakRow) => {
+                    const breakLabel = buildBreakDisplay(breakRow)
+                    const sourceLabel = cleanText(breakRow.source_name || '—')
+                    const orderLabel = cleanText(breakRow.order_number || '—')
+                    const statusLabel = breakRow.reversed_at ? 'Reversed' : 'Active'
 
-                  <div className="mt-2 text-lg font-semibold">
-                    {buildBreakDisplay(breakRow)}
-                  </div>
-
-                  <div className="mt-2 text-sm text-zinc-300">
-                    Breaker / Source: {breakRow.source_name || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Order #: {breakRow.order_number || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Format: {breakRow.format_type || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Break date: {breakRow.break_date || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Cost: {money(breakRow.total_cost)}
-                  </div>
-
-                  {breakRow.notes ? (
-                    <div className="mt-2 text-sm text-zinc-400">
-                      Notes: {breakRow.notes}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Link href={`/app/breaks/${breakRow.id}`} className="app-button">
-                    Break Details
-                  </Link>
-                  <Link href={`/app/breaks/${breakRow.id}/edit`} className="app-button">
-                    Edit Break
-                  </Link>
-                </div>
-              </div>
+                    return (
+                      <tr key={breakRow.id} className="app-tr">
+                        <td className="app-td whitespace-nowrap">{formatDate(breakRow.break_date)}</td>
+                        <td className="app-td">
+                          <div className="max-w-80 truncate" title={breakLabel}>
+                            {breakLabel}
+                          </div>
+                        </td>
+                        <td className="app-td">
+                          <div className="max-w-40 truncate" title={sourceLabel}>
+                            {sourceLabel}
+                          </div>
+                        </td>
+                        <td className="app-td">
+                          <div className="max-w-52 truncate" title={orderLabel}>
+                            {orderLabel || '—'}
+                          </div>
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
+                        </td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(breakRow.total_cost)}
+                        </td>
+                        <td className="app-td">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Link href={`/app/breaks/${breakRow.id}`} className="app-button">
+                              Details
+                            </Link>
+                            <Link href={`/app/breaks/${breakRow.id}/edit`} className="app-button">
+                              Edit
+                            </Link>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
+          </div>
         </ResultSection>
       ) : null}
 
       {!isMultiOrderSearch && matchingInventory.length > 0 ? (
         <ResultSection
           title="Matching Inventory Items"
-          subtitle="Search hits from item title, player name, set, item number, team, notes, and related inventory fields."
+          subtitle="Search hits from title, player, set, number, team, notes, and related inventory fields."
           count={matchingInventory.length}
         >
-          {matchingInventory.map((item) => (
-            <div key={item.id} className="app-card-tight p-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="text-lg font-semibold">
-                    {buildInventoryDisplay(item) || item.title || 'Untitled inventory item'}
-                  </div>
+          <div className="app-table-wrap">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th">Item</th>
+                    <th className="app-th">Status</th>
+                    <th className="app-th">Qty</th>
+                    <th className="app-th">Available</th>
+                    <th className="app-th text-right">Cost</th>
+                    <th className="app-th text-right">Est. Value</th>
+                    <th className="app-th">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchingInventory.map((item) => {
+                    const display = buildInventoryDisplay(item) || item.title || 'Untitled inventory item'
+                    const statusLabel = cleanText(item.status || '—')
 
-                  <div className="mt-2 text-sm text-zinc-300">Type: {item.item_type || '—'}</div>
-                  <div className="mt-1 text-sm text-zinc-300">Status: {item.status || '—'}</div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Qty: {item.quantity ?? '—'} / Available: {item.available_quantity ?? '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Cost basis: {money(item.cost_basis_total)}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Est. value: {money(item.estimated_value_total)}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Source type: {item.source_type || '—'}
-                  </div>
-
-                  {item.notes ? (
-                    <div className="mt-2 text-sm text-zinc-400">Notes: {item.notes}</div>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Link href={`/app/inventory/${item.id}`} className="app-button">
-                    Open Item
-                  </Link>
-
-                  <Link href="/app/inventory" className="app-button">
-                    Open Inventory
-                  </Link>
-
-                  {item.source_break_id ? (
-                    <Link href={`/app/breaks/${item.source_break_id}`} className="app-button">
-                      Source Break
-                    </Link>
-                  ) : null}
-                </div>
-              </div>
+                    return (
+                      <tr key={item.id} className="app-tr">
+                        <td className="app-td">
+                          <div className="max-w-96 truncate" title={display}>
+                            {display}
+                          </div>
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <span className={statusBadgeClasses(statusLabel)}>{statusLabel || '—'}</span>
+                        </td>
+                        <td className="app-td whitespace-nowrap">{item.quantity ?? '—'}</td>
+                        <td className="app-td whitespace-nowrap">{item.available_quantity ?? '—'}</td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(item.cost_basis_total)}
+                        </td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(item.estimated_value_total)}
+                        </td>
+                        <td className="app-td">
+                          <div className="flex flex-wrap gap-1.5">
+                            <Link href={`/app/inventory/${item.id}`} className="app-button">
+                              Open
+                            </Link>
+                            {item.source_break_id ? (
+                              <Link href={`/app/breaks/${item.source_break_id}`} className="app-button">
+                                Break
+                              </Link>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
+          </div>
         </ResultSection>
       ) : null}
 
@@ -776,76 +911,65 @@ export default async function GlobalSearchPage({
           subtitle="Search hits from sold item details, sold item notes, sale notes, and platform fields."
           count={matchingSales.length}
         >
-          {matchingSales.map((sale) => (
-            <div key={sale.id} className="app-card-tight p-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="app-badge app-badge-success">Sold</span>
+          <div className="app-table-wrap">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th">Date</th>
+                    <th className="app-th">Item</th>
+                    <th className="app-th">Platform</th>
+                    <th className="app-th">Qty</th>
+                    <th className="app-th text-right">Gross</th>
+                    <th className="app-th text-right">Profit</th>
+                    <th className="app-th">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchingSales.map((sale) => {
+                    const display = buildSoldItemDisplay(sale)
+                    const platform = cleanText(sale.platform || '—')
 
-                    {sale.inventory_items?.status ? (
-                      <span className="app-badge app-badge-neutral">
-                        {sale.inventory_items.status}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-2 text-lg font-semibold">
-                    {buildSoldItemDisplay(sale)}
-                  </div>
-
-                  <div className="mt-2 text-sm text-zinc-300">
-                    Sale date: {sale.sale_date || '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Qty sold: {sale.quantity_sold ?? '—'}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Gross sale: {money(sale.gross_sale)}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Profit: {money(sale.profit)}
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-300">
-                    Platform: {sale.platform || '—'}
-                  </div>
-
-                  {sale.inventory_items?.notes ? (
-                    <div className="mt-2 text-sm text-zinc-400">
-                      Item notes: {sale.inventory_items.notes}
-                    </div>
-                  ) : null}
-
-                  {sale.notes ? (
-                    <div className="mt-1 text-sm text-zinc-400">
-                      Sale notes: {sale.notes}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {sale.inventory_item_id ? (
-                    <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button">
-                      Open Item
-                    </Link>
-                  ) : null}
-
-                  {sale.inventory_items?.source_break_id ? (
-                    <Link
-                      href={`/app/breaks/${sale.inventory_items.source_break_id}`}
-                      className="app-button"
-                    >
-                      Source Break
-                    </Link>
-                  ) : null}
-
-                  <Link href="/app/inventory" className="app-button">
-                    Open Inventory
-                  </Link>
-                </div>
-              </div>
+                    return (
+                      <tr key={sale.id} className="app-tr">
+                        <td className="app-td whitespace-nowrap">{formatDate(sale.sale_date)}</td>
+                        <td className="app-td">
+                          <div className="max-w-96 truncate" title={display}>
+                            {display}
+                          </div>
+                        </td>
+                        <td className="app-td whitespace-nowrap">{platform || '—'}</td>
+                        <td className="app-td whitespace-nowrap">{sale.quantity_sold ?? '—'}</td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(sale.gross_sale)}
+                        </td>
+                        <td className="app-td whitespace-nowrap text-right">
+                          {money(sale.profit)}
+                        </td>
+                        <td className="app-td">
+                          <div className="flex flex-wrap gap-1.5">
+                            {sale.inventory_item_id ? (
+                              <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button">
+                                Item
+                              </Link>
+                            ) : null}
+                            {sale.inventory_items?.source_break_id ? (
+                              <Link
+                                href={`/app/breaks/${sale.inventory_items.source_break_id}`}
+                                className="app-button"
+                              >
+                                Break
+                              </Link>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
+          </div>
         </ResultSection>
       ) : null}
     </div>

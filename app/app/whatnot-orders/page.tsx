@@ -18,6 +18,7 @@ type WhatnotOrderRow = {
   taxes: number | null
   total: number | null
   source_file_name: string | null
+  created_at: string | null
 }
 
 type WhatnotOrderSummaryRow = {
@@ -46,6 +47,72 @@ function money(value: number | string | null | undefined) {
     style: 'currency',
     currency: 'USD',
   }).format(Number(value ?? 0))
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—'
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: '2-digit',
+  }).format(parsed)
+}
+
+function cleanText(value: string | null | undefined) {
+  return String(value ?? '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function decodeCandidate(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function normalizeCandidate(value: string | null | undefined) {
+  return cleanText(decodeCandidate(String(value ?? '')))
+}
+
+function looksLikeOrderNumber(value: string) {
+  const cleaned = normalizeCandidate(value)
+
+  if (!cleaned) return false
+  if (cleaned.includes(',')) return false
+  if (/\s/.test(cleaned)) return false
+  if (/UTC|USD|direct_order|completed|imported|subtotal|shipping|tax/i.test(cleaned)) {
+    return false
+  }
+
+  return /^[A-Za-z0-9_-]+$/.test(cleaned)
+}
+
+function getOrderNumberDisplay(order: WhatnotOrderRow) {
+  const numericId = normalizeCandidate(order.order_numeric_id)
+  const orderId = normalizeCandidate(order.order_id)
+
+  if (looksLikeOrderNumber(numericId)) return numericId
+  if (looksLikeOrderNumber(orderId)) return orderId
+
+  return '—'
+}
+
+function getDescriptionDisplay(order: WhatnotOrderRow) {
+  const cleanedProductName = cleanText(order.product_name)
+
+  if (cleanedProductName) {
+    return cleanedProductName
+  }
+
+  return 'Imported order'
 }
 
 function buildFocusHref(order: WhatnotOrderRow) {
@@ -122,7 +189,8 @@ export default async function WhatnotOrdersPage({
       shipping_price,
       taxes,
       total,
-      source_file_name
+      source_file_name,
+      created_at
     `)
     .eq('user_id', user.id)
 
@@ -195,17 +263,17 @@ export default async function WhatnotOrdersPage({
 
   const pageTitle =
     qRaw === 'unassigned'
-      ? 'Imported Orders — Unassigned'
+      ? 'Orders — Unassigned'
       : qRaw === 'assigned'
-        ? 'Imported Orders — Assigned'
-        : 'Imported Orders'
+        ? 'Orders — Assigned'
+        : 'Orders'
 
   const pageDescription =
     qRaw === 'unassigned'
-      ? 'Showing only imported orders that have not yet been grouped into a break.'
+      ? 'Showing only orders that have not yet been grouped into a break.'
       : qRaw === 'assigned'
-        ? 'Showing only imported orders that are already linked to a break.'
-        : 'Imported orders are shown here as a staging area before grouping them into breaks or other purchase batches.'
+        ? 'Showing only orders that are already linked to a break.'
+        : 'Orders are shown here as a staging area before grouping them into breaks or other purchase batches.'
 
   const hasPreviousPage = page > 1
   const hasNextPage = filteredOrders.length === limit
@@ -368,7 +436,7 @@ export default async function WhatnotOrdersPage({
                 ? 'Showing only unassigned orders.'
                 : qRaw === 'assigned'
                   ? 'Showing only assigned orders.'
-                  : 'Showing all imported orders.'}
+                  : 'Showing all orders.'}
             </p>
           </div>
 
@@ -382,44 +450,66 @@ export default async function WhatnotOrdersPage({
             No orders found for this view.
           </div>
         ) : (
-          <div className="mt-4 divide-y divide-zinc-800">
-            {filteredOrders.map((order) => (
-              <Link
-                key={order.id}
-                href={buildFocusHref(order)}
-                className="block transition hover:bg-zinc-900/60"
-              >
-                <div className="flex items-center justify-between gap-3 py-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
-                      <span className="text-zinc-300">
-                        {order.processed_date_display || order.processed_date || '—'}
-                      </span>
+          <div className="mt-4 app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
+                <tr>
+                  <th className="app-th">Order #</th>
+                  <th className="app-th">Date Added</th>
+                  <th className="app-th">Order Date</th>
+                  <th className="app-th">Purchased From</th>
+                  <th className="app-th">Description</th>
+                  <th className="app-th">Status</th>
+                  <th className="app-th text-right">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map((order) => {
+                  const importedDate = formatDate(order.created_at)
+                  const orderDate = formatDate(
+                    order.processed_date_display || order.processed_date
+                  )
+                  const orderNumber = getOrderNumberDisplay(order)
+                  const seller = cleanText(order.seller || 'Unknown Seller')
+                  const productName = getDescriptionDisplay(order)
 
-                      <span className="text-zinc-500">•</span>
-
-                      <span className="text-zinc-300 break-words">
-                        {order.order_numeric_id || order.order_id || '—'}
-                      </span>
-
-                      {order.break_id ? (
-                        <span className="app-badge app-badge-success">Linked</span>
-                      ) : (
-                        <span className="app-badge app-badge-warning">Unassigned</span>
-                      )}
-                    </div>
-
-                    <div className="mt-1 text-sm text-zinc-400 truncate">
-                      {order.seller || 'Unknown Seller'}
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 text-sm font-semibold text-zinc-100">
-                    {money(order.total)}
-                  </div>
-                </div>
-              </Link>
-            ))}
+                  return (
+                    <tr key={order.id} className="app-tr">
+                      <td className="app-td whitespace-nowrap">
+                        <Link
+                          href={buildFocusHref(order)}
+                          className="hover:text-zinc-100"
+                        >
+                          {orderNumber}
+                        </Link>
+                      </td>
+                      <td className="app-td whitespace-nowrap">{importedDate}</td>
+                      <td className="app-td whitespace-nowrap">{orderDate}</td>
+                      <td className="app-td">
+                        <div className="max-w-[180px] truncate" title={seller}>
+                          {seller}
+                        </div>
+                      </td>
+                      <td className="app-td">
+                        <div className="max-w-[520px] truncate" title={productName}>
+                          {productName}
+                        </div>
+                      </td>
+                      <td className="app-td">
+                        {order.break_id ? (
+                          <span className="app-badge app-badge-success">Linked</span>
+                        ) : (
+                          <span className="app-badge app-badge-warning">Unassigned</span>
+                        )}
+                      </td>
+                      <td className="app-td text-right whitespace-nowrap">
+                        {money(order.total)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
