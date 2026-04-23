@@ -17,6 +17,7 @@ const CATEGORY_OPTIONS = [
   'Shipping Supplies',
   'Supplies',
   'Postage',
+  'Platform Fees',
   'Software / Subscriptions',
   'Equipment',
   'Office Expense',
@@ -299,7 +300,7 @@ export default async function ExpensesPage({
             <textarea
               name="notes"
               rows={3}
-              placeholder="Example: 200 top loaders, 1000 penny sleeves, 50 padded mailers"
+              placeholder="Example: Amazon order #12345, 200 top loaders, 1000 penny sleeves, 50 padded mailers"
               className="app-textarea"
             />
           </div>
@@ -313,7 +314,8 @@ export default async function ExpensesPage({
 
         <div className="mt-2 text-xs text-zinc-400">
           Use this page for bulk supply purchases and other business expenses that are not already
-          captured in an individual sale.
+          captured in an individual sale. If you have a receipt number, invoice number, or source
+          reference, put it in the notes field for now.
         </div>
       </form>
 
@@ -340,6 +342,12 @@ export default async function ExpensesPage({
             title="Postage"
             description="Use only if you buy postage separately in bulk and want to log it here."
             examples="Examples: stamp rolls, postage refills, bulk label postage purchases."
+          />
+
+          <GuideCard
+            title="Platform Fees"
+            description="Use for selling-platform charges that are not already captured on individual sales."
+            examples="Examples: store subscriptions, promoted listing charges, account-level platform charges, marketplace service fees."
           />
 
           <GuideCard

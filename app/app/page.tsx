@@ -163,11 +163,11 @@ export default async function AppHomePage() {
   const whatnotCount = whatnotRes.count ?? whatnotOrders.length
 
   return (
-    <div className="max-w-7xl space-y-5">
-      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <h1 className="app-title">Dashboard</h1>
+          <p className="app-subtitle">
             Overview of your breaks, inventory, sales, and imported Whatnot orders.
           </p>
         </div>
@@ -215,7 +215,7 @@ export default async function AppHomePage() {
           href="/app/whatnot-orders?q=unassigned"
           className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
-          <div className="text-sm text-zinc-400">Whatnot Orders</div>
+          <div className="text-sm text-zinc-400">Orders</div>
           <div className="mt-1.5 text-2xl font-semibold">{whatnotCount}</div>
           <div className="mt-1 text-xs text-zinc-500">
             {unassignedWhatnotOrdersCount} unassigned

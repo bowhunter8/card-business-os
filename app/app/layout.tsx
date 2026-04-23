@@ -31,36 +31,36 @@ export default async function AppLayout({
 
           <nav className="space-y-2">
             <Link
-              href="/app/dashboard"
-              className="block rounded-xl border border-zinc-800 px-4 py-3 text-zinc-100 hover:bg-zinc-800"
+              href="/app"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Dashboard
             </Link>
 
             <Link
               href="/app/inventory"
-              className="block rounded-xl border border-zinc-800 px-4 py-3 text-zinc-100 hover:bg-zinc-800"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Inventory
             </Link>
 
             <Link
               href="/app/breaks"
-              className="block rounded-xl border border-zinc-800 px-4 py-3 text-zinc-100 hover:bg-zinc-800"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Breaks
             </Link>
 
             <Link
               href="/app/whatnot-orders"
-              className="block rounded-xl border border-zinc-800 px-4 py-3 text-zinc-100 hover:bg-zinc-800"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Orders
             </Link>
 
             <Link
               href="/app/utilities"
-              className="block rounded-xl border border-zinc-800 px-4 py-3 text-zinc-100 hover:bg-zinc-800"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Utilities
             </Link>
@@ -76,7 +76,29 @@ export default async function AppLayout({
           </div>
         </aside>
 
-        <main className="min-w-0">{children}</main>
+        <main className="min-w-0">
+          <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-3">
+            <form
+              action="/app/search"
+              method="GET"
+              role="search"
+              className="flex max-w-4xl gap-2"
+            >
+              <input
+                type="text"
+                name="q"
+                placeholder="Search orders, breaks, players, sets, order IDs... or paste multiple orders"
+                className="app-input"
+                autoComplete="off"
+              />
+              <button type="submit" className="app-button-primary whitespace-nowrap">
+                Search
+              </button>
+            </form>
+          </div>
+
+          <div className="p-4 md:p-6">{children}</div>
+        </main>
       </div>
     </div>
   )
