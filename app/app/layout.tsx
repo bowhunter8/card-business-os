@@ -77,7 +77,7 @@ export default async function AppLayout({
         </aside>
 
         <main className="min-w-0">
-          <div className="border-b border-zinc-800 bg-zinc-950 px-4 py-3">
+          <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
             <form
               action="/app/search"
               method="GET"
