@@ -5,6 +5,7 @@ import { reverseSaleAction } from '@/app/actions/sale-safety'
 import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
 import { updateInventoryItemAction } from '@/app/actions/inventory'
 import { deleteInventoryItemAction } from '@/app/actions/breaks'
+import { markAsGiveawayAction } from '@/app/actions/inventory-giveaway'
 
 type InventoryItem = {
   id: string
@@ -109,6 +110,10 @@ function renderStatusPill(status: string | null) {
     return <span className="app-badge app-badge-neutral">Junk</span>
   }
 
+  if (status === 'giveaway') {
+    return <span className="app-badge app-badge-warning">Giveaway</span>
+  }
+
   return (
     <span className="app-badge app-badge-neutral capitalize">
       {(status || 'unknown').replaceAll('_', ' ')}
@@ -194,6 +199,7 @@ function EditableSelect({
         <option value="listed">Listed</option>
         <option value="personal">Personal</option>
         <option value="junk">Junk</option>
+        <option value="giveaway">Giveaway</option>
       </select>
     </div>
   )
@@ -293,22 +299,10 @@ export default async function InventoryDetailPage({
 
   const activeSales = sales.filter((sale) => !sale.reversed_at)
 
-  const totalGross = activeSales.reduce(
-    (sum, row) => sum + Number(row.gross_sale ?? 0),
-    0
-  )
-  const totalNet = activeSales.reduce(
-    (sum, row) => sum + Number(row.net_proceeds ?? 0),
-    0
-  )
-  const totalProfit = activeSales.reduce(
-    (sum, row) => sum + Number(row.profit ?? 0),
-    0
-  )
-  const totalQtySold = activeSales.reduce(
-    (sum, row) => sum + Number(row.quantity_sold ?? 0),
-    0
-  )
+  const totalGross = activeSales.reduce((sum, row) => sum + Number(row.gross_sale ?? 0), 0)
+  const totalNet = activeSales.reduce((sum, row) => sum + Number(row.net_proceeds ?? 0), 0)
+  const totalProfit = activeSales.reduce((sum, row) => sum + Number(row.profit ?? 0), 0)
+  const totalQtySold = activeSales.reduce((sum, row) => sum + Number(row.quantity_sold ?? 0), 0)
 
   const availableQuantity = Number(item.available_quantity ?? 0)
   const hasAvailableToSell = availableQuantity > 0
@@ -347,9 +341,18 @@ export default async function InventoryDetailPage({
           </Link>
 
           {hasAvailableToSell ? (
-            <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
-              Sell Item
-            </Link>
+            <>
+              <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
+                Sell Item
+              </Link>
+
+              <form action={markAsGiveawayAction}>
+                <input type="hidden" name="inventory_item_id" value={item.id} />
+                <button type="submit" className="app-button-warning">
+                  Mark as Giveaway
+                </button>
+              </form>
+            </>
           ) : latestActiveSale ? (
             <form action={reverseSaleAction}>
               <input type="hidden" name="sale_id" value={latestActiveSale.id} />
@@ -390,6 +393,12 @@ export default async function InventoryDetailPage({
       {item.status === 'personal' ? (
         <div className="app-alert-info">
           This item is marked as Personal Collection and is not currently part of your active sell inventory.
+        </div>
+      ) : null}
+
+      {item.status === 'giveaway' ? (
+        <div className="app-alert-info">
+          This item has been marked as a Giveaway and recorded as a marketing expense.
         </div>
       ) : null}
 
@@ -577,10 +586,7 @@ export default async function InventoryDetailPage({
         <h2 className="text-base font-semibold leading-tight">Listing Details</h2>
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <Detail
-            label="Listed Price"
-            value={item.listed_price != null ? money(item.listed_price) : '—'}
-          />
+          <Detail label="Listed Price" value={item.listed_price != null ? money(item.listed_price) : '—'} />
           <Detail label="Listed Platform" value={item.listed_platform || '—'} />
           <Detail label="Listed Date" value={formatDate(item.listed_date)} />
         </div>
@@ -597,9 +603,7 @@ export default async function InventoryDetailPage({
               type="number"
               min={0}
               step="0.01"
-              defaultValue={
-                item.listed_price != null ? Number(item.listed_price).toFixed(2) : ''
-              }
+              defaultValue={item.listed_price != null ? Number(item.listed_price).toFixed(2) : ''}
               placeholder="0.00"
               className="app-input"
             />

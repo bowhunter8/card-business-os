@@ -1,6 +1,8 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import TaxExportButton from '../TaxExportButton'
+import TaxPdfExportButton from '../TaxPdfExportButton'
 
 type SearchParams = Promise<{
   year?: string
@@ -66,6 +68,19 @@ type InventorySummaryRow = {
   estimated_value_total: number | null
 }
 
+type TaxYearSettingsRow = {
+  beginning_inventory: number | null
+  business_use_of_home: number | null
+  vehicle_expense: number | null
+  depreciation_expense: number | null
+  legal_professional: number | null
+  insurance: number | null
+  utilities: number | null
+  taxes_licenses: number | null
+  repairs_maintenance: number | null
+  notes: string | null
+}
+
 const DETAIL_LIMIT = 25
 
 function money(value: number | null | undefined) {
@@ -73,6 +88,11 @@ function money(value: number | null | undefined) {
     style: 'currency',
     currency: 'USD',
   }).format(Number(value ?? 0))
+}
+
+function parseMoneyInput(value: FormDataEntryValue | null) {
+  const parsed = Number(String(value ?? '0').replace(/\$/g, '').replace(/,/g, '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 function buildItemName(item: InventoryRow) {
@@ -104,6 +124,43 @@ function StatCard({ label, value }: { label: string; value: string }) {
   )
 }
 
+async function saveTaxYearSettings(formData: FormData) {
+  'use server'
+
+  const year = clampYear(String(formData.get('tax_year') ?? ''))
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return
+
+  const payload = {
+    user_id: user.id,
+    tax_year: year,
+    beginning_inventory: parseMoneyInput(formData.get('beginning_inventory')),
+    business_use_of_home: parseMoneyInput(formData.get('business_use_of_home')),
+    vehicle_expense: parseMoneyInput(formData.get('vehicle_expense')),
+    depreciation_expense: parseMoneyInput(formData.get('depreciation_expense')),
+    legal_professional: parseMoneyInput(formData.get('legal_professional')),
+    insurance: parseMoneyInput(formData.get('insurance')),
+    utilities: parseMoneyInput(formData.get('utilities')),
+    taxes_licenses: parseMoneyInput(formData.get('taxes_licenses')),
+    repairs_maintenance: parseMoneyInput(formData.get('repairs_maintenance')),
+    notes: String(formData.get('notes') ?? '').trim() || null,
+    updated_at: new Date().toISOString(),
+  }
+
+  await supabase
+    .from('tax_year_settings')
+    .upsert(payload, {
+      onConflict: 'user_id,tax_year',
+    })
+
+  revalidatePath('/app/reports/tax/summary')
+}
+
 export default async function TaxReportPage({
   searchParams,
 }: {
@@ -130,6 +187,7 @@ export default async function TaxReportPage({
     salesDetailRes,
     inventorySummaryRes,
     inventoryDetailRes,
+    taxSettingsRes,
   ] = await Promise.all([
     supabase
       .from('breaks')
@@ -215,16 +273,36 @@ export default async function TaxReportPage({
       .gt('available_quantity', 0)
       .order('year', { ascending: false })
       .limit(DETAIL_LIMIT),
+
+    supabase
+      .from('tax_year_settings')
+      .select(`
+        beginning_inventory,
+        business_use_of_home,
+        vehicle_expense,
+        depreciation_expense,
+        legal_professional,
+        insurance,
+        utilities,
+        taxes_licenses,
+        repairs_maintenance,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .eq('tax_year', selectedYear)
+      .maybeSingle(),
   ])
 
-  const breakSummaryRows = breaksSummaryRes.data ?? []
-  const breaks = breaksDetailRes.data ?? []
+  const breakSummaryRows = (breaksSummaryRes.data ?? []) as BreakSummaryRow[]
+  const breaks = (breaksDetailRes.data ?? []) as BreakRow[]
 
-  const salesSummaryRows = salesSummaryRes.data ?? []
-  const sales = salesDetailRes.data ?? []
+  const salesSummaryRows = (salesSummaryRes.data ?? []) as SaleSummaryRow[]
+  const sales = (salesDetailRes.data ?? []) as SaleRow[]
 
-  const inventorySummaryRows = inventorySummaryRes.data ?? []
-  const endingInventory = inventoryDetailRes.data ?? []
+  const inventorySummaryRows = (inventorySummaryRes.data ?? []) as InventorySummaryRow[]
+  const endingInventory = (inventoryDetailRes.data ?? []) as InventoryRow[]
+
+  const taxSettings = (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null
 
   const totalBreakPurchases = breakSummaryRows.reduce(
     (sum, row) => sum + Number(row.total_cost ?? 0),
@@ -277,13 +355,23 @@ export default async function TaxReportPage({
     0
   )
 
+  const beginningInventory = Number(taxSettings?.beginning_inventory ?? 0)
+  const businessUseOfHome = Number(taxSettings?.business_use_of_home ?? 0)
+  const vehicleExpense = Number(taxSettings?.vehicle_expense ?? 0)
+  const depreciationExpense = Number(taxSettings?.depreciation_expense ?? 0)
+  const legalProfessional = Number(taxSettings?.legal_professional ?? 0)
+  const insurance = Number(taxSettings?.insurance ?? 0)
+  const utilities = Number(taxSettings?.utilities ?? 0)
+  const taxesLicenses = Number(taxSettings?.taxes_licenses ?? 0)
+  const repairsMaintenance = Number(taxSettings?.repairs_maintenance ?? 0)
+
   return (
     <div className="app-page-wide space-y-4">
       <div className="app-page-header gap-4">
         <div>
           <h1 className="app-title">Tax Summary</h1>
           <p className="app-subtitle">
-            Year-end summary and CSV export for your business records.
+            Year-end summary, Schedule C settings, workbook export, and PDF tax report.
           </p>
         </div>
 
@@ -293,6 +381,8 @@ export default async function TaxReportPage({
           </Link>
 
           <TaxExportButton year={selectedYear} />
+
+          <TaxPdfExportButton year={selectedYear} />
         </div>
       </div>
 
@@ -316,9 +406,13 @@ export default async function TaxReportPage({
             </select>
           </div>
 
-          <button type="submit" className="app-button">
-            Load Year
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className="app-button">
+              Load Year
+            </button>
+
+            <TaxPdfExportButton year={selectedYear} />
+          </div>
         </form>
       </div>
 
@@ -332,14 +426,181 @@ export default async function TaxReportPage({
       <div className="grid gap-4 md:grid-cols-4">
         <StatCard label="Realized COGS" value={money(totalCOGS)} />
         <StatCard label="Realized Profit" value={money(totalProfit)} />
+        <StatCard label="Beginning Inventory" value={money(beginningInventory)} />
         <StatCard label="Ending Inventory Cost" value={money(endingInventoryCost)} />
-        <StatCard
-          label="Ending Inventory Est. Value"
-          value={money(endingInventoryEstimatedValue)}
-        />
       </div>
 
-      {/* tables unchanged */}
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard label="Ending Inventory Est. Value" value={money(endingInventoryEstimatedValue)} />
+        <StatCard label="Home Office" value={money(businessUseOfHome)} />
+        <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
+        <StatCard label="Legal / Professional" value={money(legalProfessional)} />
+      </div>
+
+      <div className="app-section p-5">
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Schedule C Year Settings</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            These amounts feed the Schedule C PDF report for {selectedYear}. Use this for beginning inventory and Schedule C lines that are not created from sales or expense records.
+          </p>
+        </div>
+
+        {!taxSettings && (
+          <div className="mb-4 rounded-2xl border border-amber-700/60 bg-amber-950/30 p-4 text-sm text-amber-100">
+            No tax settings have been saved for {selectedYear} yet. The PDF will use zero defaults until you save this section.
+          </div>
+        )}
+
+        <form action={saveTaxYearSettings} className="space-y-5">
+          <input type="hidden" name="tax_year" value={selectedYear} />
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Beginning Inventory</span>
+              <input
+                name="beginning_inventory"
+                defaultValue={beginningInventory}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Part III Line 35.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Business Use of Home</span>
+              <input
+                name="business_use_of_home"
+                defaultValue={businessUseOfHome}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 30, if applicable.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Vehicle Expense</span>
+              <input
+                name="vehicle_expense"
+                defaultValue={vehicleExpense}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 9, if applicable.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Depreciation / Section 179</span>
+              <input
+                name="depreciation_expense"
+                defaultValue={depreciationExpense}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 13.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Legal / Professional</span>
+              <input
+                name="legal_professional"
+                defaultValue={legalProfessional}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 17.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Insurance</span>
+              <input
+                name="insurance"
+                defaultValue={insurance}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 15.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Utilities</span>
+              <input
+                name="utilities"
+                defaultValue={utilities}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 25.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Taxes / Licenses</span>
+              <input
+                name="taxes_licenses"
+                defaultValue={taxesLicenses}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 23.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm text-zinc-300">Repairs / Maintenance</span>
+              <input
+                name="repairs_maintenance"
+                defaultValue={repairsMaintenance}
+                className="app-input"
+                inputMode="decimal"
+                placeholder="0.00"
+              />
+              <span className="mt-1 block text-xs text-zinc-500">
+                Schedule C Line 21.
+              </span>
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="mb-1 block text-sm text-zinc-300">Tax Notes</span>
+            <textarea
+              name="notes"
+              defaultValue={taxSettings?.notes ?? ''}
+              className="app-input min-h-28"
+              placeholder="Optional notes for this tax year..."
+            />
+          </label>
+
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className="app-button-primary">
+              Save Schedule C Settings
+            </button>
+
+            <TaxPdfExportButton year={selectedYear} />
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

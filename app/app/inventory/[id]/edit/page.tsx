@@ -28,39 +28,27 @@ type InventoryItem = {
 
 function renderStatusPill(status: string | null) {
   if (status === 'available') {
-    return (
-      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-        For Sale
-      </span>
-    )
+    return <span className="app-badge app-badge-success">For Sale</span>
   }
 
   if (status === 'listed') {
-    return (
-      <span className="rounded-full border border-purple-800 bg-purple-950/40 px-2 py-1 text-xs text-purple-300">
-        Listed
-      </span>
-    )
+    return <span className="app-badge app-badge-info">Listed</span>
   }
 
   if (status === 'personal') {
-    return (
-      <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
-        Personal
-      </span>
-    )
+    return <span className="app-badge app-badge-info">Personal</span>
   }
 
   if (status === 'junk') {
-    return (
-      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
-        Junk
-      </span>
-    )
+    return <span className="app-badge app-badge-neutral">Junk</span>
+  }
+
+  if (status === 'giveaway') {
+    return <span className="app-badge app-badge-warning">Giveaway</span>
   }
 
   return (
-    <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 capitalize">
+    <span className="app-badge app-badge-neutral capitalize">
       {(status || 'unknown').replaceAll('_', ' ')}
     </span>
   )
@@ -141,160 +129,209 @@ export default async function EditInventoryPage({
   const canDelete = soldQuantity === 0
 
   return (
-    <div className="max-w-4xl">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold">Edit Inventory Item</h1>
-          <p className="mt-2 text-zinc-400">{itemLine}</p>
-          <div className="mt-3">{renderStatusPill(item.status)}</div>
+    <div className="app-page-wide space-y-3">
+      <div className="app-page-header gap-3">
+        <div className="min-w-0">
+          <h1 className="app-title">Edit Inventory Item</h1>
+          <p className="app-subtitle mt-1">{itemLine}</p>
+          <div className="mt-2">{renderStatusPill(item.status)}</div>
         </div>
 
-        <Link
-          href={backHref}
-          className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-        >
+        <Link href={backHref} className="app-button">
           {cameFromBreak ? 'Back to Break' : 'Back to Item'}
         </Link>
       </div>
 
-      {pageError && (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {pageError}
-        </div>
-      )}
+      {pageError ? <div className="app-alert-error">{pageError}</div> : null}
 
-      {/* 🔥 TOP SAVE BAR */}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-        <div className="text-sm text-zinc-400">
-          Make changes and save anytime
-        </div>
+      <div className="app-section p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-zinc-400">Make changes and save anytime.</div>
 
-        <div className="flex gap-3">
-          <Link
-            href={backHref}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Cancel
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href={backHref} className="app-button">
+              Cancel
+            </Link>
 
-          <button
-            type="submit"
-            form="edit-inventory-form"
-            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
-          >
-            Save Item Changes
-          </button>
+            <button type="submit" form="edit-inventory-form" className="app-button-primary">
+              Save Item Changes
+            </button>
+          </div>
         </div>
       </div>
 
-      {!canDelete && (
-        <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-200">
-          This item cannot be deleted after sales have happened. Reverse the sale first.
+      {!canDelete ? (
+        <div className="app-alert-info">
+          This item has sales history, so delete is disabled. Reverse the sale first if this was a
+          mistake.
         </div>
-      )}
+      ) : null}
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+      {item.status === 'giveaway' ? (
+        <div className="app-alert-info">
+          This item is marked as Giveaway. If it was marked through the giveaway workflow, it should
+          also have a matching Advertising / Marketing expense record.
+        </div>
+      ) : null}
+
+      <div className="app-section p-4">
         <form
           id="edit-inventory-form"
           action={updateInventoryItemAction}
-          className="grid gap-4 md:grid-cols-2"
+          className="grid gap-3 md:grid-cols-2"
         >
           <input type="hidden" name="inventory_item_id" value={item.id} />
           <input type="hidden" name="from" value={from ?? ''} />
           <input type="hidden" name="break_id" value={breakId ?? ''} />
 
-          {/* --- FIELDS (unchanged) --- */}
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Title</label>
-            <input name="title" defaultValue={item.title ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Title
+            </label>
+            <input name="title" defaultValue={item.title ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Player</label>
-            <input name="player_name" defaultValue={item.player_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Player
+            </label>
+            <input name="player_name" defaultValue={item.player_name ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Year</label>
-            <input name="year" type="number" defaultValue={item.year ?? undefined} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Year
+            </label>
+            <input
+              name="year"
+              type="number"
+              defaultValue={item.year ?? undefined}
+              className="app-input"
+            />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Brand</label>
-            <input name="brand" defaultValue={item.brand ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Brand
+            </label>
+            <input name="brand" defaultValue={item.brand ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Set Name</label>
-            <input name="set_name" defaultValue={item.set_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Set Name
+            </label>
+            <input name="set_name" defaultValue={item.set_name ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Card Number</label>
-            <input name="card_number" defaultValue={item.card_number ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Card Number
+            </label>
+            <input name="card_number" defaultValue={item.card_number ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Parallel</label>
-            <input name="parallel_name" defaultValue={item.parallel_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Parallel
+            </label>
+            <input
+              name="parallel_name"
+              defaultValue={item.parallel_name ?? ''}
+              className="app-input"
+            />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Team</label>
-            <input name="team" defaultValue={item.team ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Team
+            </label>
+            <input name="team" defaultValue={item.team ?? ''} className="app-input" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Quantity</label>
-            <input name="quantity" type="number" defaultValue={item.quantity ?? 1} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Quantity
+            </label>
+            <input
+              name="quantity"
+              type="number"
+              defaultValue={item.quantity ?? 1}
+              className="app-input"
+            />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Status</label>
-            <select name="status" defaultValue={item.status ?? 'available'} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Status
+            </label>
+            <select name="status" defaultValue={item.status ?? 'available'} className="app-select">
               <option value="available">For Sale</option>
               <option value="listed">Listed</option>
               <option value="personal">Personal</option>
               <option value="junk">Junk</option>
+              <option value="giveaway">Giveaway</option>
             </select>
+            <div className="mt-1 text-xs text-zinc-500">
+              Use the Mark as Giveaway button on the item detail page when you want the giveaway
+              expense created automatically.
+            </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Storage Location</label>
-            <input name="storage_location" defaultValue={item.storage_location ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Storage Location
+            </label>
+            <input
+              name="storage_location"
+              defaultValue={item.storage_location ?? ''}
+              className="app-input"
+            />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Estimated Value Per Unit</label>
-            <input name="estimated_value_unit" type="number" step="0.01" defaultValue={item.estimated_value_unit ?? 0} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Estimated Value Per Unit
+            </label>
+            <input
+              name="estimated_value_unit"
+              type="number"
+              step="0.01"
+              defaultValue={item.estimated_value_unit ?? 0}
+              className="app-input"
+            />
           </div>
 
           <div className="md:col-span-2">
-            <label className="mb-1 block text-sm text-zinc-300">Notes</label>
-            <textarea name="notes" rows={4} defaultValue={item.notes ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Notes
+            </label>
+            <textarea
+              name="notes"
+              rows={4}
+              defaultValue={item.notes ?? ''}
+              className="app-textarea"
+            />
           </div>
 
-          {/* 🔻 BOTTOM BUTTONS */}
-          <div className="md:col-span-2 flex flex-wrap justify-end gap-3 pt-2">
-            <Link href={backHref} className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800">
+          <div className="md:col-span-2 flex flex-wrap justify-end gap-2 pt-2">
+            <Link href={backHref} className="app-button">
               Cancel
             </Link>
-            <button type="submit" className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200">
+            <button type="submit" className="app-button-primary">
               Save Item Changes
             </button>
           </div>
         </form>
 
-        {canDelete && (
+        {canDelete ? (
           <div className="mt-4 flex justify-end">
             <form action={deleteInventoryItemAction}>
               <input type="hidden" name="inventory_item_id" value={item.id} />
-              <button className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-red-200 hover:bg-red-950">
-                Delete Item
-              </button>
+              <button className="app-button-danger">Delete Item</button>
             </form>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )

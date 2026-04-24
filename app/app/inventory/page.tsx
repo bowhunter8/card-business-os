@@ -150,6 +150,10 @@ function renderStatusPill(status: string | null) {
     return <span className="app-badge app-badge-warning">Sold</span>
   }
 
+  if (status === 'giveaway') {
+    return <span className="app-badge app-badge-warning">Giveaway</span>
+  }
+
   return (
     <span className="text-xs capitalize text-zinc-400">
       {(status || '—').replaceAll('_', ' ')}
@@ -645,7 +649,7 @@ export default async function InventoryPage({
                       limit={limit}
                     />
                   </th>
-                  <th className="app-th">Actions</th>
+                  <th className="app-th min-w-[260px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -698,8 +702,8 @@ export default async function InventoryPage({
                         </div>
                       </td>
 
-                      <td className="app-td">
-                        <div className="flex flex-wrap gap-1.5">
+                      <td className="app-td whitespace-nowrap">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
                           <Link href={`/app/inventory/${item.id}`} className="app-button">
                             Details
                           </Link>
@@ -720,7 +724,7 @@ export default async function InventoryPage({
                               ) : null}
                             </>
                           ) : latestActiveSale ? (
-                            <form action={reverseSaleAction}>
+                            <form action={reverseSaleAction} className="inline-flex">
                               <input type="hidden" name="sale_id" value={latestActiveSale.id} />
                               <input type="hidden" name="inventory_item_id" value={item.id} />
                               <input

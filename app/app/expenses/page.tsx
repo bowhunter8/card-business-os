@@ -42,47 +42,6 @@ function formatDate(value: string | null | undefined) {
   return date.toISOString().slice(0, 10)
 }
 
-async function createExpenseAction(formData: FormData) {
-  'use server'
-
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) return
-
-  const expenseDate = String(formData.get('expense_date') ?? '').trim()
-  const category = String(formData.get('category') ?? '').trim()
-  const vendor = String(formData.get('vendor') ?? '').trim()
-  const notes = String(formData.get('notes') ?? '').trim()
-  const amountRaw = Number(String(formData.get('amount') ?? '0'))
-
-  if (!expenseDate || !category || !Number.isFinite(amountRaw) || amountRaw < 0) {
-    redirect('/app/expenses?saved=error')
-  }
-
-  const amount = Number(amountRaw.toFixed(2))
-
-  const { error } = await supabase.from('expenses').insert({
-    user_id: user.id,
-    expense_date: expenseDate,
-    category,
-    vendor: vendor || null,
-    amount,
-    notes: notes || null,
-  })
-
-  if (error) {
-    redirect('/app/expenses?saved=error')
-  }
-
-  revalidatePath('/app/expenses')
-  revalidatePath('/app/reports/tax/summary')
-  redirect('/app/expenses?saved=1')
-}
-
 async function deleteExpenseAction(formData: FormData) {
   'use server'
 
@@ -133,11 +92,17 @@ function GuideCard({
   examples: string
 }) {
   return (
-    <div className="app-card-tight p-3">
-      <div className="font-medium">{title}</div>
+    <Link
+      href={`/app/expenses/new?category=${encodeURIComponent(title)}`}
+      className="app-card-tight block p-3 transition hover:border-zinc-600 hover:bg-zinc-900"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="font-medium">{title}</div>
+        <div className="text-xs text-zinc-500">Add expense →</div>
+      </div>
       <div className="mt-1 text-sm text-zinc-400">{description}</div>
       <div className="mt-2 text-sm text-zinc-300">{examples}</div>
-    </div>
+    </Link>
   )
 }
 
@@ -175,6 +140,7 @@ export default async function ExpensesPage({
   const expenses = (data ?? []) as ExpenseRow[]
 
   const totalExpenses = expenses.reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+
   const shippingSuppliesExpenses = expenses.reduce((sum, row) => {
     const category = String(row.category ?? '').toLowerCase()
     if (category === 'shipping supplies') {
@@ -205,11 +171,14 @@ export default async function ExpensesPage({
         <div>
           <h1 className="app-title">Supplies & Expense Tracker</h1>
           <p className="app-subtitle">
-            Record bulk supply purchases and other business expenses for tax reporting.
+            Choose a category below to record a business expense for tax reporting.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Link href="/app/expenses/new" className="app-button-primary">
+            Add Expense
+          </Link>
           <Link href="/app/reports/tax/summary" className="app-button">
             Tax Summary
           </Link>
@@ -238,98 +207,17 @@ export default async function ExpensesPage({
         <MetricCard label="Postage" value={money(postageExpenses)} />
       </div>
 
-      <form action={createExpenseAction} className="app-section p-4">
-        <h2 className="text-lg font-semibold">Add Expense</h2>
-
-        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Expense Date
-            </label>
-            <input
-              type="date"
-              name="expense_date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
-              className="app-input"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Category
-            </label>
-            <select name="category" defaultValue="Shipping Supplies" className="app-select">
-              {CATEGORY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Vendor
-            </label>
-            <input
-              type="text"
-              name="vendor"
-              placeholder="Amazon, Walmart, eBay..."
-              className="app-input"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Amount
-            </label>
-            <input
-              type="number"
-              name="amount"
-              min="0"
-              step="0.01"
-              placeholder="0.00"
-              className="app-input"
-            />
-          </div>
-
-          <div className="md:col-span-2 xl:col-span-4">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Notes
-            </label>
-            <textarea
-              name="notes"
-              rows={3}
-              placeholder="Example: Amazon order #12345, 200 top loaders, 1000 penny sleeves, 50 padded mailers"
-              className="app-textarea"
-            />
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button type="submit" className="app-button-primary">
-            Save Expense
-          </button>
-        </div>
-
-        <div className="mt-2 text-xs text-zinc-400">
-          Use this page for bulk supply purchases and other business expenses that are not already
-          captured in an individual sale. If you have a receipt number, invoice number, or source
-          reference, put it in the notes field for now.
-        </div>
-      </form>
-
       <div className="app-section p-4">
-        <h2 className="text-lg font-semibold">Category Guide</h2>
+        <h2 className="text-lg font-semibold">Add by Category</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Use consistent categories so reports stay clean and easy to understand later.
+          Click a category to open a focused expense entry page with that category already selected.
         </p>
 
         <div className="mt-3 grid gap-2 md:grid-cols-2">
           <GuideCard
             title="Shipping Supplies"
             description="Use for items that directly go into packing and shipping an order."
-            examples="Examples: penny sleeves, top loaders, team bags, envelopes, bubble mailers, boxes, packing tape, labels."
+            examples="Examples: penny sleeves, top loaders, team bags, envelopes, bubble mailers, boxes, packing tape, thermal labels / label printer labels."
           />
 
           <GuideCard
@@ -363,9 +251,15 @@ export default async function ExpensesPage({
           />
 
           <GuideCard
+            title="Office Expense"
+            description="Use for ordinary office-related business costs."
+            examples="Examples: paper, ink, pens, folders, small desk items, business office consumables."
+          />
+
+          <GuideCard
             title="Advertising / Marketing"
             description="Use for promotion and customer-acquisition related costs."
-            examples="Examples: ads, promo cards, stream promotion, branding materials."
+            examples="Examples: Whatnot giveaways, buyer appreciation giveaways, ads, promo cards, stream promotion, branding materials."
           />
 
           <GuideCard
@@ -375,15 +269,22 @@ export default async function ExpensesPage({
           />
 
           <GuideCard
-            title="Other"
-            description="Use only when nothing else fits well. Add a clear note if you use this."
-            examples='Example note: "business storage locker fee" or "one-time convention table fee."'
+            title="Travel"
+            description="Use for business travel tied to sourcing, shows, or selling."
+            examples="Examples: mileage notes, parking, tolls, lodging, show-related travel costs."
           />
-        </div>
 
-        <div className="mt-3 app-alert-info">
-          Recommended default: top loaders, penny sleeves, team bags, envelopes, and mailers should
-          usually go under <span className="font-medium">Shipping Supplies</span>.
+          <GuideCard
+            title="Education"
+            description="Use for learning resources directly related to the business."
+            examples="Examples: pricing guides, business courses, paid research tools, market education."
+          />
+
+          <GuideCard
+            title="Other"
+            description="Use when nothing else fits well, or use a Custom Category for a clearly named one-off expense."
+            examples='Examples: "business storage locker fee," "one-time convention table fee," or another occasional oddball business expense.'
+          />
         </div>
       </div>
 

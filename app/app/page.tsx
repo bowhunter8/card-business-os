@@ -168,7 +168,7 @@ export default async function AppHomePage() {
         <div>
           <h1 className="app-title">Dashboard</h1>
           <p className="app-subtitle">
-            Overview of your breaks, inventory, sales, and imported Whatnot orders.
+            Overview of your breaks, inventory, sales, and imported orders.
           </p>
         </div>
 
@@ -330,7 +330,7 @@ export default async function AppHomePage() {
           href="/app/whatnot-orders?q=unassigned"
           className="rounded-xl border border-zinc-800 bg-zinc-900 p-4 transition hover:bg-zinc-800"
         >
-          <h2 className="text-lg font-semibold">Whatnot Staging</h2>
+          <h2 className="text-lg font-semibold">Imported Orders Waiting To Be Entered</h2>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
               <div className="text-xs text-zinc-400">Unassigned Orders</div>
@@ -348,7 +348,7 @@ export default async function AppHomePage() {
           </div>
 
           <div className="mt-3 text-xs text-zinc-400">
-            Click to view unassigned Whatnot orders.
+            Click to view unassigned orders. Unassigned orders = breaks or inventory not entered into system yet
           </div>
         </Link>
       </div>

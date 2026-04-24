@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-export default function TaxExportButton({ year }: { year: number }) {
+export default function TaxPdfExportButton({ year }: { year: number }) {
   const [isExporting, setIsExporting] = useState(false)
 
   async function handleExport() {
@@ -11,10 +11,10 @@ export default function TaxExportButton({ year }: { year: number }) {
     try {
       setIsExporting(true)
 
-      const response = await fetch(`/api/reports/tax/export?year=${year}`)
+      const response = await fetch(`/api/reports/tax/pdf?year=${year}`)
 
       if (!response.ok) {
-        throw new Error(`Export failed with status ${response.status}`)
+        throw new Error(`PDF export failed with status ${response.status}`)
       }
 
       const blob = await response.blob()
@@ -22,7 +22,7 @@ export default function TaxExportButton({ year }: { year: number }) {
 
       const link = document.createElement('a')
       link.href = url
-      link.download = `tax-report-${year}.xls`
+      link.download = `tax-summary-${year}.pdf`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -30,7 +30,7 @@ export default function TaxExportButton({ year }: { year: number }) {
       window.URL.revokeObjectURL(url)
     } catch (error) {
       console.error(error)
-      window.alert('Export failed. Please try again.')
+      alert('PDF export failed. Please try again.')
     } finally {
       setIsExporting(false)
     }
@@ -41,9 +41,9 @@ export default function TaxExportButton({ year }: { year: number }) {
       type="button"
       onClick={handleExport}
       disabled={isExporting}
-      className="app-button-primary disabled:cursor-not-allowed disabled:opacity-60"
+      className="app-button"
     >
-      {isExporting ? 'Exporting...' : 'Export Tax Workbook'}
+      {isExporting ? 'Exporting PDF...' : 'Export Tax PDF Summary'}
     </button>
   )
 }

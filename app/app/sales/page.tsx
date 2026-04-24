@@ -39,7 +39,7 @@ function money(value: number | null) {
 function getSaleItem(sale: SaleRow): SaleInventoryItemRow | null {
   if (!sale.inventory_items) return null
   return Array.isArray(sale.inventory_items)
-    ? (sale.inventory_items[0] ?? null)
+    ? sale.inventory_items[0] ?? null
     : sale.inventory_items
 }
 
@@ -153,44 +153,48 @@ export default async function SalesPage() {
           <table className="app-table">
             <thead className="app-thead">
               <tr>
-                <th className="app-th">Sale</th>
+                <th className="app-th min-w-[520px]">Sale / Item</th>
                 <th className="app-th">Qty</th>
                 <th className="app-th">Gross</th>
                 <th className="app-th">Net</th>
                 <th className="app-th">COGS</th>
                 <th className="app-th">Profit</th>
                 <th className="app-th">Platform</th>
-                <th className="app-th">Actions</th>
+                <th className="app-th min-w-[120px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {sales.map((sale) => (
                 <tr key={sale.id} className="app-tr">
-                  <td className="app-td">
-                    <div className="min-w-[240px]">
-                      <div className="font-medium leading-tight">{sale.sale_date}</div>
-                      <div className="mt-0.5 text-xs leading-snug text-zinc-400">
+                  <td className="app-td whitespace-nowrap">
+                    <div className="flex min-w-[520px] items-center gap-3">
+                      <span className="text-xs text-zinc-500">{sale.sale_date}</span>
+                      <span className="max-w-[360px] truncate font-semibold text-zinc-100" title={getItemName(sale)}>
                         {getItemName(sale)}
-                      </div>
+                      </span>
+                      {sale.notes ? (
+                        <span className="max-w-[180px] truncate text-xs text-zinc-500" title={sale.notes}>
+                          Notes: {sale.notes}
+                        </span>
+                      ) : null}
                     </div>
                   </td>
-                  <td className="app-td">{sale.quantity_sold ?? 0}</td>
+                  <td className="app-td whitespace-nowrap">{sale.quantity_sold ?? 0}</td>
                   <td className="app-td whitespace-nowrap">{money(sale.gross_sale)}</td>
                   <td className="app-td whitespace-nowrap">{money(sale.net_proceeds)}</td>
                   <td className="app-td whitespace-nowrap">{money(sale.cost_of_goods_sold)}</td>
                   <td className="app-td whitespace-nowrap">{money(sale.profit)}</td>
-                  <td className="app-td">{sale.platform || '—'}</td>
-                  <td className="app-td">
-                    {sale.inventory_item_id ? (
-                      <Link
-                        href={`/app/inventory/${sale.inventory_item_id}`}
-                        className="app-button"
-                      >
-                        View Item
-                      </Link>
-                    ) : (
-                      <span className="text-zinc-500">—</span>
-                    )}
+                  <td className="app-td whitespace-nowrap">{sale.platform || '—'}</td>
+                  <td className="app-td whitespace-nowrap">
+                    <div className="flex items-center gap-1 whitespace-nowrap">
+                      {sale.inventory_item_id ? (
+                        <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button">
+                          View Item
+                        </Link>
+                      ) : (
+                        <span className="text-zinc-500">—</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

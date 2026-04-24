@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import TaxExportButton from './TaxExportButton'
+import TaxPdfExportButton from './TaxPdfExportButton'
 
 type SearchParams = Promise<{
   year?: string
@@ -216,6 +217,8 @@ export default async function TaxReportPage({
           </Link>
 
           <TaxExportButton year={selectedYear} />
+
+          <TaxPdfExportButton year={selectedYear} />
         </div>
       </div>
 
@@ -239,7 +242,7 @@ export default async function TaxReportPage({
             </select>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               type="submit"
               className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
@@ -248,6 +251,8 @@ export default async function TaxReportPage({
             </button>
 
             <TaxExportButton year={selectedYear} />
+
+            <TaxPdfExportButton year={selectedYear} />
           </div>
         </form>
       </div>
