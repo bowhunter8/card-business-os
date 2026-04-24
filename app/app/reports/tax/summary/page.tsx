@@ -161,6 +161,72 @@ async function saveTaxYearSettings(formData: FormData) {
   revalidatePath('/app/reports/tax/summary')
 }
 
+async function carryForwardEndingInventory(formData: FormData) {
+  'use server'
+
+  const year = clampYear(String(formData.get('tax_year') ?? ''))
+  const nextYear = year + 1
+  const endingInventoryCost = parseMoneyInput(formData.get('ending_inventory_cost'))
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return
+
+  const existingSettingsRes = await supabase
+    .from('tax_year_settings')
+    .select(`
+      business_use_of_home,
+      vehicle_expense,
+      depreciation_expense,
+      legal_professional,
+      insurance,
+      utilities,
+      taxes_licenses,
+      repairs_maintenance,
+      notes
+    `)
+    .eq('user_id', user.id)
+    .eq('tax_year', nextYear)
+    .maybeSingle()
+
+  const existingSettings = existingSettingsRes.data as Partial<TaxYearSettingsRow> | null
+
+  const existingNotes = String(existingSettings?.notes ?? '').trim()
+  const carryForwardNote = `Beginning inventory carried forward from ${year} ending inventory: ${money(endingInventoryCost)}.`
+  const nextNotes = existingNotes
+    ? `${existingNotes}\n${carryForwardNote}`
+    : carryForwardNote
+
+  await supabase
+    .from('tax_year_settings')
+    .upsert(
+      {
+        user_id: user.id,
+        tax_year: nextYear,
+        beginning_inventory: endingInventoryCost,
+        business_use_of_home: Number(existingSettings?.business_use_of_home ?? 0),
+        vehicle_expense: Number(existingSettings?.vehicle_expense ?? 0),
+        depreciation_expense: Number(existingSettings?.depreciation_expense ?? 0),
+        legal_professional: Number(existingSettings?.legal_professional ?? 0),
+        insurance: Number(existingSettings?.insurance ?? 0),
+        utilities: Number(existingSettings?.utilities ?? 0),
+        taxes_licenses: Number(existingSettings?.taxes_licenses ?? 0),
+        repairs_maintenance: Number(existingSettings?.repairs_maintenance ?? 0),
+        notes: nextNotes,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'user_id,tax_year',
+      }
+    )
+
+  revalidatePath('/app/reports/tax/summary')
+}
+
 export default async function TaxReportPage({
   searchParams,
 }: {
@@ -355,6 +421,45 @@ export default async function TaxReportPage({
     0
   )
 
+  const nextYear = selectedYear + 1
+
+  const nextTaxSettingsRes = await supabase
+    .from('tax_year_settings')
+    .select('beginning_inventory, notes')
+    .eq('user_id', user.id)
+    .eq('tax_year', nextYear)
+    .maybeSingle()
+
+  const nextTaxSettings = nextTaxSettingsRes.data as Pick<
+    TaxYearSettingsRow,
+    'beginning_inventory' | 'notes'
+  > | null
+
+  if (!nextTaxSettings && endingInventoryCost > 0) {
+    await supabase
+      .from('tax_year_settings')
+      .upsert(
+        {
+          user_id: user.id,
+          tax_year: nextYear,
+          beginning_inventory: endingInventoryCost,
+          business_use_of_home: 0,
+          vehicle_expense: 0,
+          depreciation_expense: 0,
+          legal_professional: 0,
+          insurance: 0,
+          utilities: 0,
+          taxes_licenses: 0,
+          repairs_maintenance: 0,
+          notes: `Auto-created from ${selectedYear} ending inventory: ${money(endingInventoryCost)}.`,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id,tax_year',
+        }
+      )
+  }
+
   const beginningInventory = Number(taxSettings?.beginning_inventory ?? 0)
   const businessUseOfHome = Number(taxSettings?.business_use_of_home ?? 0)
   const vehicleExpense = Number(taxSettings?.vehicle_expense ?? 0)
@@ -395,8 +500,8 @@ export default async function TaxReportPage({
               defaultValue={String(selectedYear)}
               className="app-select"
             >
-              {Array.from({ length: 5 }).map((_, i) => {
-                const year = new Date().getFullYear() - i
+              {Array.from({ length: 6 }).map((_, i) => {
+                const year = new Date().getFullYear() + 1 - i
                 return (
                   <option key={year} value={year}>
                     {year}
@@ -436,6 +541,12 @@ export default async function TaxReportPage({
         <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
         <StatCard label="Legal / Professional" value={money(legalProfessional)} />
       </div>
+
+      {endingInventoryCost > 0 && (
+        <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/20 p-4 text-sm text-emerald-100">
+          The system checks for a {nextYear} tax settings record automatically. If one does not exist yet, it creates it using {selectedYear} ending inventory as {nextYear} beginning inventory.
+        </div>
+      )}
 
       <div className="app-section p-5">
         <div className="mb-4">
@@ -600,6 +711,40 @@ export default async function TaxReportPage({
             <TaxPdfExportButton year={selectedYear} />
           </div>
         </form>
+
+        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Inventory Carryover</h3>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-400">
+                Use this after reviewing the year. It will copy {selectedYear} ending inventory cost into {selectedYear + 1} beginning inventory so next year&apos;s Schedule C starts with the correct carryover number.
+              </p>
+              <p className="mt-2 text-sm text-zinc-300">
+                Carryover amount:{' '}
+                <span className="font-semibold text-zinc-100">
+                  {money(endingInventoryCost)}
+                </span>
+              </p>
+            </div>
+
+            <form action={carryForwardEndingInventory}>
+              <input type="hidden" name="tax_year" value={selectedYear} />
+              <input
+                type="hidden"
+                name="ending_inventory_cost"
+                value={endingInventoryCost}
+              />
+
+              <button type="submit" className="app-button-primary">
+                Carry Forward to {selectedYear + 1}
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
+            This updates or creates the {selectedYear + 1} Schedule C settings record. You can still edit the beginning inventory later if needed.
+          </div>
+        </div>
       </div>
     </div>
   )
