@@ -1,8 +1,54 @@
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Script from 'next/script'
 import { createSaleAction, quickSellAction } from '@/app/actions/sales'
 import { createClient } from '@/lib/supabase/server'
+
+async function safeCreateSaleAction(formData: FormData) {
+  'use server'
+
+  const inventoryItemId = String(formData.get('inventory_item_id') ?? '').trim()
+  const quantitySold = Number(formData.get('quantity_sold') ?? 0)
+
+  if (!inventoryItemId) {
+    redirect('/app/inventory?error=Missing inventory item ID')
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data: item, error } = await supabase
+    .from('inventory_items')
+    .select('available_quantity')
+    .eq('id', inventoryItemId)
+    .eq('user_id', user.id)
+    .single()
+
+  const availableQuantity = Number(item?.available_quantity ?? 0)
+
+  if (error || !item) {
+    redirect(`/app/inventory/${inventoryItemId}/sell?error=Inventory item not found`)
+  }
+
+  if (!Number.isFinite(quantitySold) || quantitySold < 1) {
+    redirect(`/app/inventory/${inventoryItemId}/sell?error=Quantity sold must be at least 1`)
+  }
+
+  if (quantitySold > availableQuantity) {
+    redirect(
+      `/app/inventory/${inventoryItemId}/sell?error=Cannot sell more than available quantity`
+    )
+  }
+
+  return createSaleAction(formData)
+}
 
 type ShippingProfile = {
   id: string
@@ -216,7 +262,7 @@ export default async function SellInventoryPage({
       </div>
 
       <form
-        action={createSaleAction}
+        action={safeCreateSaleAction}
         className="app-section mt-0"
         id="sell-item-form"
       >
