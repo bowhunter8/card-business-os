@@ -97,6 +97,7 @@ export default async function TaxReportPage({
       .from('breaks')
       .select('id, break_date, source_name, product_name, order_number, total_cost')
       .eq('user_id', user.id)
+      .is('reversed_at', null)
       .gte('break_date', startDate)
       .lte('break_date', endDate)
       .order('break_date', { ascending: false }),
@@ -118,6 +119,7 @@ export default async function TaxReportPage({
         inventory_item_id
       `)
       .eq('user_id', user.id)
+      .is('reversed_at', null)
       .gte('sale_date', startDate)
       .lte('sale_date', endDate)
       .order('sale_date', { ascending: false }),
