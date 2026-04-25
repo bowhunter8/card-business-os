@@ -1,4 +1,6 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
 type WhatnotOrderRow = {
@@ -41,6 +43,7 @@ type PageLimit = 10 | 25 | 100
 
 const DEFAULT_LIMIT: PageLimit = 10
 const LIMIT_OPTIONS: PageLimit[] = [10, 25, 100]
+const BULK_ORDERS_FORM_ID = 'bulk-delete-orders-page-form'
 
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
@@ -147,13 +150,298 @@ function buildOrdersHref({
   return query ? `/app/whatnot-orders?${query}` : '/app/whatnot-orders'
 }
 
+function buildOrdersStatusHref({
+  q,
+  page,
+  limit,
+  statusKey,
+  statusValue,
+}: {
+  q?: string
+  page: number
+  limit: number
+  statusKey: string
+  statusValue: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set(statusKey, statusValue)
+
+  return `/app/whatnot-orders?${params.toString()}#orders-status`
+}
+
+function readFormIds(formData: FormData, fieldName: string) {
+  return formData
+    .getAll(fieldName)
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+}
+
+function readOrdersListFormState(formData: FormData) {
+  const q = String(formData.get('q') ?? '').trim()
+  const page = Number(String(formData.get('page') ?? '1'))
+  const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const safeLimit: PageLimit = LIMIT_OPTIONS.includes(limit as PageLimit)
+    ? (limit as PageLimit)
+    : DEFAULT_LIMIT
+
+  return {
+    q,
+    safePage,
+    safeLimit,
+  }
+}
+
+async function deleteOrderAction(formData: FormData) {
+  'use server'
+
+  const orderId = String(formData.get('order_id') ?? '').trim()
+  const isLinked = String(formData.get('is_linked') ?? '') === '1'
+  const { q, safePage, safeLimit } = readOrdersListFormState(formData)
+
+  if (!orderId) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'Missing order ID.',
+      })
+    )
+  }
+
+  if (isLinked) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'This order is linked to a break. Roll back or unlink the break first, then delete the order.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('whatnot_orders')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('id', orderId)
+    .is('break_id', null)
+
+  if (error) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/app/whatnot-orders')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    buildOrdersStatusHref({
+      q,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'deleted_count',
+      statusValue: '1 unassigned order',
+    })
+  )
+}
+
+async function bulkDeleteOrdersAction(formData: FormData) {
+  'use server'
+
+  const orderIds = readFormIds(formData, 'selected_order_ids')
+  const { q, safePage, safeLimit } = readOrdersListFormState(formData)
+
+  if (orderIds.length === 0) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'Select at least one unassigned order to delete.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('whatnot_orders')
+    .delete()
+    .eq('user_id', user.id)
+    .is('break_id', null)
+    .in('id', orderIds)
+
+  if (error) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/app/whatnot-orders')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    buildOrdersStatusHref({
+      q,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'deleted_count',
+      statusValue: `${orderIds.length} unassigned order(s)`,
+    })
+  )
+}
+
+function BulkDeleteConfirmControl({ formId }: { formId: string }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Check unassigned order rows you want to remove, then confirm below. Linked orders are protected.
+          </div>
+        </div>
+
+        <details className="group">
+          <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+            Delete Selected
+          </summary>
+
+          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+              This will delete the selected unassigned orders only. Orders linked to breaks must be handled by rolling back or unlinking the break first.
+            </div>
+
+            <button
+              type="submit"
+              form={formId}
+              className="app-button mt-3 border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+            >
+              Yes, Delete Selected
+            </button>
+          </div>
+        </details>
+      </div>
+    </div>
+  )
+}
+
+function DeleteOrderConfirmControl({
+  orderId,
+  orderLabel,
+  isLinked,
+  qRaw,
+  page,
+  limit,
+}: {
+  orderId: string
+  orderLabel: string
+  isLinked: boolean
+  qRaw: string
+  page: number
+  limit: PageLimit
+}) {
+  if (isLinked) {
+    return (
+      <div className="max-w-[190px] text-[11px] leading-snug text-amber-300">
+        Linked to break — roll back or unlink break first.
+      </div>
+    )
+  }
+
+  return (
+    <details className="group relative">
+      <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete
+      </summary>
+
+      <div className="mt-2 min-w-64 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl">
+        <div className="text-sm font-semibold text-red-200">Confirm delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete this unassigned order: <span className="text-zinc-200">{orderLabel}</span>
+        </div>
+
+        <form action={deleteOrderAction} className="mt-3 flex flex-wrap gap-2">
+          <input type="hidden" name="order_id" value={orderId} />
+          <input type="hidden" name="is_linked" value={isLinked ? '1' : '0'} />
+          <input type="hidden" name="q" value={qRaw} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+
+          <button
+            type="submit"
+            className="app-button border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete
+          </button>
+        </form>
+      </div>
+    </details>
+  )
+}
+
 export default async function WhatnotOrdersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; page?: string; limit?: string }>
+  searchParams?: Promise<{
+    q?: string
+    page?: string
+    limit?: string
+    deleted_count?: string
+    delete_error?: string
+  }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim().toLowerCase()
+  const deletedCount = String(params?.deleted_count ?? '').trim()
+  const deleteError = String(params?.delete_error ?? '').trim()
 
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
@@ -294,6 +582,20 @@ export default async function WhatnotOrdersPage({
             Back to Utilities
           </Link>
         </div>
+      </div>
+
+      <div id="orders-status" className="scroll-mt-28 space-y-3">
+        {deletedCount ? (
+          <div className="app-alert-success">
+            Deleted {deletedCount} successfully.
+          </div>
+        ) : null}
+
+        {deleteError ? (
+          <div className="app-alert-error">
+            Delete blocked: {deleteError}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -445,6 +747,18 @@ export default async function WhatnotOrdersPage({
           </div>
         </div>
 
+        <form id={BULK_ORDERS_FORM_ID} action={bulkDeleteOrdersAction} className="hidden">
+          <input type="hidden" name="q" value={qRaw} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+        </form>
+
+        {filteredOrders.length > 0 ? (
+          <div className="mt-4">
+            <BulkDeleteConfirmControl formId={BULK_ORDERS_FORM_ID} />
+          </div>
+        ) : null}
+
         {filteredOrders.length === 0 ? (
           <div className="app-empty mt-4">
             No orders found for this view.
@@ -454,13 +768,15 @@ export default async function WhatnotOrdersPage({
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
+                  <th className="app-th w-16">Select</th>
                   <th className="app-th">Order #</th>
                   <th className="app-th">Date Added</th>
                   <th className="app-th">Order Date</th>
                   <th className="app-th">Purchased From</th>
-                  <th className="app-th">Description</th>
+                  <th className="app-th min-w-[240px]">Description</th>
                   <th className="app-th">Status</th>
                   <th className="app-th text-right">Price</th>
+                  <th className="app-th min-w-[220px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -472,9 +788,25 @@ export default async function WhatnotOrdersPage({
                   const orderNumber = getOrderNumberDisplay(order)
                   const seller = cleanText(order.seller || 'Unknown Seller')
                   const productName = getDescriptionDisplay(order)
+                  const isLinked = Boolean(order.break_id)
 
                   return (
-                    <tr key={order.id} className="app-tr">
+                    <tr key={order.id} className="app-tr align-top">
+                      <td className="app-td">
+                        {!isLinked ? (
+                          <input
+                            form={BULK_ORDERS_FORM_ID}
+                            type="checkbox"
+                            name="selected_order_ids"
+                            value={order.id}
+                            aria-label={`Select order ${orderNumber}`}
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                        ) : (
+                          <span className="text-xs text-zinc-600">—</span>
+                        )}
+                      </td>
+
                       <td className="app-td whitespace-nowrap">
                         <Link
                           href={buildFocusHref(order)}
@@ -486,17 +818,17 @@ export default async function WhatnotOrdersPage({
                       <td className="app-td whitespace-nowrap">{importedDate}</td>
                       <td className="app-td whitespace-nowrap">{orderDate}</td>
                       <td className="app-td">
-                        <div className="max-w-[180px] truncate" title={seller}>
+                        <div className="max-w-[160px] break-words" title={seller}>
                           {seller}
                         </div>
                       </td>
                       <td className="app-td">
-                        <div className="max-w-[520px] truncate" title={productName}>
+                        <div className="min-w-[220px] max-w-[520px] break-words" title={productName}>
                           {productName}
                         </div>
                       </td>
-                      <td className="app-td">
-                        {order.break_id ? (
+                      <td className="app-td whitespace-nowrap">
+                        {isLinked ? (
                           <span className="app-badge app-badge-success">Linked</span>
                         ) : (
                           <span className="app-badge app-badge-warning">Unassigned</span>
@@ -504,6 +836,28 @@ export default async function WhatnotOrdersPage({
                       </td>
                       <td className="app-td text-right whitespace-nowrap">
                         {money(order.total)}
+                      </td>
+                      <td className="app-td whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Link href={buildFocusHref(order)} className="app-button">
+                            Open
+                          </Link>
+
+                          {order.break_id ? (
+                            <Link href={`/app/breaks/${order.break_id}`} className="app-button">
+                              Break
+                            </Link>
+                          ) : null}
+
+                          <DeleteOrderConfirmControl
+                            orderId={order.id}
+                            orderLabel={orderNumber}
+                            isLinked={isLinked}
+                            qRaw={qRaw}
+                            page={page}
+                            limit={limit}
+                          />
+                        </div>
                       </td>
                     </tr>
                   )

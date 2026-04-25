@@ -1,4 +1,7 @@
+'use client'
+
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import BackupExportButton from './BackupExportButton'
 import BackupCSVExportButton from './BackupCSVExportButton'
 import RestorePreviewPanel from './RestorePreviewPanel'
@@ -43,6 +46,42 @@ function StepCard({
 }
 
 export default function BackupRestorePage() {
+  const [lastBackup, setLastBackup] = useState<string | null>(null)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('last_backup_date')
+    if (stored) setLastBackup(stored)
+  }, [])
+
+  function getBackupStatus() {
+    if (!lastBackup) {
+      return {
+        text: 'No backup recorded yet',
+        warning: true,
+      }
+    }
+
+    const last = new Date(lastBackup)
+    const now = new Date()
+    const diffDays = Math.floor(
+      (now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24)
+    )
+
+    if (diffDays >= 7) {
+      return {
+        text: `Last backup: ${last.toLocaleDateString()} (${diffDays} days ago)`,
+        warning: true,
+      }
+    }
+
+    return {
+      text: `Last backup: ${last.toLocaleDateString()}`,
+      warning: false,
+    }
+  }
+
+  const backupStatus = getBackupStatus()
+
   return (
     <div className="app-page-wide space-y-5">
       <div className="app-page-header gap-4">
@@ -74,6 +113,15 @@ export default function BackupRestorePage() {
                   Create either a full restore-capable backup for the app or CSV
                   exports for accounting, tax prep, and spreadsheet review.
                 </p>
+
+                {/* 🔥 NEW LAST BACKUP STATUS */}
+                <div
+                  className={`mt-3 text-sm ${
+                    backupStatus.warning ? 'text-amber-400' : 'text-emerald-400'
+                  }`}
+                >
+                  {backupStatus.text}
+                </div>
               </div>
 
               <div className="space-y-3">

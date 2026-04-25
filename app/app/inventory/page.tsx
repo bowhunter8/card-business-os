@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import DeleteInventoryItemButton from './DeleteInventoryItemButton'
+import CancelDetailsButton from '../search/CancelDetailsButton'
+import SelectAllCheckbox from '../search/SelectAllCheckbox'
 
 type InventoryRow = {
   id: string
@@ -47,6 +49,7 @@ type SortKey =
   | 'storage_location'
 
 type SortDir = 'asc' | 'desc'
+type BulkStatus = 'available' | 'listed' | 'personal' | 'junk'
 
 const DEFAULT_LIMIT = 10
 const LIMIT_OPTIONS = [10, 25, 100] as const
@@ -165,6 +168,14 @@ function renderStatusPill(status: string | null) {
   )
 }
 
+function bulkStatusLabel(status: BulkStatus) {
+  if (status === 'available') return 'For Sale'
+  if (status === 'listed') return 'Listed'
+  if (status === 'personal') return 'Personal'
+  if (status === 'junk') return 'Junk'
+  return status
+}
+
 function buildInventoryHref({
   q,
   sort,
@@ -231,10 +242,7 @@ function readFormIds(formData: FormData, fieldName: string) {
     .filter(Boolean)
 }
 
-async function bulkDeleteInventoryItemsAction(formData: FormData) {
-  'use server'
-
-  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+function readInventoryListFormState(formData: FormData) {
   const q = String(formData.get('q') ?? '').trim()
   const sort = String(formData.get('sort') ?? 'created_at').trim() as SortKey
   const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
@@ -260,6 +268,21 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
   const safeLimit = LIMIT_OPTIONS.includes(limit as (typeof LIMIT_OPTIONS)[number])
     ? limit
     : DEFAULT_LIMIT
+
+  return {
+    q,
+    safeSort,
+    safeDir,
+    safePage,
+    safeLimit,
+  }
+}
+
+async function bulkDeleteInventoryItemsAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const { q, safeSort, safeDir, safePage, safeLimit } = readInventoryListFormState(formData)
 
   if (itemIds.length === 0) {
     redirect(
@@ -318,6 +341,92 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
       limit: safeLimit,
       statusKey: 'deleted_count',
       statusValue: `${itemIds.length} inventory item(s)`,
+    })
+  )
+}
+
+async function bulkUpdateInventoryStatusAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
+  const { q, safeSort, safeDir, safePage, safeLimit } = readInventoryListFormState(formData)
+
+  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
+
+  if (!allowedStatuses.includes(requestedStatus)) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Choose a valid bulk status.',
+      })
+    )
+  }
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: `Select at least one inventory item to mark ${bulkStatusLabel(requestedStatus)}.`,
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .update({ status: requestedStatus })
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
+  if (error) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/reports/tax')
+
+  redirect(
+    buildInventoryStatusHref({
+      q,
+      sort: safeSort,
+      dir: safeDir,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'status_updated',
+      statusValue: `${itemIds.length} item(s) marked ${bulkStatusLabel(requestedStatus)}`,
     })
   )
 }
@@ -420,37 +529,114 @@ function SummaryCard({
   )
 }
 
+function BulkStatusConfirmControl({
+  formId,
+  status,
+  label,
+  helpText,
+}: {
+  formId: string
+  status: BulkStatus
+  label: string
+  helpText: string
+}) {
+  return (
+    <details className="group">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap">
+        {label}
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-zinc-200">Confirm status update?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">{helpText}</div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            name="bulk_status"
+            value={status}
+            formAction={bulkUpdateInventoryStatusAction}
+            className="app-button-primary whitespace-nowrap"
+          >
+            Yes, {label}
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   return (
+    <details className="group">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete Selected
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete the selected inventory items. This cannot be undone from this screen.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            formAction={bulkDeleteInventoryItemsAction}
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete Selected
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function BulkActionsPanel({ formId }: { formId: string }) {
+  return (
     <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3">
         <div>
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
-            Check the inventory rows you want to remove, then confirm below.
+            Check inventory rows, then update their status or delete the selected rows.
           </div>
         </div>
 
-        <details className="group">
-          <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
-            Delete Selected
-          </summary>
-
-          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
-            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
-            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-              This will delete the selected inventory items. This cannot be undone from this screen.
-            </div>
-
-            <button
-              type="submit"
-              form={formId}
-              className="app-button mt-3 border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
-            >
-              Yes, Delete Selected
-            </button>
-          </div>
-        </details>
+        <div className="flex flex-wrap items-center gap-2">
+          <BulkStatusConfirmControl
+            formId={formId}
+            status="available"
+            label="Mark For Sale"
+            helpText="This will mark the selected inventory items as For Sale / Available."
+          />
+          <BulkStatusConfirmControl
+            formId={formId}
+            status="listed"
+            label="Mark Listed"
+            helpText="This will mark the selected inventory items as Listed."
+          />
+          <BulkStatusConfirmControl
+            formId={formId}
+            status="personal"
+            label="Move to Personal"
+            helpText="This will move the selected inventory items to Personal Collection status."
+          />
+          <BulkStatusConfirmControl
+            formId={formId}
+            status="junk"
+            label="Mark Junk"
+            helpText="This will mark the selected inventory items as Junk."
+          />
+          <BulkDeleteConfirmControl formId={formId} />
+        </div>
       </div>
     </div>
   )
@@ -468,6 +654,8 @@ export default async function InventoryPage({
     limit?: string
     deleted_count?: string
     delete_error?: string
+    status_updated?: string
+    status_error?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -477,6 +665,8 @@ export default async function InventoryPage({
   const saved = String(params?.saved ?? '')
   const deletedCount = String(params?.deleted_count ?? '').trim()
   const deleteError = String(params?.delete_error ?? '').trim()
+  const statusUpdated = String(params?.status_updated ?? '').trim()
+  const statusError = String(params?.status_error ?? '').trim()
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
 
@@ -666,9 +856,21 @@ export default async function InventoryPage({
           </div>
         ) : null}
 
+        {statusUpdated ? (
+          <div className="app-alert-success">
+            Updated {statusUpdated} successfully.
+          </div>
+        ) : null}
+
         {deleteError ? (
           <div className="app-alert-error">
             Delete failed: {deleteError}
+          </div>
+        ) : null}
+
+        {statusError ? (
+          <div className="app-alert-error">
+            Status update failed: {statusError}
           </div>
         ) : null}
       </div>
@@ -753,7 +955,7 @@ export default async function InventoryPage({
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
 
-        <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction} className="hidden">
+        <form id={BULK_INVENTORY_FORM_ID} action={bulkUpdateInventoryStatusAction} className="hidden">
           <input type="hidden" name="q" value={q} />
           <input type="hidden" name="sort" value={sortKey} />
           <input type="hidden" name="dir" value={sortDir} />
@@ -763,7 +965,7 @@ export default async function InventoryPage({
 
         {items.length > 0 ? (
           <div className="mt-4">
-            <BulkDeleteConfirmControl formId={BULK_INVENTORY_FORM_ID} />
+            <BulkActionsPanel formId={BULK_INVENTORY_FORM_ID} />
           </div>
         ) : null}
 
@@ -772,8 +974,14 @@ export default async function InventoryPage({
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
-                  <th className="app-th">Select</th>
-                  <th className="app-th">
+                  <th className="app-th w-16">
+                    <SelectAllCheckbox
+                      formId={BULK_INVENTORY_FORM_ID}
+                      fieldName="selected_inventory_ids"
+                      label="Select all inventory items"
+                    />
+                  </th>
+                  <th className="app-th min-w-[260px]">
                     <SortHeader
                       label="Item"
                       sortKey="card"
@@ -853,7 +1061,7 @@ export default async function InventoryPage({
                       limit={limit}
                     />
                   </th>
-                  <th className="app-th min-w-[320px]">Actions</th>
+                  <th className="app-th min-w-[230px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -867,8 +1075,8 @@ export default async function InventoryPage({
                   const itemName = `${getPrimaryTitle(item)}${itemLine ? ` • ${itemLine}` : ''}`
 
                   return (
-                    <tr key={item.id} className="app-tr">
-                      <td className="app-td whitespace-nowrap">
+                    <tr key={item.id} className="app-tr align-top">
+                      <td className="app-td">
                         <input
                           form={BULK_INVENTORY_FORM_ID}
                           type="checkbox"
@@ -879,18 +1087,18 @@ export default async function InventoryPage({
                         />
                       </td>
 
-                      <td className="app-td whitespace-nowrap">
-                        <div className="min-w-55">
-                          <div className="flex items-center gap-1.5">
-                            <div className="truncate font-medium leading-tight">
+                      <td className="app-td">
+                        <div className="min-w-[240px] max-w-[520px]">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <div className="break-words font-medium leading-tight">
                               {getPrimaryTitle(item)}
                             </div>
                             {isLotLike ? (
-                              <span className="app-badge app-badge-warning">Lot / Multi Qty</span>
+                              <span className="app-badge app-badge-warning shrink-0">Lot / Multi Qty</span>
                             ) : null}
                           </div>
                           <div
-                            className="mt-0.5 truncate text-xs text-zinc-400"
+                            className="mt-0.5 break-words text-xs text-zinc-400"
                             title={itemLine || getPrimaryTitle(item)}
                           >
                             {itemLine || '—'}
@@ -913,13 +1121,13 @@ export default async function InventoryPage({
                       <td className="app-td whitespace-nowrap">{money(item.estimated_value_total)}</td>
 
                       <td className="app-td">
-                        <div className="max-w-35 truncate" title={item.storage_location || '—'}>
+                        <div className="max-w-28 break-words" title={item.storage_location || '—'}>
                           {item.storage_location || '—'}
                         </div>
                       </td>
 
-                      <td className="app-td whitespace-nowrap">
-                        <div className="flex items-center gap-1 whitespace-nowrap">
+                      <td className="app-td">
+                        <div className="flex flex-wrap items-center gap-1">
                           <Link href={`/app/inventory/${item.id}`} className="app-button">
                             Details
                           </Link>

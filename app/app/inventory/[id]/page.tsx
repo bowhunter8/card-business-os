@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
 import { updateInventoryItemAction } from '@/app/actions/inventory'
-import { deleteInventoryItemAction } from '@/app/actions/breaks'
 import { markAsGiveawayAction } from '@/app/actions/inventory-giveaway'
+import DeleteInventoryItemButton from '../DeleteInventoryItemButton'
 
 type InventoryItem = {
   id: string
@@ -309,6 +309,7 @@ export default async function InventoryDetailPage({
   const latestActiveSale = activeSales[0] ?? null
   const canDelete = activeSales.length === 0
   const itemFormId = 'inventory-inline-edit-form'
+  const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
 
   return (
     <div className="app-page-wide space-y-3">
@@ -369,14 +370,7 @@ export default async function InventoryDetailPage({
           ) : null}
 
           {canDelete ? (
-            <form action={deleteInventoryItemAction}>
-              <input type="hidden" name="inventory_item_id" value={item.id} />
-              <input type="hidden" name="return_to" value="inventory" />
-              <input type="hidden" name="break_id" value={item.source_break_id ?? ''} />
-              <button type="submit" className="app-button-danger">
-                Delete Item
-              </button>
-            </form>
+            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
           ) : null}
         </div>
       </div>

@@ -106,6 +106,23 @@ export default function RestorePreviewPanel() {
     if (!selectedFile || !result?.ok || !confirmed || isRestoring) return
 
     try {
+      // 🔥 ONLY NEW ADDITION START
+      const shouldBackup = confirm(
+        'Do you want to create a backup before restoring? This is strongly recommended.'
+      )
+
+      if (shouldBackup) {
+        try {
+          const res = await fetch('/api/utilities/backup/export')
+          if (res.ok) {
+            localStorage.setItem('last_backup_date', new Date().toISOString())
+          }
+        } catch {
+          // silent fail
+        }
+      }
+      // 🔥 ONLY NEW ADDITION END
+
       setIsRestoring(true)
       setError('')
       setRestoreResult(null)

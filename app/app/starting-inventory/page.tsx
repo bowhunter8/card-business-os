@@ -1,9 +1,13 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import {
   archiveStartingInventoryItemAction,
   importStartingInventoryItemAction,
 } from '@/app/actions/starting-inventory'
+import CancelDetailsButton from '../search/CancelDetailsButton'
+import SelectAllCheckbox from '../search/SelectAllCheckbox'
 
 type StartingInventoryRow = {
   id: string
@@ -31,6 +35,7 @@ type PageLimit = 10 | 25 | 50
 
 const DEFAULT_LIMIT: PageLimit = 25
 const LIMIT_OPTIONS: PageLimit[] = [10, 25, 50]
+const BULK_STARTING_INVENTORY_FORM_ID = 'bulk-archive-starting-inventory-form'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -45,6 +50,12 @@ function cleanSearchTerm(value: string) {
 
 function formatLabel(value: string | null | undefined) {
   return (value || '—').replaceAll('_', ' ')
+}
+
+function getInventoryStatusFromDestination(destination: string | null) {
+  if (destination === 'personal') return 'personal'
+  if (destination === 'junk') return 'junk'
+  return 'available'
 }
 
 function buildStartingInventoryHref({
@@ -74,6 +85,371 @@ function buildStartingInventoryHref({
   return `/app/starting-inventory?${params.toString()}`
 }
 
+function buildStartingInventoryStatusHref({
+  q,
+  status,
+  page,
+  limit,
+  statusKey,
+  statusValue,
+}: {
+  q?: string
+  status?: string
+  page: number
+  limit: number
+  statusKey: string
+  statusValue: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  if (status) {
+    params.set('status', status)
+  }
+
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set(statusKey, statusValue)
+
+  return `/app/starting-inventory?${params.toString()}`
+}
+
+function readFormIds(formData: FormData, fieldName: string) {
+  return formData
+    .getAll(fieldName)
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+}
+
+async function bulkImportStartingInventoryItemsAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_starting_inventory_ids')
+  const q = cleanSearchTerm(String(formData.get('q') ?? ''))
+  const status = String(formData.get('status') ?? '').trim()
+  const pageValue = Number(String(formData.get('page') ?? '1'))
+  const limitValue = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? Math.floor(pageValue) : 1
+  const limit: PageLimit = LIMIT_OPTIONS.includes(limitValue as PageLimit)
+    ? (limitValue as PageLimit)
+    : DEFAULT_LIMIT
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildStartingInventoryStatusHref({
+        q,
+        status,
+        page,
+        limit,
+        statusKey: 'error',
+        statusValue: 'Select at least one draft starting inventory item to import.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const rowsResponse = await supabase
+    .from('starting_inventory_items')
+    .select(`
+      id,
+      status,
+      destination,
+      item_type,
+      title,
+      player_name,
+      year,
+      brand,
+      set_name,
+      card_number,
+      parallel_name,
+      quantity,
+      cost_basis_unit,
+      cost_basis_total,
+      estimated_value_total,
+      storage_location,
+      cost_basis_method
+    `)
+    .eq('user_id', user.id)
+    .eq('status', 'draft')
+    .in('id', itemIds)
+
+  if (rowsResponse.error) {
+    redirect(
+      buildStartingInventoryStatusHref({
+        q,
+        status,
+        page,
+        limit,
+        statusKey: 'error',
+        statusValue: rowsResponse.error.message,
+      })
+    )
+  }
+
+  const draftRows = (rowsResponse.data ?? []) as StartingInventoryRow[]
+
+  if (draftRows.length === 0) {
+    redirect(
+      buildStartingInventoryStatusHref({
+        q,
+        status,
+        page,
+        limit,
+        statusKey: 'error',
+        statusValue: 'No draft starting inventory items were available to import.',
+      })
+    )
+  }
+
+  let importedCount = 0
+
+  for (const row of draftRows) {
+    const quantity = Number(row.quantity ?? 1)
+    const costBasisUnit = Number(row.cost_basis_unit ?? 0)
+    const costBasisTotal = Number(row.cost_basis_total ?? costBasisUnit * quantity)
+    const estimatedValueTotal = Number(row.estimated_value_total ?? 0)
+
+    const insertResponse = await supabase
+      .from('inventory_items')
+      .insert({
+        user_id: user.id,
+        source_type: 'starting_inventory',
+        source_reference: row.id,
+        item_type: row.item_type || 'single_card',
+        status: getInventoryStatusFromDestination(row.destination),
+        quantity,
+        available_quantity: quantity,
+        title: row.title,
+        player_name: row.player_name,
+        year: row.year,
+        brand: row.brand,
+        set_name: row.set_name,
+        card_number: row.card_number,
+        parallel_name: row.parallel_name,
+        cost_basis_unit: costBasisUnit,
+        cost_basis_total: costBasisTotal,
+        estimated_value_total: estimatedValueTotal,
+        storage_location: row.storage_location,
+        notes: row.cost_basis_method
+          ? `Imported from starting inventory. Cost basis method: ${row.cost_basis_method}`
+          : 'Imported from starting inventory.',
+      })
+      .select('id')
+      .single()
+
+    if (insertResponse.error) {
+      redirect(
+        buildStartingInventoryStatusHref({
+          q,
+          status,
+          page,
+          limit,
+          statusKey: 'error',
+          statusValue: insertResponse.error.message,
+        })
+      )
+    }
+
+    const importedInventoryItemId = String(insertResponse.data?.id ?? '')
+
+    const updateResponse = await supabase
+      .from('starting_inventory_items')
+      .update({
+        status: 'imported',
+        imported_inventory_item_id: importedInventoryItemId || null,
+      })
+      .eq('user_id', user.id)
+      .eq('id', row.id)
+
+    if (updateResponse.error) {
+      redirect(
+        buildStartingInventoryStatusHref({
+          q,
+          status,
+          page,
+          limit,
+          statusKey: 'error',
+          statusValue: updateResponse.error.message,
+        })
+      )
+    }
+
+    importedCount += 1
+  }
+
+  revalidatePath('/app/starting-inventory')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/reports/tax')
+
+  redirect(
+    buildStartingInventoryStatusHref({
+      q,
+      status,
+      page,
+      limit,
+      statusKey: 'imported',
+      statusValue: `${importedCount}`,
+    })
+  )
+}
+
+async function bulkArchiveStartingInventoryItemsAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_starting_inventory_ids')
+  const q = cleanSearchTerm(String(formData.get('q') ?? ''))
+  const status = String(formData.get('status') ?? '').trim()
+  const pageValue = Number(String(formData.get('page') ?? '1'))
+  const limitValue = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+
+  const page = Number.isFinite(pageValue) && pageValue > 0 ? Math.floor(pageValue) : 1
+  const limit: PageLimit = LIMIT_OPTIONS.includes(limitValue as PageLimit)
+    ? (limitValue as PageLimit)
+    : DEFAULT_LIMIT
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildStartingInventoryStatusHref({
+        q,
+        status,
+        page,
+        limit,
+        statusKey: 'error',
+        statusValue: 'Select at least one draft starting inventory item to archive.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('starting_inventory_items')
+    .update({ status: 'archived' })
+    .eq('user_id', user.id)
+    .eq('status', 'draft')
+    .in('id', itemIds)
+
+  if (error) {
+    redirect(
+      buildStartingInventoryStatusHref({
+        q,
+        status,
+        page,
+        limit,
+        statusKey: 'error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/app/starting-inventory')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+
+  redirect(
+    buildStartingInventoryStatusHref({
+      q,
+      status,
+      page,
+      limit,
+      statusKey: 'archived',
+      statusValue: `${itemIds.length}`,
+    })
+  )
+}
+
+function BulkActionsControl({ formId }: { formId: string }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Check draft starting inventory rows, then import or archive the selected rows.
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap">
+              Import Selected
+            </summary>
+
+            <div className="mt-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+              <div className="text-sm font-semibold text-zinc-200">Confirm bulk import?</div>
+              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                This will import the selected draft starting inventory items into your main inventory.
+                Imported and already archived rows are not selectable.
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  formAction={bulkImportStartingInventoryItemsAction}
+                  className="app-button-primary whitespace-nowrap"
+                >
+                  Yes, Import Selected
+                </button>
+
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+              Archive Selected
+            </summary>
+
+            <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+              <div className="text-sm font-semibold text-red-200">Confirm bulk archive?</div>
+              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                This will archive the selected draft starting inventory items. Imported and already archived rows are not selectable.
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  formAction={bulkArchiveStartingInventoryItemsAction}
+                  className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+                >
+                  Yes, Archive Selected
+                </button>
+
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default async function StartingInventoryPage({
   searchParams,
 }: {
@@ -84,6 +460,7 @@ export default async function StartingInventoryPage({
     created?: string
     updated?: string
     archived?: string
+    imported?: string
     page?: string
     limit?: string
   }>
@@ -95,6 +472,7 @@ export default async function StartingInventoryPage({
   const createdId = params?.created
   const updated = params?.updated
   const archived = params?.archived
+  const imported = params?.imported
 
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
@@ -167,6 +545,7 @@ export default async function StartingInventoryPage({
 
   const hasPreviousPage = page > 1
   const hasNextPage = items.length === limit
+  const hasDraftRows = items.some((item) => item.status === 'draft')
 
   return (
     <div className="app-page-wide">
@@ -195,6 +574,12 @@ export default async function StartingInventoryPage({
       {updated && (
         <div className="app-alert-info">
           Starting inventory item updated successfully.
+        </div>
+      )}
+
+      {imported && (
+        <div className="app-alert-success">
+          Imported {imported} starting inventory item(s) into main inventory.
         </div>
       )}
 
@@ -283,11 +668,31 @@ export default async function StartingInventoryPage({
         </div>
       )}
 
+      <form id={BULK_STARTING_INVENTORY_FORM_ID} action={bulkArchiveStartingInventoryItemsAction} className="hidden">
+        <input type="hidden" name="q" value={q} />
+        <input type="hidden" name="status" value={statusFilter} />
+        <input type="hidden" name="page" value={page} />
+        <input type="hidden" name="limit" value={limit} />
+      </form>
+
+      {items.length > 0 && hasDraftRows ? (
+        <div className="mt-3">
+          <BulkActionsControl formId={BULK_STARTING_INVENTORY_FORM_ID} />
+        </div>
+      ) : null}
+
       <div className="app-table-wrap">
         <div className="app-table-scroll">
           <table className="app-table">
             <thead className="app-thead">
               <tr>
+                <th className="app-th w-16">
+                  <SelectAllCheckbox
+                    formId={BULK_STARTING_INVENTORY_FORM_ID}
+                    fieldName="selected_starting_inventory_ids"
+                    label="Select all draft starting inventory items"
+                  />
+                </th>
                 <th className="app-th">Item</th>
                 <th className="app-th">Status</th>
                 <th className="app-th">Destination</th>
@@ -316,8 +721,25 @@ export default async function StartingInventoryPage({
                   .filter(Boolean)
                   .join(' • ')
 
+                const itemLabel = item.title || item.player_name || display || 'Untitled'
+
                 return (
                   <tr key={item.id} className="app-tr">
+                    <td className="app-td">
+                      {isDraft ? (
+                        <input
+                          form={BULK_STARTING_INVENTORY_FORM_ID}
+                          type="checkbox"
+                          name="selected_starting_inventory_ids"
+                          value={item.id}
+                          aria-label={`Select ${itemLabel}`}
+                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                        />
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
+                    </td>
+
                     <td className="app-td">
                       <div className="font-medium">
                         {item.title || item.player_name || 'Untitled'}
@@ -359,12 +781,32 @@ export default async function StartingInventoryPage({
                               </button>
                             </form>
 
-                            <form action={archiveStartingInventoryItemAction}>
-                              <input type="hidden" name="starting_inventory_item_id" value={item.id} />
-                              <button type="submit" className="app-button">
+                            <details className="group relative">
+                              <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
                                 Archive
-                              </button>
-                            </form>
+                              </summary>
+
+                              <div className="mt-2 min-w-64 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl">
+                                <div className="text-sm font-semibold text-red-200">Confirm archive?</div>
+                                <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                                  This will archive this starting inventory item:{' '}
+                                  <span className="text-zinc-200">{itemLabel}</span>
+                                </div>
+
+                                <form action={archiveStartingInventoryItemAction} className="mt-3 flex flex-wrap gap-2">
+                                  <input type="hidden" name="starting_inventory_item_id" value={item.id} />
+
+                                  <button
+                                    type="submit"
+                                    className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+                                  >
+                                    Yes, Archive
+                                  </button>
+
+                                  <CancelDetailsButton />
+                                </form>
+                              </div>
+                            </details>
                           </>
                         )}
 
@@ -394,7 +836,7 @@ export default async function StartingInventoryPage({
 
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-zinc-400">
+                  <td colSpan={10} className="px-4 py-10 text-center text-zinc-400">
                     No items found.
                   </td>
                 </tr>

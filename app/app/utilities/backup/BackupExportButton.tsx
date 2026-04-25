@@ -49,6 +49,8 @@ export default function BackupExportButton() {
       link.remove()
       window.URL.revokeObjectURL(url)
 
+      localStorage.setItem('last_backup_date', new Date().toISOString())
+
       setSuccess('Full backup exported successfully.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Backup export failed')

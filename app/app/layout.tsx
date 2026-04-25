@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { signOutAction } from '@/app/actions/auth'
+import AppGlobalSearch from './components/app-global-search'
 
 export default async function AppLayout({
   children,
@@ -78,23 +79,7 @@ export default async function AppLayout({
 
         <main className="min-w-0">
           <div className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
-            <form
-              action="/app/search"
-              method="GET"
-              role="search"
-              className="flex max-w-4xl gap-2"
-            >
-              <input
-                type="text"
-                name="q"
-                placeholder="Search orders, breaks, players, sets, order IDs... or paste multiple orders"
-                className="app-input"
-                autoComplete="off"
-              />
-              <button type="submit" className="app-button-primary whitespace-nowrap">
-                Search
-              </button>
-            </form>
+            <AppGlobalSearch />
           </div>
 
           <div className="p-4 md:p-6">{children}</div>

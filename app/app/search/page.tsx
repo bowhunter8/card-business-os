@@ -1,5 +1,9 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import SelectAllCheckbox from './SelectAllCheckbox'
+import CancelDetailsButton from './CancelDetailsButton'
 
 type WhatnotOrderRow = {
   id: string
@@ -88,6 +92,9 @@ type SaleSearchRow = {
 }
 
 const SECTION_LIMIT = 50
+const BULK_ORDERS_FORM_ID = 'bulk-delete-orders-form'
+const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-form'
+const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-form'
 
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
@@ -104,6 +111,259 @@ function buildFocusHref(order: WhatnotOrderRow) {
   if (order.order_id) params.set('order_id', order.order_id)
 
   return `/app/whatnot-orders/focus?${params.toString()}`
+}
+
+function buildSearchRedirect(q: string, statusKey: string, statusValue: string) {
+  const params = new URLSearchParams()
+
+  if (q.trim()) params.set('q', q.trim())
+  params.set(statusKey, statusValue)
+
+  return `/app/search?${params.toString()}#search-status`
+}
+
+function readFormIds(formData: FormData, fieldName: string) {
+  return formData
+    .getAll(fieldName)
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+}
+
+async function deleteOrderAction(formData: FormData) {
+  'use server'
+
+  const orderId = String(formData.get('order_id') ?? '').trim()
+  const isLinked = String(formData.get('is_linked') ?? '') === '1'
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (!orderId) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Missing order ID.'))
+  }
+
+  if (isLinked) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'delete_error',
+        'This order is linked to a break. Roll back or unlink the break first, then delete the order.'
+      )
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('whatnot_orders')
+    .delete()
+    .eq('id', orderId)
+    .eq('user_id', user.id)
+    .is('break_id', null)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/whatnot-orders')
+  revalidatePath('/app/breaks')
+
+  redirect(buildSearchRedirect(q, 'deleted', 'order'))
+}
+
+async function deleteInventoryItemAction(formData: FormData) {
+  'use server'
+
+  const itemId = String(formData.get('item_id') ?? '').trim()
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (!itemId) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Missing inventory item ID.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('id', itemId)
+    .eq('user_id', user.id)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/breaks')
+
+  redirect(buildSearchRedirect(q, 'deleted', 'inventory'))
+}
+
+async function deleteBreakAction(formData: FormData) {
+  'use server'
+
+  const breakId = String(formData.get('break_id') ?? '').trim()
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (!breakId) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Missing break ID.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('breaks')
+    .delete()
+    .eq('id', breakId)
+    .eq('user_id', user.id)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/whatnot-orders')
+
+  redirect(buildSearchRedirect(q, 'deleted', 'break'))
+}
+
+async function bulkDeleteOrdersAction(formData: FormData) {
+  'use server'
+
+  const orderIds = readFormIds(formData, 'selected_order_ids')
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (orderIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Select at least one unassigned order to delete.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('whatnot_orders')
+    .delete()
+    .eq('user_id', user.id)
+    .is('break_id', null)
+    .in('id', orderIds)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/whatnot-orders')
+  revalidatePath('/app/breaks')
+
+  redirect(buildSearchRedirect(q, 'deleted_count', `${orderIds.length} unassigned order(s)`))
+}
+
+async function bulkDeleteInventoryItemsAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (itemIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Select at least one inventory item to delete.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .delete()
+    .eq('user_id', user.id)
+    .in('id', itemIds)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/breaks')
+
+  redirect(buildSearchRedirect(q, 'deleted_count', `${itemIds.length} inventory item(s)`))
+}
+
+async function bulkDeleteBreaksAction(formData: FormData) {
+  'use server'
+
+  const breakIds = readFormIds(formData, 'selected_break_ids')
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (breakIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'delete_error', 'Select at least one break to delete.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('breaks')
+    .delete()
+    .eq('user_id', user.id)
+    .in('id', breakIds)
+
+  if (error) {
+    redirect(buildSearchRedirect(q, 'delete_error', error.message))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/whatnot-orders')
+
+  redirect(buildSearchRedirect(q, 'deleted_count', `${breakIds.length} break(s)`))
 }
 
 function escapeLike(value: string) {
@@ -259,15 +519,164 @@ function ResultSection({
   )
 }
 
+function DeleteConfirmControl({
+  itemType,
+  itemName,
+  hiddenIdName,
+  hiddenIdValue,
+  q,
+  action,
+}: {
+  itemType: 'inventory item' | 'break'
+  itemName: string
+  hiddenIdName: string
+  hiddenIdValue: string
+  q: string
+  action: (formData: FormData) => Promise<void>
+}) {
+  return (
+    <details className="group relative">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete
+      </summary>
+
+      <div className="mt-2 min-w-64 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl">
+        <div className="text-sm font-semibold text-red-200">Confirm delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete this {itemType}: <span className="text-zinc-200">{itemName}</span>
+        </div>
+
+        <form action={action} className="mt-3 flex flex-wrap gap-2">
+          <input type="hidden" name={hiddenIdName} value={hiddenIdValue} />
+          <input type="hidden" name="q" value={q} />
+
+          <button
+            type="submit"
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete
+          </button>
+
+          <CancelDetailsButton />
+        </form>
+      </div>
+    </details>
+  )
+}
+
+function DeleteOrderConfirmControl({
+  orderId,
+  orderLabel,
+  isLinked,
+  q,
+}: {
+  orderId: string
+  orderLabel: string
+  isLinked: boolean
+  q: string
+}) {
+  if (isLinked) {
+    return (
+      <div className="max-w-[190px] whitespace-normal rounded-xl border border-amber-900/50 bg-amber-950/20 px-2 py-1 text-[11px] leading-snug text-amber-300">
+        Linked order — roll back the break first.
+      </div>
+    )
+  }
+
+  return (
+    <details className="group relative">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete
+      </summary>
+
+      <div className="mt-2 min-w-64 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl">
+        <div className="text-sm font-semibold text-red-200">Confirm delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete this unassigned order: <span className="text-zinc-200">{orderLabel}</span>
+        </div>
+
+        <form action={deleteOrderAction} className="mt-3 flex flex-wrap gap-2">
+          <input type="hidden" name="order_id" value={orderId} />
+          <input type="hidden" name="is_linked" value={isLinked ? '1' : '0'} />
+          <input type="hidden" name="q" value={q} />
+
+          <button
+            type="submit"
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete
+          </button>
+
+          <CancelDetailsButton />
+        </form>
+      </div>
+    </details>
+  )
+}
+
+function BulkDeleteConfirmControl({
+  label,
+  formId,
+}: {
+  label: string
+  formId: string
+}) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Check the rows you want to remove, then confirm below.
+          </div>
+        </div>
+
+        <details className="group">
+          <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+            Delete Selected
+          </summary>
+
+          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+              This will delete the selected {label}. This cannot be undone from this screen.
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="submit"
+                form={formId}
+                className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+              >
+                Yes, Delete Selected
+              </button>
+
+              <CancelDetailsButton />
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  )
+}
+
 export default async function GlobalSearchPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>
+  searchParams?: Promise<{
+    q?: string
+    deleted?: string
+    deleted_count?: string
+    delete_error?: string
+  }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim()
   const q = escapeLike(qRaw)
   const extractedNumbers = extractOrderNumbers(qRaw)
+  const deleted = String(params?.deleted ?? '').trim()
+  const deletedCount = String(params?.deleted_count ?? '').trim()
+  const deleteError = String(params?.delete_error ?? '').trim()
 
   const isLikelyReceiptPaste =
     extractedNumbers.length > 0 &&
@@ -631,16 +1040,36 @@ export default async function GlobalSearchPage({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Link href="/app/whatnot-orders" className="app-button">
+          <Link href="/app/whatnot-orders" className="app-button whitespace-nowrap">
             Imported Orders
           </Link>
-          <Link href="/app/breaks" className="app-button">
+          <Link href="/app/breaks" className="app-button whitespace-nowrap">
             Breaks
           </Link>
-          <Link href="/app/inventory" className="app-button">
+          <Link href="/app/inventory" className="app-button whitespace-nowrap">
             Inventory
           </Link>
         </div>
+      </div>
+
+      <div id="search-status" className="scroll-mt-28 space-y-3">
+        {deleted ? (
+          <div className="app-alert-success">
+            Deleted {deleted === 'break' ? 'break' : deleted === 'order' ? 'unassigned order' : 'inventory item'} successfully.
+          </div>
+        ) : null}
+
+        {deletedCount ? (
+          <div className="app-alert-success">
+            Deleted {deletedCount} successfully.
+          </div>
+        ) : null}
+
+        {deleteError ? (
+          <div className="app-alert-error">
+            Delete failed: {deleteError}
+          </div>
+        ) : null}
       </div>
 
       {qRaw ? (
@@ -663,7 +1092,7 @@ export default async function GlobalSearchPage({
               Use the global search bar at the top of the app to run a new search.
             </div>
             <div className="mt-3">
-              <Link href="/app/search" className="app-button">
+              <Link href="/app/search" className="app-button whitespace-nowrap">
                 Clear Results
               </Link>
             </div>
@@ -704,18 +1133,31 @@ export default async function GlobalSearchPage({
           }
           count={matchingOrders.length}
         >
+          <form id={BULK_ORDERS_FORM_ID} action={bulkDeleteOrdersAction} className="hidden">
+            <input type="hidden" name="q" value={qRaw} />
+          </form>
+
+          <BulkDeleteConfirmControl label="unassigned orders" formId={BULK_ORDERS_FORM_ID} />
+
           <div className="app-table-wrap">
             <div className="app-table-scroll">
               <table className="app-table">
                 <thead className="app-thead">
                   <tr>
+                    <th className="app-th w-16">
+                      <SelectAllCheckbox
+                        formId={BULK_ORDERS_FORM_ID}
+                        fieldName="selected_order_ids"
+                        label="Select all unassigned orders"
+                      />
+                    </th>
                     <th className="app-th">Order #</th>
                     <th className="app-th">Date</th>
                     <th className="app-th">Purchased From</th>
                     <th className="app-th">Description</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Total</th>
-                    <th className="app-th">Actions</th>
+                    <th className="app-th min-w-[220px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -723,10 +1165,25 @@ export default async function GlobalSearchPage({
                     const orderNumber = cleanText(order.order_numeric_id || order.order_id || '—')
                     const seller = cleanText(order.seller || '—')
                     const description = cleanText(order.product_name || 'Untitled order')
-                    const statusLabel = order.break_id ? 'Linked' : 'Staging'
+                    const isLinked = Boolean(order.break_id)
+                    const statusLabel = isLinked ? 'Linked' : 'Staging'
 
                     return (
-                      <tr key={order.id} className="app-tr">
+                      <tr key={order.id} className="app-tr align-top">
+                        <td className="app-td">
+                          {!isLinked ? (
+                            <input
+                              form={BULK_ORDERS_FORM_ID}
+                              type="checkbox"
+                              name="selected_order_ids"
+                              value={order.id}
+                              aria-label={`Select order ${orderNumber || order.id}`}
+                              className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                            />
+                          ) : (
+                            <span className="text-xs text-zinc-600">—</span>
+                          )}
+                        </td>
                         <td className="app-td whitespace-nowrap">{orderNumber || '—'}</td>
                         <td className="app-td whitespace-nowrap">
                           {formatDate(order.processed_date_display || order.processed_date)}
@@ -747,16 +1204,22 @@ export default async function GlobalSearchPage({
                         <td className="app-td whitespace-nowrap text-right">
                           {money(order.total)}
                         </td>
-                        <td className="app-td">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Link href={buildFocusHref(order)} className="app-button">
+                        <td className="app-td whitespace-nowrap">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <Link href={buildFocusHref(order)} className="app-button whitespace-nowrap">
                               Open
                             </Link>
                             {order.break_id ? (
-                              <Link href={`/app/breaks/${order.break_id}`} className="app-button">
+                              <Link href={`/app/breaks/${order.break_id}`} className="app-button whitespace-nowrap">
                                 Break
                               </Link>
                             ) : null}
+                            <DeleteOrderConfirmControl
+                              orderId={order.id}
+                              orderLabel={orderNumber || order.id}
+                              isLinked={isLinked}
+                              q={qRaw}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -775,18 +1238,31 @@ export default async function GlobalSearchPage({
           subtitle="Search hits from order number, source, product, format, and notes."
           count={matchingBreaks.length}
         >
+          <form id={BULK_BREAKS_FORM_ID} action={bulkDeleteBreaksAction} className="hidden">
+            <input type="hidden" name="q" value={qRaw} />
+          </form>
+
+          <BulkDeleteConfirmControl label="breaks" formId={BULK_BREAKS_FORM_ID} />
+
           <div className="app-table-wrap">
             <div className="app-table-scroll">
               <table className="app-table">
                 <thead className="app-thead">
                   <tr>
+                    <th className="app-th w-16">
+                      <SelectAllCheckbox
+                        formId={BULK_BREAKS_FORM_ID}
+                        fieldName="selected_break_ids"
+                        label="Select all breaks"
+                      />
+                    </th>
                     <th className="app-th">Date</th>
                     <th className="app-th">Break</th>
                     <th className="app-th">Source</th>
                     <th className="app-th">Order #</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Cost</th>
-                    <th className="app-th">Actions</th>
+                    <th className="app-th min-w-[220px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -797,7 +1273,17 @@ export default async function GlobalSearchPage({
                     const statusLabel = breakRow.reversed_at ? 'Reversed' : 'Active'
 
                     return (
-                      <tr key={breakRow.id} className="app-tr">
+                      <tr key={breakRow.id} className="app-tr align-top">
+                        <td className="app-td whitespace-nowrap">
+                          <input
+                            form={BULK_BREAKS_FORM_ID}
+                            type="checkbox"
+                            name="selected_break_ids"
+                            value={breakRow.id}
+                            aria-label={`Select ${breakLabel}`}
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                        </td>
                         <td className="app-td whitespace-nowrap">{formatDate(breakRow.break_date)}</td>
                         <td className="app-td">
                           <div className="max-w-80 truncate" title={breakLabel}>
@@ -820,14 +1306,22 @@ export default async function GlobalSearchPage({
                         <td className="app-td whitespace-nowrap text-right">
                           {money(breakRow.total_cost)}
                         </td>
-                        <td className="app-td">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Link href={`/app/breaks/${breakRow.id}`} className="app-button">
+                        <td className="app-td whitespace-nowrap">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <Link href={`/app/breaks/${breakRow.id}`} className="app-button whitespace-nowrap">
                               Details
                             </Link>
-                            <Link href={`/app/breaks/${breakRow.id}/edit`} className="app-button">
+                            <Link href={`/app/breaks/${breakRow.id}/edit`} className="app-button whitespace-nowrap">
                               Edit
                             </Link>
+                            <DeleteConfirmControl
+                              itemType="break"
+                              itemName={breakLabel}
+                              hiddenIdName="break_id"
+                              hiddenIdValue={breakRow.id}
+                              q={qRaw}
+                              action={deleteBreakAction}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -846,18 +1340,31 @@ export default async function GlobalSearchPage({
           subtitle="Search hits from title, player, set, number, team, notes, and related inventory fields."
           count={matchingInventory.length}
         >
+          <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction} className="hidden">
+            <input type="hidden" name="q" value={qRaw} />
+          </form>
+
+          <BulkDeleteConfirmControl label="inventory items" formId={BULK_INVENTORY_FORM_ID} />
+
           <div className="app-table-wrap">
             <div className="app-table-scroll">
               <table className="app-table">
                 <thead className="app-thead">
                   <tr>
+                    <th className="app-th w-16">
+                      <SelectAllCheckbox
+                        formId={BULK_INVENTORY_FORM_ID}
+                        fieldName="selected_inventory_ids"
+                        label="Select all inventory items"
+                      />
+                    </th>
                     <th className="app-th">Item</th>
                     <th className="app-th">Status</th>
                     <th className="app-th">Qty</th>
                     <th className="app-th">Available</th>
                     <th className="app-th text-right">Cost</th>
                     <th className="app-th text-right">Est. Value</th>
-                    <th className="app-th">Actions</th>
+                    <th className="app-th min-w-[220px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -866,7 +1373,17 @@ export default async function GlobalSearchPage({
                     const statusLabel = cleanText(item.status || '—')
 
                     return (
-                      <tr key={item.id} className="app-tr">
+                      <tr key={item.id} className="app-tr align-top">
+                        <td className="app-td whitespace-nowrap">
+                          <input
+                            form={BULK_INVENTORY_FORM_ID}
+                            type="checkbox"
+                            name="selected_inventory_ids"
+                            value={item.id}
+                            aria-label={`Select ${display}`}
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                        </td>
                         <td className="app-td">
                           <div className="max-w-96 truncate" title={display}>
                             {display}
@@ -883,16 +1400,24 @@ export default async function GlobalSearchPage({
                         <td className="app-td whitespace-nowrap text-right">
                           {money(item.estimated_value_total)}
                         </td>
-                        <td className="app-td">
-                          <div className="flex flex-wrap gap-1.5">
-                            <Link href={`/app/inventory/${item.id}`} className="app-button">
+                        <td className="app-td whitespace-nowrap">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
+                            <Link href={`/app/inventory/${item.id}`} className="app-button whitespace-nowrap">
                               Open
                             </Link>
                             {item.source_break_id ? (
-                              <Link href={`/app/breaks/${item.source_break_id}`} className="app-button">
+                              <Link href={`/app/breaks/${item.source_break_id}`} className="app-button whitespace-nowrap">
                                 Break
                               </Link>
                             ) : null}
+                            <DeleteConfirmControl
+                              itemType="inventory item"
+                              itemName={display}
+                              hiddenIdName="item_id"
+                              hiddenIdValue={item.id}
+                              q={qRaw}
+                              action={deleteInventoryItemAction}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -946,17 +1471,17 @@ export default async function GlobalSearchPage({
                         <td className="app-td whitespace-nowrap text-right">
                           {money(sale.profit)}
                         </td>
-                        <td className="app-td">
-                          <div className="flex flex-wrap gap-1.5">
+                        <td className="app-td whitespace-nowrap">
+                          <div className="flex items-center gap-1 whitespace-nowrap">
                             {sale.inventory_item_id ? (
-                              <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button">
+                              <Link href={`/app/inventory/${sale.inventory_item_id}`} className="app-button whitespace-nowrap">
                                 Item
                               </Link>
                             ) : null}
                             {sale.inventory_items?.source_break_id ? (
                               <Link
                                 href={`/app/breaks/${sale.inventory_items.source_break_id}`}
-                                className="app-button"
+                                className="app-button whitespace-nowrap"
                               >
                                 Break
                               </Link>

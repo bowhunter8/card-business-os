@@ -76,7 +76,7 @@ export default function UtilitiesPage() {
           />
 
           <UtilityCard
-            href="/app/backup"
+            href="/app/utilities/backup"
             title="Backup & Export"
             description="Create full restore-capable backups and export records for accountants, QuickBooks, tax software, or CPA workflows."
           />
