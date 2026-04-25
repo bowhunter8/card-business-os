@@ -1,6 +1,9 @@
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
+import DeleteInventoryItemButton from './DeleteInventoryItemButton'
 
 type InventoryRow = {
   id: string
@@ -47,6 +50,7 @@ type SortDir = 'asc' | 'desc'
 
 const DEFAULT_LIMIT = 10
 const LIMIT_OPTIONS = [10, 25, 100] as const
+const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -188,6 +192,136 @@ function buildInventoryHref({
   return `/app/inventory?${params.toString()}`
 }
 
+function buildInventoryStatusHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+  statusKey,
+  statusValue,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+  statusKey: string
+  statusValue: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set(statusKey, statusValue)
+
+  return `/app/inventory?${params.toString()}#inventory-status`
+}
+
+function readFormIds(formData: FormData, fieldName: string) {
+  return formData
+    .getAll(fieldName)
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+}
+
+async function bulkDeleteInventoryItemsAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const q = String(formData.get('q') ?? '').trim()
+  const sort = String(formData.get('sort') ?? 'created_at').trim() as SortKey
+  const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
+  const page = Number(String(formData.get('page') ?? '1'))
+  const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+
+  const safeSort: SortKey = [
+    'created_at',
+    'card',
+    'status',
+    'quantity',
+    'available_quantity',
+    'cost_basis_unit',
+    'cost_basis_total',
+    'estimated_value_total',
+    'storage_location',
+  ].includes(sort)
+    ? sort
+    : 'created_at'
+
+  const safeDir: SortDir = dir === 'asc' ? 'asc' : 'desc'
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const safeLimit = LIMIT_OPTIONS.includes(limit as (typeof LIMIT_OPTIONS)[number])
+    ? limit
+    : DEFAULT_LIMIT
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'Select at least one inventory item to delete.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { error } = await supabase
+    .from('inventory_items')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .in('id', itemIds)
+
+  if (error) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    buildInventoryStatusHref({
+      q,
+      sort: safeSort,
+      dir: safeDir,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'deleted_count',
+      statusValue: `${itemIds.length} inventory item(s)`,
+    })
+  )
+}
+
 function getFilterHref(
   filter: '' | 'listed' | 'junk' | 'personal',
   sortKey: SortKey,
@@ -286,6 +420,42 @@ function SummaryCard({
   )
 }
 
+function BulkDeleteConfirmControl({ formId }: { formId: string }) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Check the inventory rows you want to remove, then confirm below.
+          </div>
+        </div>
+
+        <details className="group">
+          <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+            Delete Selected
+          </summary>
+
+          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+              This will delete the selected inventory items. This cannot be undone from this screen.
+            </div>
+
+            <button
+              type="submit"
+              form={formId}
+              className="app-button mt-3 border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+            >
+              Yes, Delete Selected
+            </button>
+          </div>
+        </details>
+      </div>
+    </div>
+  )
+}
+
 export default async function InventoryPage({
   searchParams,
 }: {
@@ -296,6 +466,8 @@ export default async function InventoryPage({
     saved?: string
     page?: string
     limit?: string
+    deleted_count?: string
+    delete_error?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -303,6 +475,8 @@ export default async function InventoryPage({
   const q = cleanSearchTerm(qRaw)
   const qNormalized = q.toLowerCase()
   const saved = String(params?.saved ?? '')
+  const deletedCount = String(params?.deleted_count ?? '').trim()
+  const deleteError = String(params?.delete_error ?? '').trim()
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
 
@@ -362,6 +536,7 @@ export default async function InventoryPage({
       created_at
     `)
     .eq('user_id', user.id)
+    .is('deleted_at', null)
 
   if (qNormalized !== 'junk') {
     query = query.neq('status', 'junk')
@@ -478,11 +653,25 @@ export default async function InventoryPage({
         </Link>
       </div>
 
-      {saved === '1' ? (
-        <div className="app-alert-success">
-          Quick sale recorded, inventory updated, and tax tracking kept in sync.
-        </div>
-      ) : null}
+      <div id="inventory-status" className="scroll-mt-28 space-y-3">
+        {saved === '1' ? (
+          <div className="app-alert-success">
+            Quick sale recorded, inventory updated, and tax tracking kept in sync.
+          </div>
+        ) : null}
+
+        {deletedCount ? (
+          <div className="app-alert-success">
+            Deleted {deletedCount} successfully.
+          </div>
+        ) : null}
+
+        {deleteError ? (
+          <div className="app-alert-error">
+            Delete failed: {deleteError}
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard label="Rows On This Page" value={totalItems} />
@@ -564,11 +753,26 @@ export default async function InventoryPage({
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
 
+        <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction} className="hidden">
+          <input type="hidden" name="q" value={q} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+        </form>
+
+        {items.length > 0 ? (
+          <div className="mt-4">
+            <BulkDeleteConfirmControl formId={BULK_INVENTORY_FORM_ID} />
+          </div>
+        ) : null}
+
         <div className="mt-4 app-table-wrap">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
+                  <th className="app-th">Select</th>
                   <th className="app-th">
                     <SortHeader
                       label="Item"
@@ -649,7 +853,7 @@ export default async function InventoryPage({
                       limit={limit}
                     />
                   </th>
-                  <th className="app-th min-w-[260px]">Actions</th>
+                  <th className="app-th min-w-[320px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -660,9 +864,21 @@ export default async function InventoryPage({
                   const hasAvailable = available > 0
                   const isLotLike = quantity > 1 || available > 1
                   const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
+                  const itemName = `${getPrimaryTitle(item)}${itemLine ? ` • ${itemLine}` : ''}`
 
                   return (
                     <tr key={item.id} className="app-tr">
+                      <td className="app-td whitespace-nowrap">
+                        <input
+                          form={BULK_INVENTORY_FORM_ID}
+                          type="checkbox"
+                          name="selected_inventory_ids"
+                          value={item.id}
+                          aria-label={`Select ${itemName}`}
+                          className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                        />
+                      </td>
+
                       <td className="app-td whitespace-nowrap">
                         <div className="min-w-55">
                           <div className="flex items-center gap-1.5">
@@ -737,6 +953,8 @@ export default async function InventoryPage({
                               </button>
                             </form>
                           ) : null}
+
+                          <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
                         </div>
                       </td>
                     </tr>
@@ -745,7 +963,7 @@ export default async function InventoryPage({
 
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-zinc-400">
+                    <td colSpan={10} className="px-4 py-8 text-center text-zinc-400">
                       {q ? 'No inventory items match your search.' : 'No inventory items found.'}
                     </td>
                   </tr>
