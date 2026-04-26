@@ -37,6 +37,9 @@ type SuggestedGroup = {
   date_label: string
   order_count: number
   total_paid: number
+  latest_order_created_at: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 type PageLimit = 10 | 25 | 100
@@ -349,7 +352,7 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
         </div>
 
         <details className="group">
-          <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+          <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
             Delete Selected
           </summary>
 
@@ -362,7 +365,7 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
             <button
               type="submit"
               form={formId}
-              className="app-button mt-3 border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+              className="app-button mt-3 whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
             >
               Yes, Delete Selected
             </button>
@@ -398,7 +401,7 @@ function DeleteOrderConfirmControl({
 
   return (
     <details className="group relative">
-      <summary className="app-button cursor-pointer list-none border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
         Delete
       </summary>
 
@@ -417,7 +420,7 @@ function DeleteOrderConfirmControl({
 
           <button
             type="submit"
-            className="app-button border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
           >
             Yes, Delete
           </button>
@@ -509,18 +512,23 @@ export default async function WhatnotOrdersPage({
             date_key,
             date_label,
             order_count,
-            total_paid
+            total_paid,
+            latest_order_created_at,
+            created_at,
+            updated_at
           `)
           .eq('user_id', user.id)
-          .order('order_count', { ascending: false })
-          .order('total_paid', { ascending: false })
+          .order('latest_order_created_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false, nullsFirst: false })
           .limit(20)
 
   const from = (page - 1) * limit
   const to = from + limit - 1
 
   const [filteredRes, summaryRes, suggestionsRes] = await Promise.all([
-    filteredQuery.order('processed_date', { ascending: false }).range(from, to),
+    filteredQuery
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .range(from, to),
     summaryQuery,
     suggestionsQuery,
   ])
@@ -574,11 +582,11 @@ export default async function WhatnotOrdersPage({
           <p className="app-subtitle">{pageDescription}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Link href="/app/imports/whatnot" className="app-button">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/app/imports/whatnot" className="app-button whitespace-nowrap">
             Import More
           </Link>
-          <Link href="/app/utilities" className="app-button">
+          <Link href="/app/utilities" className="app-button whitespace-nowrap">
             Back to Utilities
           </Link>
         </div>
@@ -598,22 +606,22 @@ export default async function WhatnotOrdersPage({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Link
           href={buildOrdersHref({ q: '', page: 1, limit })}
-          className={`app-chip ${qRaw === '' ? 'app-chip-active' : 'app-chip-idle'}`}
+          className={`app-chip whitespace-nowrap ${qRaw === '' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           All Orders
         </Link>
         <Link
           href={buildOrdersHref({ q: 'unassigned', page: 1, limit })}
-          className={`app-chip ${qRaw === 'unassigned' ? 'app-chip-active' : 'app-chip-idle'}`}
+          className={`app-chip whitespace-nowrap ${qRaw === 'unassigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Unassigned
         </Link>
         <Link
           href={buildOrdersHref({ q: 'assigned', page: 1, limit })}
-          className={`app-chip ${qRaw === 'assigned' ? 'app-chip-active' : 'app-chip-idle'}`}
+          className={`app-chip whitespace-nowrap ${qRaw === 'assigned' ? 'app-chip-active' : 'app-chip-idle'}`}
         >
           Assigned
         </Link>
@@ -666,15 +674,15 @@ export default async function WhatnotOrdersPage({
       <div className="app-section p-4 mt-3">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-xs text-zinc-500">
-            Page {page} • Suggested groups are loaded from cached database records.
+            Page {page} • Orders and suggested groups are sorted by most recently imported first.
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {LIMIT_OPTIONS.map((option) => (
               <Link
                 key={option}
                 href={buildOrdersHref({ q: qRaw, page: 1, limit: option })}
-                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+                className={`app-chip whitespace-nowrap ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
               >
                 {option} rows
               </Link>
@@ -701,9 +709,9 @@ export default async function WhatnotOrdersPage({
           <div className="mt-4 grid gap-3">
             {suggestedGroups.map((group) => (
               <div key={group.id} className="app-card-tight">
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="min-w-0">
-                    <div className="text-lg font-semibold leading-snug">
+                    <div className="break-words text-lg font-semibold leading-snug">
                       {group.seller} — {group.date_label}
                     </div>
                     <div className="mt-1 text-sm text-zinc-400">
@@ -714,10 +722,10 @@ export default async function WhatnotOrdersPage({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
                     <Link
                       href={`/app/search?q=${encodeURIComponent(group.seller)}`}
-                      className="app-button"
+                      className="app-button whitespace-nowrap"
                     >
                       Search Seller
                     </Link>
@@ -838,13 +846,13 @@ export default async function WhatnotOrdersPage({
                         {money(order.total)}
                       </td>
                       <td className="app-td whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          <Link href={buildFocusHref(order)} className="app-button">
+                        <div className="flex items-center gap-1 whitespace-nowrap">
+                          <Link href={buildFocusHref(order)} className="app-button whitespace-nowrap">
                             Open
                           </Link>
 
                           {order.break_id ? (
-                            <Link href={`/app/breaks/${order.break_id}`} className="app-button">
+                            <Link href={`/app/breaks/${order.break_id}`} className="app-button whitespace-nowrap">
                               Break
                             </Link>
                           ) : null}
@@ -874,7 +882,7 @@ export default async function WhatnotOrdersPage({
             Showing page {page} with up to {limit} orders.
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2 whitespace-nowrap">
             {hasPreviousPage ? (
               <Link
                 href={buildOrdersHref({
@@ -882,12 +890,12 @@ export default async function WhatnotOrdersPage({
                   page: page - 1,
                   limit,
                 })}
-                className="app-button"
+                className="app-button whitespace-nowrap"
               >
                 Previous
               </Link>
             ) : (
-              <span className="app-button opacity-50 pointer-events-none">Previous</span>
+              <span className="app-button pointer-events-none whitespace-nowrap opacity-50">Previous</span>
             )}
 
             {hasNextPage ? (
@@ -897,12 +905,12 @@ export default async function WhatnotOrdersPage({
                   page: page + 1,
                   limit,
                 })}
-                className="app-button-primary"
+                className="app-button-primary whitespace-nowrap"
               >
                 Next
               </Link>
             ) : (
-              <span className="app-button-primary opacity-50 pointer-events-none">Next</span>
+              <span className="app-button-primary pointer-events-none whitespace-nowrap opacity-50">Next</span>
             )}
           </div>
         </div>

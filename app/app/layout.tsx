@@ -4,6 +4,14 @@ import { createClient } from '@/lib/supabase/server'
 import { signOutAction } from '@/app/actions/auth'
 import AppGlobalSearch from './components/app-global-search'
 
+type AppUserAccessRow = {
+  id: string
+  email: string
+  role: string
+  is_active: boolean
+  display_name?: string | null
+}
+
 export default async function AppLayout({
   children,
 }: {
@@ -18,6 +26,24 @@ export default async function AppLayout({
   if (!user) {
     redirect('/login')
   }
+
+  const userEmail = String(user.email ?? '').trim().toLowerCase()
+
+  const { data: appUserAccess } = await supabase
+    .from('app_users')
+    .select('id, email, role, is_active, display_name')
+    .ilike('email', userEmail)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!appUserAccess) {
+    redirect('/not-authorized')
+  }
+
+  const access = appUserAccess as AppUserAccessRow
+  const isAdmin = access.role === 'admin'
+
+  const displayName = access.display_name || user.email
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -59,17 +85,40 @@ export default async function AppLayout({
               Orders
             </Link>
 
+            {/* ✅ NEW SETTINGS LINK */}
+            <Link
+              href="/app/settings"
+              className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
+            >
+              Settings
+            </Link>
+
             <Link
               href="/app/utilities"
               className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
               Utilities
             </Link>
+
+            {isAdmin ? (
+              <Link
+                href="/app/admin/users"
+                className="block rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-amber-200 hover:bg-amber-900/30"
+              >
+                Admin
+              </Link>
+            ) : null}
           </nav>
 
           <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4 text-sm text-zinc-400">
             <div className="mb-2">Signed in as</div>
-            <div className="break-all text-zinc-200">{user.email}</div>
+            <div className="break-all text-zinc-200">{displayName}</div>
+
+            <div className="mt-2">
+              <span className="app-badge app-badge-info">
+                {isAdmin ? 'Admin' : 'Approved User'}
+              </span>
+            </div>
 
             <form action={signOutAction} className="mt-4">
               <button className="app-button w-full">Sign out</button>

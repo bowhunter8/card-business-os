@@ -36,6 +36,22 @@ type TaxYearSettingsRow = {
   notes: string | null
 }
 
+type UserProfileRow = {
+  email: string | null
+  display_name: string | null
+  legal_name: string | null
+  business_name: string | null
+  ein: string | null
+  phone: string | null
+  business_email: string | null
+  address_line1: string | null
+  address_line2: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  country: string | null
+}
+
 type ExpenseCategorySummaryRow = {
   category: string
   amount: number
@@ -75,6 +91,52 @@ function pdfEscape(value: unknown) {
     .replace(/\(/g, '\\(')
     .replace(/\)/g, '\\)')
     .replace(/\r?\n/g, ' ')
+}
+
+function cleanProfileText(value: string | null | undefined) {
+  return String(value ?? '').trim()
+}
+
+function addProfileLine(lines: PdfLine[], label: string, value: string | null | undefined) {
+  const cleaned = cleanProfileText(value)
+
+  if (cleaned) {
+    lines.push({
+      label: `${label}: ${cleaned}`,
+      type: 'note',
+    })
+  }
+}
+
+function buildTaxpayerProfileLines(profile: UserProfileRow | null, fallbackEmail: string | null | undefined) {
+  const lines: PdfLine[] = []
+  const fallbackEmailClean = cleanProfileText(fallbackEmail)
+  const name = cleanProfileText(profile?.legal_name) || cleanProfileText(profile?.display_name)
+  const email = cleanProfileText(profile?.business_email) || cleanProfileText(profile?.email) || fallbackEmailClean
+  const cityStateZip = [profile?.city, profile?.state, profile?.zip]
+    .map((value) => cleanProfileText(value))
+    .filter(Boolean)
+    .join(' ')
+  const address = [profile?.address_line1, profile?.address_line2, cityStateZip, profile?.country]
+    .map((value) => cleanProfileText(value))
+    .filter(Boolean)
+    .join(', ')
+
+  addProfileLine(lines, 'Name', name)
+  addProfileLine(lines, 'Business Name', profile?.business_name)
+  addProfileLine(lines, 'EIN', profile?.ein)
+  addProfileLine(lines, 'Mailing Address', address)
+  addProfileLine(lines, 'Phone', profile?.phone)
+  addProfileLine(lines, 'Email', email)
+
+  if (lines.length === 0) {
+    lines.push({
+      label: 'No optional business / tax profile information was entered. This section is optional.',
+      type: 'note',
+    })
+  }
+
+  return lines
 }
 
 function mapExpenseCategoryToScheduleCArea(category: string) {
@@ -272,7 +334,9 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
-  const [salesRes, inventoryRes, expensesRes, taxSettingsRes] = await Promise.all([
+  const userEmail = String(user.email ?? '').trim().toLowerCase()
+
+  const [salesRes, inventoryRes, expensesRes, taxSettingsRes, profileRes] = await Promise.all([
     supabase
       .from('sales')
       .select(`
@@ -327,12 +391,33 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .eq('tax_year', year)
       .maybeSingle(),
+
+    supabase
+      .from('app_users')
+      .select(`
+        email,
+        display_name,
+        legal_name,
+        business_name,
+        ein,
+        phone,
+        business_email,
+        address_line1,
+        address_line2,
+        city,
+        state,
+        zip,
+        country
+      `)
+      .ilike('email', userEmail)
+      .maybeSingle(),
   ])
 
   const sales: SaleRow[] = (salesRes.data ?? []) as SaleRow[]
   const endingInventory: InventoryRow[] = (inventoryRes.data ?? []) as InventoryRow[]
   const expenses: ExpenseRow[] = (expensesRes.data ?? []) as ExpenseRow[]
   const taxSettings = (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null
+  const profile = (profileRes.data ?? null) as UserProfileRow | null
 
   const beginningInventory = roundMoney(Number(taxSettings?.beginning_inventory ?? 0))
   const scheduleCLine30BusinessUseOfHome = roundMoney(Number(taxSettings?.business_use_of_home ?? 0))
@@ -586,8 +671,13 @@ export async function GET(request: NextRequest) {
     warnings.push('No major tax-readiness warnings were detected from tracked data.')
   }
 
+  const taxpayerProfileLines = buildTaxpayerProfileLines(profile, user.email)
+
   const pdfLines: PdfLine[] = [
     { label: `Schedule C Ready Tax Report - ${year}`, type: 'title' },
+    { label: 'TAXPAYER / BUSINESS INFORMATION', type: 'section' },
+    ...taxpayerProfileLines,
+    { label: '', type: 'spacer' },
     {
       label:
         'This report is designed as a line-by-line Schedule C entry guide. Keep the tax workbook export as detailed backup and supporting worksheets.',
