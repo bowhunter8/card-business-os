@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import DeleteInventoryItemButton from './DeleteInventoryItemButton'
 import CancelDetailsButton from '../search/CancelDetailsButton'
-import SelectAllCheckbox from '../search/SelectAllCheckbox'
 
 type InventoryRow = {
   id: string
@@ -246,10 +245,14 @@ function buildInventoryStatusHref({
 }
 
 function readFormIds(formData: FormData, fieldName: string) {
-  return formData
-    .getAll(fieldName)
-    .map((value) => String(value ?? '').trim())
-    .filter(Boolean)
+  return Array.from(
+    new Set(
+      formData
+        .getAll(fieldName)
+        .map((value) => String(value ?? '').trim())
+        .filter(Boolean)
+    )
+  )
 }
 
 function readInventoryListFormState(formData: FormData) {
@@ -628,9 +631,9 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   )
 }
 
-function BulkActionsPanel({ formId }: { formId: string }) {
+function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemCount: number }) {
   return (
-    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+    <div className="fixed left-4 right-4 top-[5.5rem] z-50 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur md:left-[calc(220px+1rem)]">
       <div className="flex flex-col gap-3">
         <div>
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
@@ -641,10 +644,25 @@ function BulkActionsPanel({ formId }: { formId: string }) {
             <div
               id={BULK_SELECTION_COUNT_ID}
               data-bulk-selected-count="true"
+              data-bulk-page-count={pageItemCount}
               className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
             >
-              0 selected
+              0 of {pageItemCount} selected
             </div>
+            <button
+              type="button"
+              data-bulk-select-page="true"
+              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+            >
+              Select all on page
+            </button>
+            <button
+              type="button"
+              data-bulk-clear-selection="true"
+              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+            >
+              Clear selection
+            </button>
             <div
               id={BULK_PENDING_STATE_ID}
               data-bulk-pending-state="true"
@@ -693,15 +711,47 @@ function BulkSelectionScript({ formId }: { formId: string }) {
     (() => {
       const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
       const fieldName = 'selected_inventory_ids';
+      const storageKey = 'card_business_os_inventory_bulk_selection_v2';
       let isBulkSubmitting = false;
 
+      const form = () => document.getElementById(formId);
       const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
       const pendingNodes = () => Array.from(document.querySelectorAll('[data-bulk-pending-state="true"]'));
-      const checkboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
+      const rowCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-inventory-bulk-row-checkbox="true"]'));
+      const allSelectionCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
+      const pageToggleCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]'));
       const toggles = () => Array.from(document.querySelectorAll('[data-bulk-action-toggle="true"]'));
       const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
+      const selectPageButtons = () => Array.from(document.querySelectorAll('[data-bulk-select-page="true"]'));
+      const clearButtons = () => Array.from(document.querySelectorAll('[data-bulk-clear-selection="true"]'));
       const scrollInputs = () => Array.from(document.querySelectorAll('input[name="scroll_y"][form="' + formId + '"], form#' + formId + ' input[name="scroll_y"]'));
       const statusInputs = () => Array.from(document.querySelectorAll('input[name="bulk_status"][form="' + formId + '"], form#' + formId + ' input[name="bulk_status"]'));
+
+      function loadStoredSelection() {
+        try {
+          const raw = window.sessionStorage.getItem(storageKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (!Array.isArray(parsed)) return new Set();
+          return new Set(parsed.map((value) => String(value || '').trim()).filter(Boolean));
+        } catch (_error) {
+          return new Set();
+        }
+      }
+
+      function saveStoredSelection(selection) {
+        try {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(Array.from(selection)));
+        } catch (_error) {}
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('deleted_count') || urlParams.has('status_updated')) {
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch (_error) {}
+      }
+
+      let selectedIdsSet = loadStoredSelection();
 
       function setDisabled(node, disabled) {
         node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
@@ -710,23 +760,65 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         if ('disabled' in node) node.disabled = disabled;
       }
 
-      function selectedCheckboxes() {
-        return checkboxes().filter((checkbox) => checkbox.checked);
+      function pageIds() {
+        return rowCheckboxes().map((checkbox) => checkbox.value).filter(Boolean);
       }
 
       function selectedCount() {
-        return selectedCheckboxes().length;
+        return selectedIdsSet.size;
       }
 
       function selectedIds() {
-        return selectedCheckboxes().map((checkbox) => checkbox.value).filter(Boolean);
+        return Array.from(selectedIdsSet);
+      }
+
+      function syncStoredInputs() {
+        const bulkForm = form();
+        if (!bulkForm) return;
+
+        bulkForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
+
+        selectedIds().forEach((id) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = fieldName;
+          input.value = id;
+          input.setAttribute('data-bulk-persisted-selection', 'true');
+          bulkForm.appendChild(input);
+        });
+      }
+
+      function syncPageCheckboxesFromStoredSelection() {
+        rowCheckboxes().forEach((checkbox) => {
+          checkbox.checked = selectedIdsSet.has(checkbox.value);
+        });
+      }
+
+      function syncStoredSelectionFromPageCheckbox(checkbox) {
+        const id = String(checkbox.value || '').trim();
+        if (!id) return;
+        if (checkbox.checked) {
+          selectedIdsSet.add(id);
+        } else {
+          selectedIdsSet.delete(id);
+        }
+        saveStoredSelection(selectedIdsSet);
+        syncStoredInputs();
       }
 
       function updateBulkState() {
+        syncPageCheckboxesFromStoredSelection();
+        syncStoredInputs();
+
+        const currentPageIds = pageIds();
+        const totalOnPage = currentPageIds.length;
+        const selectedOnPage = currentPageIds.filter((id) => selectedIdsSet.has(id)).length;
         const count = selectedCount();
         const hasSelection = count > 0;
+        const allPageSelected = totalOnPage > 0 && selectedOnPage === totalOnPage;
+
         countNodes().forEach((node) => {
-          node.textContent = count === 1 ? '1 selected' : count + ' selected';
+          node.textContent = count + ' selected' + (totalOnPage > 0 ? ' • ' + selectedOnPage + ' of ' + totalOnPage + ' on this page' : '');
           node.classList.toggle('text-zinc-400', !hasSelection);
           node.classList.toggle('text-zinc-100', hasSelection);
           node.classList.toggle('border-zinc-800', !hasSelection);
@@ -734,8 +826,28 @@ function BulkSelectionScript({ formId }: { formId: string }) {
           node.classList.toggle('bg-zinc-950', !hasSelection);
           node.classList.toggle('bg-emerald-950/20', hasSelection);
         });
+
+        rowCheckboxes().forEach((checkbox) => {
+          const row = checkbox.closest('[data-inventory-row-id]');
+          if (row) {
+            row.classList.toggle('bg-zinc-900/40', selectedIdsSet.has(checkbox.value) && !isBulkSubmitting);
+          }
+        });
+
+        pageToggleCheckboxes().forEach((checkbox) => {
+          checkbox.checked = allPageSelected;
+          checkbox.indeterminate = selectedOnPage > 0 && !allPageSelected;
+          checkbox.setAttribute('aria-checked', checkbox.indeterminate ? 'mixed' : String(allPageSelected));
+          setDisabled(checkbox, totalOnPage === 0 || isBulkSubmitting);
+        });
+
         toggles().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
         submitButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+        selectPageButtons().forEach((node) => {
+          setDisabled(node, totalOnPage === 0 || allPageSelected || isBulkSubmitting);
+          node.textContent = allPageSelected ? 'All rows on this page selected' : 'Select all on page';
+        });
+        clearButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
       }
 
       function rememberScrollPosition() {
@@ -825,20 +937,66 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         showPendingMessage(isDelete ? 'Deleting ' + count + ' selected item(s)…' : 'Updating ' + count + ' selected item(s)…');
         closeOpenConfirmations();
         applyInstantRowState({ ids, status, isDelete });
-        updateBulkState();
+
+        // Do not disable the clicked submit button during the same click event.
+        // In React/Next formAction flows, disabling it immediately can prevent
+        // the browser from completing the submit, which makes the UI look stuck.
+        window.setTimeout(() => updateBulkState(), 0);
       }
 
       document.addEventListener('change', (event) => {
         const target = event.target;
-        if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"]')) {
+
+        if (target && target.matches && target.matches('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]')) {
+          const shouldSelectPage = Boolean(target.checked);
+          pageIds().forEach((id) => {
+            if (shouldSelectPage) selectedIdsSet.add(id);
+            else selectedIdsSet.delete(id);
+          });
+          saveStoredSelection(selectedIdsSet);
+          syncStoredInputs();
           updateBulkState();
+          return;
         }
-      });
+
+        if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-inventory-bulk-row-checkbox="true"]')) {
+          syncStoredSelectionFromPageCheckbox(target);
+          updateBulkState();
+          return;
+        }
+      }, true);
 
       document.addEventListener('click', (event) => {
         const toggle = event.target && event.target.closest ? event.target.closest('[data-bulk-action-toggle="true"]') : null;
         if (toggle && (selectedCount() === 0 || isBulkSubmitting)) {
           event.preventDefault();
+          updateBulkState();
+          return;
+        }
+
+        const selectPageButton = event.target && event.target.closest ? event.target.closest('[data-bulk-select-page="true"]') : null;
+        if (selectPageButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isBulkSubmitting) return;
+          pageIds().forEach((id) => selectedIdsSet.add(id));
+          saveStoredSelection(selectedIdsSet);
+          updateBulkState();
+          return;
+        }
+
+        const clearButton = event.target && event.target.closest ? event.target.closest('[data-bulk-clear-selection="true"]') : null;
+        if (clearButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isBulkSubmitting) return;
+          selectedIdsSet = new Set();
+          saveStoredSelection(selectedIdsSet);
+          allSelectionCheckboxes().forEach((checkbox) => {
+            checkbox.checked = false;
+            checkbox.indeterminate = false;
+          });
+          syncStoredInputs();
           updateBulkState();
           return;
         }
@@ -850,18 +1008,22 @@ function BulkSelectionScript({ formId }: { formId: string }) {
             updateBulkState();
             return;
           }
+          syncStoredInputs();
           setBulkStatus(submitButton.getAttribute('data-bulk-status') || '');
           rememberScrollPosition();
           setSubmitting(submitButton);
         }
-      });
+      }, true);
 
       document.addEventListener('submit', (event) => {
         if (event.target && event.target.id === formId) {
+          syncStoredInputs();
           rememberScrollPosition();
         }
       });
 
+      syncPageCheckboxesFromStoredSelection();
+      syncStoredInputs();
       updateBulkState();
     })();
   `.replace('${FORM_ID_PLACEHOLDER}', formId)
@@ -1215,21 +1377,26 @@ export default async function InventoryPage({
         <ScrollRestoreScript scrollY={scrollY} />
 
         {items.length > 0 ? (
-          <div className="mt-4">
-            <BulkActionsPanel formId={BULK_INVENTORY_FORM_ID} />
-          </div>
+          <>
+            <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3 text-xs text-zinc-500">
+              Bulk actions are pinned near the top of the screen while you work through inventory rows.
+            </div>
+            <BulkActionsPanel formId={BULK_INVENTORY_FORM_ID} pageItemCount={items.length} />
+          </>
         ) : null}
 
-        <div className="mt-4 app-table-wrap">
+        <div className="mt-4 app-table-wrap pb-40">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
                   <th className="app-th w-16">
-                    <SelectAllCheckbox
-                      formId={BULK_INVENTORY_FORM_ID}
-                      fieldName="selected_inventory_ids"
-                      label="Select all inventory items"
+                    <input
+                      form={BULK_INVENTORY_FORM_ID}
+                      type="checkbox"
+                      data-bulk-page-checkbox="true"
+                      aria-label="Select all inventory items on this page"
+                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                     />
                   </th>
                   <th className="app-th min-w-[260px]">
@@ -1333,6 +1500,7 @@ export default async function InventoryPage({
                           type="checkbox"
                           name="selected_inventory_ids"
                           value={item.id}
+                          data-inventory-bulk-row-checkbox="true"
                           aria-label={`Select ${itemName}`}
                           className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                         />
