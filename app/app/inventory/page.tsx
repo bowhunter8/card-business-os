@@ -54,6 +54,8 @@ type BulkStatus = 'available' | 'listed' | 'personal' | 'junk'
 const DEFAULT_LIMIT = 10
 const LIMIT_OPTIONS = [10, 25, 100] as const
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
+const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
+const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -211,6 +213,7 @@ function buildInventoryStatusHref({
   limit,
   statusKey,
   statusValue,
+  scrollY,
 }: {
   q?: string
   sort: SortKey
@@ -219,6 +222,7 @@ function buildInventoryStatusHref({
   limit: number
   statusKey: string
   statusValue: string
+  scrollY?: string
 }) {
   const params = new URLSearchParams()
 
@@ -231,6 +235,10 @@ function buildInventoryStatusHref({
   params.set('page', String(page))
   params.set('limit', String(limit))
   params.set(statusKey, statusValue)
+
+  if (scrollY) {
+    params.set('scroll_y', scrollY)
+  }
 
   return `/app/inventory?${params.toString()}#inventory-status`
 }
@@ -248,6 +256,7 @@ function readInventoryListFormState(formData: FormData) {
   const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
   const page = Number(String(formData.get('page') ?? '1'))
   const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+  const scrollY = String(formData.get('scroll_y') ?? '').trim()
 
   const safeSort: SortKey = [
     'created_at',
@@ -275,6 +284,7 @@ function readInventoryListFormState(formData: FormData) {
     safeDir,
     safePage,
     safeLimit,
+    scrollY,
   }
 }
 
@@ -282,7 +292,7 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
   'use server'
 
   const itemIds = readFormIds(formData, 'selected_inventory_ids')
-  const { q, safeSort, safeDir, safePage, safeLimit } = readInventoryListFormState(formData)
+  const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
 
   if (itemIds.length === 0) {
     redirect(
@@ -294,6 +304,7 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
         limit: safeLimit,
         statusKey: 'delete_error',
         statusValue: 'Select at least one inventory item to delete.',
+        scrollY,
       })
     )
   }
@@ -324,6 +335,7 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
         limit: safeLimit,
         statusKey: 'delete_error',
         statusValue: error.message,
+        scrollY,
       })
     )
   }
@@ -341,18 +353,34 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
       limit: safeLimit,
       statusKey: 'deleted_count',
       statusValue: `${itemIds.length} inventory item(s)`,
+      scrollY,
     })
   )
 }
 
-async function updateInventoryStatusForBulkSelection(
-  formData: FormData,
-  requestedStatus: BulkStatus
-) {
+async function bulkUpdateInventoryStatusAction(formData: FormData) {
   'use server'
 
   const itemIds = readFormIds(formData, 'selected_inventory_ids')
-  const { q, safeSort, safeDir, safePage, safeLimit } = readInventoryListFormState(formData)
+  const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
+  const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
+
+  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
+
+  if (!allowedStatuses.includes(requestedStatus)) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Choose a valid bulk status.',
+        scrollY,
+      })
+    )
+  }
 
   if (itemIds.length === 0) {
     redirect(
@@ -364,6 +392,7 @@ async function updateInventoryStatusForBulkSelection(
         limit: safeLimit,
         statusKey: 'status_error',
         statusValue: `Select at least one inventory item to mark ${bulkStatusLabel(requestedStatus)}.`,
+        scrollY,
       })
     )
   }
@@ -395,6 +424,7 @@ async function updateInventoryStatusForBulkSelection(
         limit: safeLimit,
         statusKey: 'status_error',
         statusValue: error.message,
+        scrollY,
       })
     )
   }
@@ -413,28 +443,9 @@ async function updateInventoryStatusForBulkSelection(
       limit: safeLimit,
       statusKey: 'status_updated',
       statusValue: `${itemIds.length} item(s) marked ${bulkStatusLabel(requestedStatus)}`,
+      scrollY,
     })
   )
-}
-
-async function bulkMarkAvailableInventoryItemsAction(formData: FormData) {
-  'use server'
-  await updateInventoryStatusForBulkSelection(formData, 'available')
-}
-
-async function bulkMarkListedInventoryItemsAction(formData: FormData) {
-  'use server'
-  await updateInventoryStatusForBulkSelection(formData, 'listed')
-}
-
-async function bulkMovePersonalInventoryItemsAction(formData: FormData) {
-  'use server'
-  await updateInventoryStatusForBulkSelection(formData, 'personal')
-}
-
-async function bulkMarkJunkInventoryItemsAction(formData: FormData) {
-  'use server'
-  await updateInventoryStatusForBulkSelection(formData, 'junk')
 }
 
 function getFilterHref(
@@ -537,18 +548,21 @@ function SummaryCard({
 
 function BulkStatusConfirmControl({
   formId,
+  status,
   label,
   helpText,
-  action,
 }: {
   formId: string
+  status: BulkStatus
   label: string
   helpText: string
-  action: (formData: FormData) => Promise<void>
 }) {
   return (
     <details className="group">
-      <summary className="app-button cursor-pointer list-none whitespace-nowrap">
+      <summary
+        data-bulk-action-toggle="true"
+        className="app-button cursor-pointer list-none whitespace-nowrap"
+      >
         {label}
       </summary>
 
@@ -560,7 +574,10 @@ function BulkStatusConfirmControl({
           <button
             type="submit"
             form={formId}
-            formAction={action}
+            name="bulk_status"
+            value={status}
+            formAction={bulkUpdateInventoryStatusAction}
+            data-bulk-submit="true"
             className="app-button-primary whitespace-nowrap"
           >
             Yes, {label}
@@ -576,7 +593,10 @@ function BulkStatusConfirmControl({
 function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   return (
     <details className="group">
-      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+      <summary
+        data-bulk-action-toggle="true"
+        className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40"
+      >
         Delete Selected
       </summary>
 
@@ -591,6 +611,7 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
             type="submit"
             form={formId}
             formAction={bulkDeleteInventoryItemsAction}
+            data-bulk-submit="true"
             className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
           >
             Yes, Delete Selected
@@ -612,38 +633,145 @@ function BulkActionsPanel({ formId }: { formId: string }) {
           <div className="mt-0.5 text-xs text-zinc-500">
             Check inventory rows, then update their status or delete the selected rows.
           </div>
+          <div
+            id={BULK_SELECTION_COUNT_ID}
+            data-bulk-selected-count="true"
+            className="mt-2 inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+          >
+            0 selected
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <BulkStatusConfirmControl
             formId={formId}
+            status="available"
             label="Mark For Sale"
             helpText="This will mark the selected inventory items as For Sale / Available."
-            action={bulkMarkAvailableInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
+            status="listed"
             label="Mark Listed"
             helpText="This will mark the selected inventory items as Listed."
-            action={bulkMarkListedInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
+            status="personal"
             label="Move to Personal"
             helpText="This will move the selected inventory items to Personal Collection status."
-            action={bulkMovePersonalInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
+            status="junk"
             label="Mark Junk"
             helpText="This will mark the selected inventory items as Junk."
-            action={bulkMarkJunkInventoryItemsAction}
           />
           <BulkDeleteConfirmControl formId={formId} />
         </div>
       </div>
     </div>
   )
+}
+
+function BulkSelectionScript({ formId }: { formId: string }) {
+  const script = `
+    (() => {
+      const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
+      const fieldName = 'selected_inventory_ids';
+      const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
+      const checkboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
+      const toggles = () => Array.from(document.querySelectorAll('[data-bulk-action-toggle="true"]'));
+      const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
+      const scrollInputs = () => Array.from(document.querySelectorAll('input[name="scroll_y"][form="' + formId + '"], form#' + formId + ' input[name="scroll_y"]'));
+
+      function setDisabled(node, disabled) {
+        node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        node.classList.toggle('pointer-events-none', disabled);
+        node.classList.toggle('opacity-50', disabled);
+        if ('disabled' in node) node.disabled = disabled;
+      }
+
+      function selectedCount() {
+        return checkboxes().filter((checkbox) => checkbox.checked).length;
+      }
+
+      function updateBulkState() {
+        const count = selectedCount();
+        const hasSelection = count > 0;
+        countNodes().forEach((node) => {
+          node.textContent = count === 1 ? '1 selected' : count + ' selected';
+          node.classList.toggle('text-zinc-400', !hasSelection);
+          node.classList.toggle('text-zinc-100', hasSelection);
+          node.classList.toggle('border-zinc-800', !hasSelection);
+          node.classList.toggle('border-emerald-900/60', hasSelection);
+          node.classList.toggle('bg-zinc-950', !hasSelection);
+          node.classList.toggle('bg-emerald-950/20', hasSelection);
+        });
+        toggles().forEach((node) => setDisabled(node, !hasSelection));
+        submitButtons().forEach((node) => setDisabled(node, !hasSelection));
+      }
+
+      function rememberScrollPosition() {
+        scrollInputs().forEach((input) => {
+          input.value = String(Math.max(0, Math.round(window.scrollY || 0)));
+        });
+      }
+
+      document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"]')) {
+          updateBulkState();
+        }
+      });
+
+      document.addEventListener('click', (event) => {
+        const toggle = event.target && event.target.closest ? event.target.closest('[data-bulk-action-toggle="true"]') : null;
+        if (toggle && selectedCount() === 0) {
+          event.preventDefault();
+          updateBulkState();
+          return;
+        }
+
+        const submitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-submit="true"]') : null;
+        if (submitButton) {
+          if (selectedCount() === 0) {
+            event.preventDefault();
+            updateBulkState();
+            return;
+          }
+          rememberScrollPosition();
+        }
+      });
+
+      document.addEventListener('submit', (event) => {
+        if (event.target && event.target.id === formId) {
+          rememberScrollPosition();
+        }
+      });
+
+      updateBulkState();
+    })();
+  `.replace('${FORM_ID_PLACEHOLDER}', formId)
+
+  return <script dangerouslySetInnerHTML={{ __html: script }} />
+}
+
+function ScrollRestoreScript({ scrollY }: { scrollY: string }) {
+  const numericScrollY = Number(scrollY)
+
+  if (!Number.isFinite(numericScrollY) || numericScrollY < 1) {
+    return null
+  }
+
+  const script = `
+    (() => {
+      const y = ${Math.round(numericScrollY)};
+      requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
+    })();
+  `
+
+  return <script id={BULK_SCROLL_RESTORE_ID} dangerouslySetInnerHTML={{ __html: script }} />
 }
 
 export default async function InventoryPage({
@@ -660,6 +788,7 @@ export default async function InventoryPage({
     delete_error?: string
     status_updated?: string
     status_error?: string
+    scroll_y?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -671,6 +800,7 @@ export default async function InventoryPage({
   const deleteError = String(params?.delete_error ?? '').trim()
   const statusUpdated = String(params?.status_updated ?? '').trim()
   const statusError = String(params?.status_error ?? '').trim()
+  const scrollY = String(params?.scroll_y ?? '').trim()
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
 
@@ -965,7 +1095,11 @@ export default async function InventoryPage({
           <input type="hidden" name="dir" value={sortDir} />
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="scroll_y" value="" />
         </form>
+
+        <BulkSelectionScript formId={BULK_INVENTORY_FORM_ID} />
+        <ScrollRestoreScript scrollY={scrollY} />
 
         {items.length > 0 ? (
           <div className="mt-4">
