@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import CancelDetailsButton from '../search/CancelDetailsButton'
+import SelectAllCheckbox from '../search/SelectAllCheckbox'
 
 type WhatnotOrderRow = {
   id: string
@@ -179,6 +181,16 @@ function buildOrdersStatusHref({
   return `/app/whatnot-orders?${params.toString()}#orders-status`
 }
 
+function buildCombineSelectedHref(orderIds: string[]) {
+  const params = new URLSearchParams()
+
+  for (const orderId of orderIds) {
+    params.append('order_ids', orderId)
+  }
+
+  return `/app/breaks/new?${params.toString()}`
+}
+
 function readFormIds(formData: FormData, fieldName: string) {
   return formData
     .getAll(fieldName)
@@ -340,37 +352,167 @@ async function bulkDeleteOrdersAction(formData: FormData) {
   )
 }
 
+async function combineSelectedOrdersAction(formData: FormData) {
+  'use server'
+
+  const orderIds = readFormIds(formData, 'selected_order_ids')
+  const { q, safePage, safeLimit } = readOrdersListFormState(formData)
+
+  if (orderIds.length === 0) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'Select at least one unassigned order to combine into a break.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data, error } = await supabase
+    .from('whatnot_orders')
+    .select('id, break_id')
+    .eq('user_id', user.id)
+    .in('id', orderIds)
+
+  if (error) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: error.message,
+      })
+    )
+  }
+
+  const rows = (data ?? []) as { id: string; break_id: string | null }[]
+  const foundIds = new Set(rows.map((row) => row.id))
+  const missingCount = orderIds.filter((orderId) => !foundIds.has(orderId)).length
+  const linkedCount = rows.filter((row) => row.break_id).length
+  const unassignedIds = rows.filter((row) => !row.break_id).map((row) => row.id)
+
+  if (missingCount > 0 || linkedCount > 0 || unassignedIds.length === 0) {
+    redirect(
+      buildOrdersStatusHref({
+        q,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'Only unassigned orders can be combined into a new break.',
+      })
+    )
+  }
+
+  redirect(buildCombineSelectedHref(unassignedIds))
+}
+
 function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   return (
-    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <details className="group">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete Selected
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete the selected unassigned orders only. Orders linked to breaks must be handled by rolling back or unlinking the break first.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            formAction={bulkDeleteOrdersAction}
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete Selected
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function CombineSelectedOrdersControl({ formId }: { formId: string }) {
+  return (
+    <details className="group">
+      <summary className="app-button-primary cursor-pointer list-none whitespace-nowrap">
+        Combine Selected
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-zinc-200">Create break from selected orders?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will open the new break flow with the selected unassigned orders attached. Linked orders are protected.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            formAction={combineSelectedOrdersAction}
+            className="app-button-primary whitespace-nowrap"
+          >
+            Yes, Combine Selected
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function BulkActionsPanel({
+  formId,
+  qRaw,
+  page,
+  limit,
+}: {
+  formId: string
+  qRaw: string
+  page: number
+  limit: PageLimit
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-3 shadow-2xl shadow-black/30 backdrop-blur">
+      <div className="flex flex-col gap-3">
         <div>
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
-            Check unassigned order rows you want to remove, then confirm below. Linked orders are protected.
+            Select unassigned orders, then combine them into a break or delete them. Linked orders are protected.
           </div>
         </div>
 
-        <details className="group">
-          <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
-            Delete Selected
-          </summary>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="app-chip app-chip-idle whitespace-nowrap">Select rows below</span>
 
-          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
-            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
-            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-              This will delete the selected unassigned orders only. Orders linked to breaks must be handled by rolling back or unlinking the break first.
-            </div>
+          <Link
+            href={buildOrdersHref({ q: qRaw, page, limit })}
+            className="app-button whitespace-nowrap"
+          >
+            Clear Selection
+          </Link>
 
-            <button
-              type="submit"
-              form={formId}
-              className="app-button mt-3 whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
-            >
-              Yes, Delete Selected
-            </button>
-          </div>
-        </details>
+          <CombineSelectedOrdersControl formId={formId} />
+          <BulkDeleteConfirmControl formId={formId} />
+        </div>
       </div>
     </div>
   )
@@ -424,6 +566,8 @@ function DeleteOrderConfirmControl({
           >
             Yes, Delete
           </button>
+
+          <CancelDetailsButton />
         </form>
       </div>
     </details>
@@ -575,7 +719,7 @@ export default async function WhatnotOrdersPage({
   const hasNextPage = filteredOrders.length === limit
 
   return (
-    <div className="app-page-wide">
+    <div className="app-page-wide space-y-3">
       <div className="app-page-header">
         <div>
           <h1 className="app-title">{pageTitle}</h1>
@@ -671,10 +815,10 @@ export default async function WhatnotOrdersPage({
         </div>
       </div>
 
-      <div className="app-section p-4 mt-3">
+      <div className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-xs text-zinc-500">
-            Page {page} • Orders and suggested groups are sorted by most recently imported first.
+            Page {page} • Orders are sorted by most recently imported first.
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -691,51 +835,7 @@ export default async function WhatnotOrdersPage({
         </div>
       </div>
 
-      {suggestedGroups.length > 0 ? (
-        <div className="app-section">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Suggested Groups</h2>
-              <p className="mt-0.5 text-sm text-zinc-400">
-                Auto-grouped by seller and date. These are cached suggestions.
-              </p>
-            </div>
-
-            <div className="text-xs text-zinc-500">
-              Showing groups with 2+ unassigned orders
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3">
-            {suggestedGroups.map((group) => (
-              <div key={group.id} className="app-card-tight">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div className="min-w-0">
-                    <div className="break-words text-lg font-semibold leading-snug">
-                      {group.seller} — {group.date_label}
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-400">
-                      {group.order_count} orders suggested for one break
-                    </div>
-                    <div className="mt-0.5 text-sm text-zinc-500">
-                      Total paid {money(group.total_paid)}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
-                    <Link
-                      href={`/app/search?q=${encodeURIComponent(group.seller)}`}
-                      className="app-button whitespace-nowrap"
-                    >
-                      Search Seller
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {void suggestedGroups}
 
       <div className="app-section">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -755,15 +855,20 @@ export default async function WhatnotOrdersPage({
           </div>
         </div>
 
-        <form id={BULK_ORDERS_FORM_ID} action={bulkDeleteOrdersAction} className="hidden">
+        <form id={BULK_ORDERS_FORM_ID} className="hidden">
           <input type="hidden" name="q" value={qRaw} />
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
         </form>
 
         {filteredOrders.length > 0 ? (
-          <div className="mt-4">
-            <BulkDeleteConfirmControl formId={BULK_ORDERS_FORM_ID} />
+          <div className="sticky top-16 z-30 mt-4">
+            <BulkActionsPanel
+              formId={BULK_ORDERS_FORM_ID}
+              qRaw={qRaw}
+              page={page}
+              limit={limit}
+            />
           </div>
         ) : null}
 
@@ -776,7 +881,13 @@ export default async function WhatnotOrdersPage({
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
-                  <th className="app-th w-16">Select</th>
+                  <th className="app-th w-16">
+                    <SelectAllCheckbox
+                      formId={BULK_ORDERS_FORM_ID}
+                      fieldName="selected_order_ids"
+                      label="Select all unassigned orders"
+                    />
+                  </th>
                   <th className="app-th">Order #</th>
                   <th className="app-th">Date Added</th>
                   <th className="app-th">Order Date</th>
@@ -784,7 +895,7 @@ export default async function WhatnotOrdersPage({
                   <th className="app-th min-w-[240px]">Description</th>
                   <th className="app-th">Status</th>
                   <th className="app-th text-right">Price</th>
-                  <th className="app-th min-w-[220px]">Actions</th>
+                  <th className="app-th min-w-[170px]">Quick</th>
                 </tr>
               </thead>
               <tbody>
@@ -818,7 +929,7 @@ export default async function WhatnotOrdersPage({
                       <td className="app-td whitespace-nowrap">
                         <Link
                           href={buildFocusHref(order)}
-                          className="hover:text-zinc-100"
+                          className="font-medium hover:text-zinc-100"
                         >
                           {orderNumber}
                         </Link>
@@ -831,9 +942,13 @@ export default async function WhatnotOrdersPage({
                         </div>
                       </td>
                       <td className="app-td">
-                        <div className="min-w-[220px] max-w-[520px] break-words" title={productName}>
+                        <Link
+                          href={buildFocusHref(order)}
+                          className="block min-w-[220px] max-w-[520px] break-words hover:text-zinc-100"
+                          title={productName}
+                        >
                           {productName}
-                        </div>
+                        </Link>
                       </td>
                       <td className="app-td whitespace-nowrap">
                         {isLinked ? (
@@ -847,10 +962,6 @@ export default async function WhatnotOrdersPage({
                       </td>
                       <td className="app-td whitespace-nowrap">
                         <div className="flex items-center gap-1 whitespace-nowrap">
-                          <Link href={buildFocusHref(order)} className="app-button whitespace-nowrap">
-                            Open
-                          </Link>
-
                           {order.break_id ? (
                             <Link href={`/app/breaks/${order.break_id}`} className="app-button whitespace-nowrap">
                               Break
@@ -876,7 +987,7 @@ export default async function WhatnotOrdersPage({
         )}
       </div>
 
-      <div className="app-section p-4 mt-3">
+      <div className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-zinc-300">
             Showing page {page} with up to {limit} orders.

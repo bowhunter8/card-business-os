@@ -1,9 +1,9 @@
 import Link from 'next/link'
+import Script from 'next/script'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import CancelDetailsButton from '../search/CancelDetailsButton'
-import SelectAllCheckbox from '../search/SelectAllCheckbox'
 
 type BreakRow = {
   id: string
@@ -49,6 +49,8 @@ type PageLimit = 10 | 25 | 100
 const DEFAULT_LIMIT: PageLimit = 10
 const LIMIT_OPTIONS: PageLimit[] = [10, 25, 100]
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-page-form'
+const BULK_SELECTION_COUNT_ID = 'breaks-bulk-selection-count'
+const BULK_PENDING_STATE_ID = 'breaks-bulk-pending-state'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -459,44 +461,327 @@ function SummaryCard({
   )
 }
 
-function BulkDeleteConfirmControl({ formId }: { formId: string }) {
+function BulkDeleteConfirmControl({ formId, pageBreakCount }: { formId: string; pageBreakCount: number }) {
   return (
-    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
-      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <div className="sticky top-[4.75rem] z-40 mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
+      <div className="flex flex-col gap-2">
         <div>
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
-            Check the break rows you want to remove, then confirm below.
+            Check break rows, then delete the selected breaks.
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <div
+              id={BULK_SELECTION_COUNT_ID}
+              data-bulk-selected-count="true"
+              data-bulk-page-count={pageBreakCount}
+              className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+            >
+              0 of {pageBreakCount} selected
+            </div>
+            <button
+              type="button"
+              data-bulk-select-page="true"
+              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+            >
+              Select all on page
+            </button>
+            <button
+              type="button"
+              data-bulk-clear-selection="true"
+              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+            >
+              Clear selection
+            </button>
+            <div
+              id={BULK_PENDING_STATE_ID}
+              data-bulk-pending-state="true"
+              className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
+              aria-live="polite"
+            >
+              Deleting selected breaks…
+            </div>
           </div>
         </div>
 
-        <details className="group">
-          <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
-            Delete Selected
-          </summary>
+        <div className="flex flex-wrap items-center gap-2">
+          <details className="group">
+            <summary
+              data-bulk-action-toggle="true"
+              className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40"
+            >
+              Delete Selected
+            </summary>
 
-          <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
-            <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
-            <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-              This will delete the selected breaks. This cannot be undone from this screen.
+            <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+              <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                This will delete the selected breaks. This cannot be undone from this screen.
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  data-bulk-submit="true"
+                  data-bulk-delete="true"
+                  data-bulk-label="Delete Selected"
+                  className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+                >
+                  Yes, Delete Selected
+                </button>
+
+                <CancelDetailsButton />
+              </div>
             </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="submit"
-                form={formId}
-                className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
-              >
-                Yes, Delete Selected
-              </button>
-
-              <CancelDetailsButton />
-            </div>
-          </div>
-        </details>
+          </details>
+        </div>
       </div>
     </div>
   )
+}
+
+function BulkSelectionScript({ formId }: { formId: string }) {
+  const script = `
+    (() => {
+      const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
+      const fieldName = 'selected_break_ids';
+      const storageKey = 'card_business_os_breaks_bulk_selection_v1';
+      let isBulkSubmitting = false;
+
+      const form = () => document.getElementById(formId);
+      const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
+      const pendingNodes = () => Array.from(document.querySelectorAll('[data-bulk-pending-state="true"]'));
+      const rowCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-break-bulk-row-checkbox="true"]'));
+      const allSelectionCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
+      const pageToggleCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]'));
+      const toggles = () => Array.from(document.querySelectorAll('[data-bulk-action-toggle="true"]'));
+      const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
+      const selectPageButtons = () => Array.from(document.querySelectorAll('[data-bulk-select-page="true"]'));
+      const clearButtons = () => Array.from(document.querySelectorAll('[data-bulk-clear-selection="true"]'));
+
+      function loadStoredSelection() {
+        try {
+          const raw = window.sessionStorage.getItem(storageKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (!Array.isArray(parsed)) return new Set();
+          return new Set(parsed.map((value) => String(value || '').trim()).filter(Boolean));
+        } catch (_error) {
+          return new Set();
+        }
+      }
+
+      function saveStoredSelection(selection) {
+        try {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(Array.from(selection)));
+        } catch (_error) {}
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('deleted_count')) {
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch (_error) {}
+      }
+
+      let selectedIdsSet = loadStoredSelection();
+
+      function setDisabled(node, disabled) {
+        node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        node.classList.toggle('pointer-events-none', disabled);
+        node.classList.toggle('opacity-50', disabled);
+        if ('disabled' in node) node.disabled = disabled;
+      }
+
+      function pageIds() {
+        return rowCheckboxes().map((checkbox) => checkbox.value).filter(Boolean);
+      }
+
+      function selectedCount() {
+        return selectedIdsSet.size;
+      }
+
+      function selectedIds() {
+        return Array.from(selectedIdsSet);
+      }
+
+      function syncStoredInputs() {
+        const bulkForm = form();
+        if (!bulkForm) return;
+        bulkForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
+        selectedIds().forEach((id) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = fieldName;
+          input.value = id;
+          input.setAttribute('data-bulk-persisted-selection', 'true');
+          bulkForm.appendChild(input);
+        });
+      }
+
+      function syncPageCheckboxesFromStoredSelection() {
+        rowCheckboxes().forEach((checkbox) => {
+          checkbox.checked = selectedIdsSet.has(checkbox.value);
+        });
+      }
+
+      function syncStoredSelectionFromPageCheckbox(checkbox) {
+        const id = String(checkbox.value || '').trim();
+        if (!id) return;
+        if (checkbox.checked) selectedIdsSet.add(id);
+        else selectedIdsSet.delete(id);
+        saveStoredSelection(selectedIdsSet);
+        syncStoredInputs();
+      }
+
+      function updateBulkState() {
+        syncPageCheckboxesFromStoredSelection();
+        syncStoredInputs();
+        const currentPageIds = pageIds();
+        const totalOnPage = currentPageIds.length;
+        const selectedOnPage = currentPageIds.filter((id) => selectedIdsSet.has(id)).length;
+        const count = selectedCount();
+        const hasSelection = count > 0;
+        const allPageSelected = totalOnPage > 0 && selectedOnPage === totalOnPage;
+        countNodes().forEach((node) => {
+          node.textContent = count + ' selected' + (totalOnPage > 0 ? ' • ' + selectedOnPage + ' of ' + totalOnPage + ' on this page' : '');
+          node.classList.toggle('text-zinc-400', !hasSelection);
+          node.classList.toggle('text-zinc-100', hasSelection);
+          node.classList.toggle('border-zinc-800', !hasSelection);
+          node.classList.toggle('border-emerald-900/60', hasSelection);
+          node.classList.toggle('bg-zinc-950', !hasSelection);
+          node.classList.toggle('bg-emerald-950/20', hasSelection);
+        });
+        rowCheckboxes().forEach((checkbox) => {
+          const row = checkbox.closest('[data-break-row-id]');
+          if (row) row.classList.toggle('bg-zinc-900/40', selectedIdsSet.has(checkbox.value) && !isBulkSubmitting);
+        });
+        pageToggleCheckboxes().forEach((checkbox) => {
+          checkbox.checked = allPageSelected;
+          checkbox.indeterminate = selectedOnPage > 0 && !allPageSelected;
+          checkbox.setAttribute('aria-checked', checkbox.indeterminate ? 'mixed' : String(allPageSelected));
+          setDisabled(checkbox, totalOnPage === 0 || isBulkSubmitting);
+        });
+        toggles().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+        submitButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+        selectPageButtons().forEach((node) => {
+          setDisabled(node, totalOnPage === 0 || allPageSelected || isBulkSubmitting);
+          node.textContent = allPageSelected ? 'All rows on this page selected' : 'Select all on page';
+        });
+        clearButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+      }
+
+      function closeOpenConfirmations() {
+        document.querySelectorAll('details[open]').forEach((details) => details.removeAttribute('open'));
+      }
+
+      function showPendingMessage(message) {
+        pendingNodes().forEach((node) => {
+          node.textContent = message;
+          node.classList.remove('hidden');
+        });
+      }
+
+      function applyInstantDeleteState(ids) {
+        ids.forEach((id) => {
+          const row = document.querySelector('[data-break-row-id="' + CSS.escape(id) + '"]');
+          if (!row) return;
+          row.classList.add('transition', 'duration-150', 'opacity-40');
+          row.style.filter = 'grayscale(1)';
+          row.querySelectorAll('a, button, input').forEach((node) => setDisabled(node, true));
+          const titleNode = row.querySelector('[data-break-primary-title="true"]');
+          if (titleNode && !titleNode.querySelector('[data-bulk-row-pending="true"]')) {
+            const badge = document.createElement('span');
+            badge.setAttribute('data-bulk-row-pending', 'true');
+            badge.className = 'ml-2 inline-flex rounded-full border border-red-900/60 bg-red-950/30 px-2 py-0.5 text-[11px] font-medium text-red-200';
+            badge.textContent = 'Deleting…';
+            titleNode.appendChild(badge);
+          }
+        });
+      }
+
+      function setSubmitting(button) {
+        isBulkSubmitting = true;
+        const count = selectedCount();
+        const ids = selectedIds();
+        const label = button.getAttribute('data-bulk-label') || 'Delete Selected';
+        button.setAttribute('data-original-label', button.textContent || label);
+        button.textContent = 'Deleting…';
+        showPendingMessage('Deleting ' + count + ' selected break(s)…');
+        closeOpenConfirmations();
+        applyInstantDeleteState(ids);
+        window.setTimeout(() => updateBulkState(), 0);
+      }
+
+      document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (target && target.matches && target.matches('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]')) {
+          const shouldSelectPage = Boolean(target.checked);
+          pageIds().forEach((id) => { if (shouldSelectPage) selectedIdsSet.add(id); else selectedIdsSet.delete(id); });
+          saveStoredSelection(selectedIdsSet);
+          syncStoredInputs();
+          updateBulkState();
+          return;
+        }
+        if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-break-bulk-row-checkbox="true"]')) {
+          syncStoredSelectionFromPageCheckbox(target);
+          updateBulkState();
+          return;
+        }
+      }, true);
+
+      document.addEventListener('click', (event) => {
+        const toggle = event.target && event.target.closest ? event.target.closest('[data-bulk-action-toggle="true"]') : null;
+        if (toggle && (selectedCount() === 0 || isBulkSubmitting)) {
+          event.preventDefault();
+          updateBulkState();
+          return;
+        }
+        const selectPageButton = event.target && event.target.closest ? event.target.closest('[data-bulk-select-page="true"]') : null;
+        if (selectPageButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isBulkSubmitting) return;
+          pageIds().forEach((id) => selectedIdsSet.add(id));
+          saveStoredSelection(selectedIdsSet);
+          updateBulkState();
+          return;
+        }
+        const clearButton = event.target && event.target.closest ? event.target.closest('[data-bulk-clear-selection="true"]') : null;
+        if (clearButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isBulkSubmitting) return;
+          selectedIdsSet = new Set();
+          saveStoredSelection(selectedIdsSet);
+          allSelectionCheckboxes().forEach((checkbox) => { checkbox.checked = false; checkbox.indeterminate = false; });
+          syncStoredInputs();
+          updateBulkState();
+          return;
+        }
+        const submitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-submit="true"]') : null;
+        if (submitButton) {
+          if (selectedCount() === 0 || isBulkSubmitting) {
+            event.preventDefault();
+            updateBulkState();
+            return;
+          }
+          syncStoredInputs();
+          setSubmitting(submitButton);
+        }
+      }, true);
+
+      document.addEventListener('submit', (event) => {
+        if (event.target && event.target.id === formId) syncStoredInputs();
+      });
+
+      syncPageCheckboxesFromStoredSelection();
+      syncStoredInputs();
+      updateBulkState();
+    })();
+  `.replace('${FORM_ID_PLACEHOLDER}', formId)
+
+  return <Script id="breaks-bulk-selection-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
 }
 
 function DeleteBreakConfirmControl({
@@ -823,23 +1108,26 @@ export default async function BreaksPage({
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
         </form>
+        <BulkSelectionScript formId={BULK_BREAKS_FORM_ID} />
 
         {breaks.length > 0 ? (
-          <div className="mt-4">
-            <BulkDeleteConfirmControl formId={BULK_BREAKS_FORM_ID} />
+          <div className="mt-3">
+            <BulkDeleteConfirmControl formId={BULK_BREAKS_FORM_ID} pageBreakCount={breaks.length} />
           </div>
         ) : null}
 
-        <div className="mt-4 app-table-wrap">
+        <div className="mt-3 app-table-wrap">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
                   <th className="app-th w-16">
-                    <SelectAllCheckbox
-                      formId={BULK_BREAKS_FORM_ID}
-                      fieldName="selected_break_ids"
-                      label="Select all breaks"
+                    <input
+                      form={BULK_BREAKS_FORM_ID}
+                      type="checkbox"
+                      aria-label="Select all breaks on this page"
+                      data-bulk-page-checkbox="true"
+                      className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                     />
                   </th>
                   <th className="app-th">
@@ -932,7 +1220,7 @@ export default async function BreaksPage({
                       limit={limit}
                     />
                   </th>
-                  <th className="app-th min-w-[260px]">Actions</th>
+                  <th className="app-th min-w-[150px]">Quick</th>
                 </tr>
               </thead>
               <tbody>
@@ -942,7 +1230,7 @@ export default async function BreaksPage({
                   const orderLabel = cleanText(item.order_number || '—')
 
                   return (
-                    <tr key={item.id} className="app-tr align-top">
+                    <tr key={item.id} data-break-row-id={item.id} className="app-tr align-top">
                       <td className="app-td">
                         <input
                           form={BULK_BREAKS_FORM_ID}
@@ -950,6 +1238,7 @@ export default async function BreaksPage({
                           name="selected_break_ids"
                           value={item.id}
                           aria-label={`Select ${breakLabel}`}
+                          data-break-bulk-row-checkbox="true"
                           className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                         />
                       </td>
@@ -957,9 +1246,14 @@ export default async function BreaksPage({
                       <td className="app-td whitespace-nowrap">{formatDate(item.break_date)}</td>
 
                       <td className="app-td">
-                        <div className="min-w-[200px] max-w-[420px] break-words" title={breakLabel}>
+                        <Link
+                          href={`/app/breaks/${item.id}`}
+                          data-break-primary-title="true"
+                          className="block min-w-[200px] max-w-[420px] break-words font-medium text-zinc-100 hover:text-white hover:underline"
+                          title={breakLabel}
+                        >
                           {breakLabel}
-                        </div>
+                        </Link>
                       </td>
 
                       <td className="app-td">
@@ -985,19 +1279,10 @@ export default async function BreaksPage({
 
                       <td className="app-td whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          <Link href={`/app/breaks/${item.id}`} className="app-button">
-                            Details
-                          </Link>
-
-                          {!item.reversed_at ? (
-                            <>
-                              <Link href={`/app/breaks/${item.id}/edit`} className="app-button">
-                                Edit
-                              </Link>
-                              <Link href={`/app/breaks/${item.id}/add-cards`} className="app-button">
-                                Add
-                              </Link>
-                            </>
+                          {!item.reversed_at && item.remaining > 0 ? (
+                            <Link href={`/app/breaks/${item.id}/add-cards`} className="app-button">
+                              Add
+                            </Link>
                           ) : null}
 
                           <DeleteBreakConfirmControl
