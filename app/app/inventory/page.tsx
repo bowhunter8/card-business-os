@@ -57,6 +57,7 @@ const LIMIT_OPTIONS = [10, 25, 100] as const
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
 const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
 const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
+const BULK_PENDING_STATE_ID = 'bulk-inventory-pending-state'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -578,6 +579,7 @@ function BulkStatusConfirmControl({
             formAction={bulkUpdateInventoryStatusAction}
             data-bulk-submit="true"
             data-bulk-status={status}
+            data-bulk-label={label}
             className="app-button-primary whitespace-nowrap"
           >
             Yes, {label}
@@ -612,6 +614,8 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
             form={formId}
             formAction={bulkDeleteInventoryItemsAction}
             data-bulk-submit="true"
+            data-bulk-delete="true"
+            data-bulk-label="Delete Selected"
             className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
           >
             Yes, Delete Selected
@@ -633,12 +637,22 @@ function BulkActionsPanel({ formId }: { formId: string }) {
           <div className="mt-0.5 text-xs text-zinc-500">
             Check inventory rows, then update their status or delete the selected rows.
           </div>
-          <div
-            id={BULK_SELECTION_COUNT_ID}
-            data-bulk-selected-count="true"
-            className="mt-2 inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
-          >
-            0 selected
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div
+              id={BULK_SELECTION_COUNT_ID}
+              data-bulk-selected-count="true"
+              className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+            >
+              0 selected
+            </div>
+            <div
+              id={BULK_PENDING_STATE_ID}
+              data-bulk-pending-state="true"
+              className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
+              aria-live="polite"
+            >
+              Updating selected items…
+            </div>
           </div>
         </div>
 
@@ -679,7 +693,10 @@ function BulkSelectionScript({ formId }: { formId: string }) {
     (() => {
       const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
       const fieldName = 'selected_inventory_ids';
+      let isBulkSubmitting = false;
+
       const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
+      const pendingNodes = () => Array.from(document.querySelectorAll('[data-bulk-pending-state="true"]'));
       const checkboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
       const toggles = () => Array.from(document.querySelectorAll('[data-bulk-action-toggle="true"]'));
       const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
@@ -693,8 +710,16 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         if ('disabled' in node) node.disabled = disabled;
       }
 
+      function selectedCheckboxes() {
+        return checkboxes().filter((checkbox) => checkbox.checked);
+      }
+
       function selectedCount() {
-        return checkboxes().filter((checkbox) => checkbox.checked).length;
+        return selectedCheckboxes().length;
+      }
+
+      function selectedIds() {
+        return selectedCheckboxes().map((checkbox) => checkbox.value).filter(Boolean);
       }
 
       function updateBulkState() {
@@ -709,8 +734,8 @@ function BulkSelectionScript({ formId }: { formId: string }) {
           node.classList.toggle('bg-zinc-950', !hasSelection);
           node.classList.toggle('bg-emerald-950/20', hasSelection);
         });
-        toggles().forEach((node) => setDisabled(node, !hasSelection));
-        submitButtons().forEach((node) => setDisabled(node, !hasSelection));
+        toggles().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+        submitButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
       }
 
       function rememberScrollPosition() {
@@ -725,6 +750,84 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         });
       }
 
+      function statusLabel(status) {
+        if (status === 'available') return 'For Sale';
+        if (status === 'listed') return 'Listed';
+        if (status === 'personal') return 'Personal';
+        if (status === 'junk') return 'Junk';
+        return 'Updated';
+      }
+
+      function statusPillClasses(status) {
+        if (status === 'personal') return 'app-badge app-badge-info';
+        if (status === 'junk') return 'app-badge app-badge-danger';
+        if (status === 'listed') return 'app-badge app-badge-warning';
+        return 'app-badge app-badge-success';
+      }
+
+      function closeOpenConfirmations() {
+        document.querySelectorAll('details[open]').forEach((details) => {
+          details.removeAttribute('open');
+        });
+      }
+
+      function showPendingMessage(message) {
+        pendingNodes().forEach((node) => {
+          node.textContent = message;
+          node.classList.remove('hidden');
+        });
+      }
+
+      function applyInstantRowState({ ids, status, isDelete }) {
+        ids.forEach((id) => {
+          const row = document.querySelector('[data-inventory-row-id="' + CSS.escape(id) + '"]');
+          if (!row) return;
+
+          row.classList.add('transition', 'duration-150');
+
+          if (isDelete) {
+            row.classList.add('opacity-40');
+            row.style.filter = 'grayscale(1)';
+            row.querySelectorAll('a, button, input').forEach((node) => setDisabled(node, true));
+            const titleNode = row.querySelector('[data-inventory-primary-title="true"]');
+            if (titleNode && !titleNode.querySelector('[data-bulk-row-pending="true"]')) {
+              const badge = document.createElement('span');
+              badge.setAttribute('data-bulk-row-pending', 'true');
+              badge.className = 'ml-2 inline-flex rounded-full border border-red-900/60 bg-red-950/30 px-2 py-0.5 text-[11px] font-medium text-red-200';
+              badge.textContent = 'Deleting…';
+              titleNode.appendChild(badge);
+            }
+            return;
+          }
+
+          row.classList.add('bg-emerald-950/10');
+          const statusCell = row.querySelector('[data-inventory-status-cell="true"]');
+          if (statusCell) {
+            statusCell.innerHTML = '';
+            const badge = document.createElement('span');
+            badge.className = statusPillClasses(status);
+            badge.textContent = statusLabel(status);
+            statusCell.appendChild(badge);
+          }
+        });
+      }
+
+      function setSubmitting(button) {
+        isBulkSubmitting = true;
+        const count = selectedCount();
+        const ids = selectedIds();
+        const status = button.getAttribute('data-bulk-status') || '';
+        const isDelete = button.getAttribute('data-bulk-delete') === 'true';
+        const label = button.getAttribute('data-bulk-label') || (isDelete ? 'Delete Selected' : 'Update Selected');
+
+        button.setAttribute('data-original-label', button.textContent || label);
+        button.textContent = isDelete ? 'Deleting…' : 'Updating…';
+        showPendingMessage(isDelete ? 'Deleting ' + count + ' selected item(s)…' : 'Updating ' + count + ' selected item(s)…');
+        closeOpenConfirmations();
+        applyInstantRowState({ ids, status, isDelete });
+        updateBulkState();
+      }
+
       document.addEventListener('change', (event) => {
         const target = event.target;
         if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"]')) {
@@ -734,7 +837,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
 
       document.addEventListener('click', (event) => {
         const toggle = event.target && event.target.closest ? event.target.closest('[data-bulk-action-toggle="true"]') : null;
-        if (toggle && selectedCount() === 0) {
+        if (toggle && (selectedCount() === 0 || isBulkSubmitting)) {
           event.preventDefault();
           updateBulkState();
           return;
@@ -742,13 +845,14 @@ function BulkSelectionScript({ formId }: { formId: string }) {
 
         const submitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-submit="true"]') : null;
         if (submitButton) {
-          if (selectedCount() === 0) {
+          if (selectedCount() === 0 || isBulkSubmitting) {
             event.preventDefault();
             updateBulkState();
             return;
           }
           setBulkStatus(submitButton.getAttribute('data-bulk-status') || '');
           rememberScrollPosition();
+          setSubmitting(submitButton);
         }
       });
 
@@ -1222,7 +1326,7 @@ export default async function InventoryPage({
                   const itemName = `${getPrimaryTitle(item)}${itemLine ? ` • ${itemLine}` : ''}`
 
                   return (
-                    <tr key={item.id} className="app-tr align-top">
+                    <tr key={item.id} data-inventory-row-id={item.id} className="app-tr align-top">
                       <td className="app-td">
                         <input
                           form={BULK_INVENTORY_FORM_ID}
@@ -1237,7 +1341,10 @@ export default async function InventoryPage({
                       <td className="app-td">
                         <div className="min-w-[240px] max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <div className="break-words font-medium leading-tight">
+                            <div
+                              data-inventory-primary-title="true"
+                              className="break-words font-medium leading-tight"
+                            >
                               {getPrimaryTitle(item)}
                             </div>
                             {isLotLike ? (
@@ -1253,7 +1360,7 @@ export default async function InventoryPage({
                         </div>
                       </td>
 
-                      <td className="app-td whitespace-nowrap">{renderStatusPill(item.status)}</td>
+                      <td data-inventory-status-cell="true" className="app-td whitespace-nowrap">{renderStatusPill(item.status)}</td>
                       <td className="app-td whitespace-nowrap">{item.quantity ?? 0}</td>
 
                       <td className="app-td whitespace-nowrap">
