@@ -412,6 +412,13 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
     redirect('/login')
   }
 
+  const { data: existingItems } = await supabase
+    .from('inventory_items')
+    .select('id, title, status, quantity, available_quantity, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
   const { error } = await supabase
     .from('inventory_items')
     .update({ status: requestedStatus })
@@ -432,6 +439,30 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
         scrollY,
       })
     )
+  }
+
+  const inventoryTransactionRows = (existingItems ?? [])
+    .filter((item) => item.status !== requestedStatus)
+    .map((item) => {
+      const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
+      const nextStatus = bulkStatusLabel(requestedStatus)
+      const itemTitle = item.title || 'Inventory item'
+
+      return {
+        user_id: user.id,
+        inventory_item_id: item.id,
+        transaction_type: 'status_change',
+        quantity: Number(item.available_quantity ?? item.quantity ?? 0),
+        notes:
+          requestedStatus === 'junk'
+            ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review.`
+            : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
+        created_at: new Date().toISOString(),
+      }
+    })
+
+  if (inventoryTransactionRows.length > 0) {
+    await supabase.from('inventory_transactions').insert(inventoryTransactionRows)
   }
 
   revalidatePath('/app/inventory')
@@ -633,14 +664,14 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
 
 function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemCount: number }) {
   return (
-    <div className="fixed left-4 right-4 top-[5.5rem] z-50 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur md:left-[calc(220px+1rem)]">
-      <div className="flex flex-col gap-3">
+    <div className="sticky top-[4.75rem] z-40 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
+      <div className="flex flex-col gap-2">
         <div>
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
             Check inventory rows, then update their status or delete the selected rows.
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <div
               id={BULK_SELECTION_COUNT_ID}
               data-bulk-selected-count="true"
@@ -697,7 +728,7 @@ function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemC
             formId={formId}
             status="junk"
             label="Mark Junk"
-            helpText="This will mark the selected inventory items as Junk."
+            helpText="This will mark the selected inventory items as Junk and add a status-change transaction note so the cost basis is preserved for future donation, disposal, or write-off review."
           />
           <BulkDeleteConfirmControl formId={formId} />
         </div>
@@ -1378,14 +1409,11 @@ export default async function InventoryPage({
 
         {items.length > 0 ? (
           <>
-            <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3 text-xs text-zinc-500">
-              Bulk actions are pinned near the top of the screen while you work through inventory rows.
-            </div>
             <BulkActionsPanel formId={BULK_INVENTORY_FORM_ID} pageItemCount={items.length} />
           </>
         ) : null}
 
-        <div className="mt-4 app-table-wrap pb-40">
+        <div className="mt-2 app-table-wrap pb-4">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
@@ -1479,7 +1507,7 @@ export default async function InventoryPage({
                       limit={limit}
                     />
                   </th>
-                  <th className="app-th min-w-[230px]">Actions</th>
+                  <th className="app-th min-w-[150px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1509,22 +1537,25 @@ export default async function InventoryPage({
                       <td className="app-td">
                         <div className="min-w-[240px] max-w-[520px]">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <div
+                            <Link
+                              href={`/app/inventory/${item.id}`}
                               data-inventory-primary-title="true"
-                              className="break-words font-medium leading-tight"
+                              className="break-words font-medium leading-tight text-zinc-100 hover:text-white hover:underline"
+                              title="Open inventory details"
                             >
                               {getPrimaryTitle(item)}
-                            </div>
+                            </Link>
                             {isLotLike ? (
                               <span className="app-badge app-badge-warning shrink-0">Lot / Multi Qty</span>
                             ) : null}
                           </div>
-                          <div
-                            className="mt-0.5 break-words text-xs text-zinc-400"
+                          <Link
+                            href={`/app/inventory/${item.id}`}
+                            className="mt-0.5 block break-words text-xs text-zinc-400 hover:text-zinc-200 hover:underline"
                             title={itemLine || getPrimaryTitle(item)}
                           >
-                            {itemLine || '—'}
-                          </div>
+                            {itemLine || 'Open details'}
+                          </Link>
                         </div>
                       </td>
 
@@ -1550,14 +1581,6 @@ export default async function InventoryPage({
 
                       <td className="app-td">
                         <div className="flex flex-wrap items-center gap-1">
-                          <Link href={`/app/inventory/${item.id}`} className="app-button">
-                            Details
-                          </Link>
-
-                          <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
-                            Edit
-                          </Link>
-
                           {hasAvailable ? (
                             <>
                               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
