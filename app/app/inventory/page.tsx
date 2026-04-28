@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Script from 'next/script'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
@@ -574,10 +575,9 @@ function BulkStatusConfirmControl({
           <button
             type="submit"
             form={formId}
-            name="bulk_status"
-            value={status}
             formAction={bulkUpdateInventoryStatusAction}
             data-bulk-submit="true"
+            data-bulk-status={status}
             className="app-button-primary whitespace-nowrap"
           >
             Yes, {label}
@@ -684,6 +684,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       const toggles = () => Array.from(document.querySelectorAll('[data-bulk-action-toggle="true"]'));
       const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
       const scrollInputs = () => Array.from(document.querySelectorAll('input[name="scroll_y"][form="' + formId + '"], form#' + formId + ' input[name="scroll_y"]'));
+      const statusInputs = () => Array.from(document.querySelectorAll('input[name="bulk_status"][form="' + formId + '"], form#' + formId + ' input[name="bulk_status"]'));
 
       function setDisabled(node, disabled) {
         node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
@@ -718,6 +719,12 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         });
       }
 
+      function setBulkStatus(value) {
+        statusInputs().forEach((input) => {
+          input.value = value || '';
+        });
+      }
+
       document.addEventListener('change', (event) => {
         const target = event.target;
         if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"]')) {
@@ -740,6 +747,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
             updateBulkState();
             return;
           }
+          setBulkStatus(submitButton.getAttribute('data-bulk-status') || '');
           rememberScrollPosition();
         }
       });
@@ -754,7 +762,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
     })();
   `.replace('${FORM_ID_PLACEHOLDER}', formId)
 
-  return <script dangerouslySetInnerHTML={{ __html: script }} />
+  return <Script id="bulk-selection-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
 }
 
 function ScrollRestoreScript({ scrollY }: { scrollY: string }) {
@@ -771,7 +779,7 @@ function ScrollRestoreScript({ scrollY }: { scrollY: string }) {
     })();
   `
 
-  return <script id={BULK_SCROLL_RESTORE_ID} dangerouslySetInnerHTML={{ __html: script }} />
+  return <Script id={BULK_SCROLL_RESTORE_ID} strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
 }
 
 export default async function InventoryPage({
@@ -1096,6 +1104,7 @@ export default async function InventoryPage({
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
           <input type="hidden" name="scroll_y" value="" />
+          <input type="hidden" name="bulk_status" value="" />
         </form>
 
         <BulkSelectionScript formId={BULK_INVENTORY_FORM_ID} />
