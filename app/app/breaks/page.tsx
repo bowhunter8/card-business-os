@@ -25,6 +25,26 @@ type BreakInventoryRow = {
   quantity: number | null
 }
 
+type ImportedOrderRow = {
+  id: string
+  break_id: string | null
+  order_id: string | null
+  order_numeric_id: string | null
+  buyer: string | null
+  seller: string | null
+  product_name: string | null
+  processed_date: string | null
+  processed_date_display: string | null
+  order_status: string | null
+  quantity: number | null
+  subtotal: number | null
+  shipping_price: number | null
+  taxes: number | null
+  total: number | null
+  source_file_name: string | null
+  created_at: string | null
+}
+
 type BreakViewRow = BreakRow & {
   received: number
   entered: number
@@ -51,8 +71,11 @@ const LIMIT_OPTIONS: PageLimit[] = [10, 25, 100]
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-page-form'
 const BULK_SELECTION_COUNT_ID = 'breaks-bulk-selection-count'
 const BULK_PENDING_STATE_ID = 'breaks-bulk-pending-state'
+const IMPORTED_ORDERS_FORM_ID = 'imported-orders-combine-form'
+const IMPORTED_SELECTION_COUNT_ID = 'imported-orders-selection-count'
+const IMPORTED_PENDING_STATE_ID = 'imported-orders-pending-state'
 
-function money(value: number | null) {
+function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -73,6 +96,34 @@ function formatDate(value: string | null | undefined) {
     day: '2-digit',
     year: '2-digit',
   }).format(parsed)
+}
+
+function getImportedOrderNumber(order: ImportedOrderRow) {
+  const numericId = cleanText(order.order_numeric_id)
+  const orderId = cleanText(order.order_id)
+
+  if (numericId) return numericId
+  if (orderId) return orderId
+
+  return '—'
+}
+
+function getImportedOrderDescription(order: ImportedOrderRow) {
+  const productName = cleanText(order.product_name)
+
+  if (productName) return productName
+
+  return 'Imported order'
+}
+
+function buildImportedOrderFocusHref(order: ImportedOrderRow) {
+  const params = new URLSearchParams()
+
+  if (order.id) params.set('row_id', order.id)
+  if (order.order_numeric_id) params.set('order_numeric_id', order.order_numeric_id)
+  if (order.order_id) params.set('order_id', order.order_id)
+
+  return `/app/whatnot-orders/focus?${params.toString()}`
 }
 
 function getCompletionStatus(
@@ -193,6 +244,35 @@ function buildBreaksStatusHref({
   return `/app/breaks?${params.toString()}#breaks-status`
 }
 
+function buildImportedOrdersStatusHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+  statusKey,
+  statusValue,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+  statusKey: string
+  statusValue: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) params.set('q', q)
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set(statusKey, statusValue)
+
+  return `/app/breaks?${params.toString()}#imported-orders-status`
+}
+
 function buildLimitHref({
   q,
   sort,
@@ -274,6 +354,223 @@ function readBreakListFormState(formData: FormData) {
     safePage,
     safeLimit,
   }
+}
+
+function readImportedOrdersFormState(formData: FormData) {
+  const q = String(formData.get('q') ?? '').trim()
+  const sort = String(formData.get('sort') ?? 'break_date').trim() as SortKey
+  const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
+  const page = Number(String(formData.get('page') ?? '1'))
+  const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+
+  const safeSort: SortKey = [
+    'break_date',
+    'product_name',
+    'source_name',
+    'order_number',
+    'completionStatus',
+    'entered',
+    'received',
+    'remaining',
+    'total_cost',
+  ].includes(sort)
+    ? sort
+    : 'break_date'
+
+  const safeDir: SortDir = dir === 'asc' ? 'asc' : 'desc'
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const safeLimit: PageLimit = LIMIT_OPTIONS.includes(limit as PageLimit)
+    ? (limit as PageLimit)
+    : DEFAULT_LIMIT
+
+  return {
+    q,
+    safeSort,
+    safeDir,
+    safePage,
+    safeLimit,
+  }
+}
+
+function readPositiveInteger(value: FormDataEntryValue | null, fallback = 0) {
+  const parsed = Number(String(value ?? '').trim())
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return Math.floor(parsed)
+}
+
+function readDateInput(value: FormDataEntryValue | null) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return new Date().toISOString().slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  return new Date().toISOString().slice(0, 10)
+}
+
+async function createPurchaseFromImportedOrdersAction(formData: FormData) {
+  'use server'
+
+  const orderIds = readFormIds(formData, 'selected_imported_order_ids')
+  const purchaseNameRaw = cleanText(String(formData.get('purchase_name') ?? ''))
+  const purchaseDate = readDateInput(formData.get('purchase_date'))
+  const cardsReceived = readPositiveInteger(formData.get('cards_received'), orderIds.length)
+  const notesRaw = cleanText(String(formData.get('purchase_notes') ?? ''))
+  const { q, safeSort, safeDir, safePage, safeLimit } = readImportedOrdersFormState(formData)
+
+  if (orderIds.length === 0) {
+    redirect(
+      buildImportedOrdersStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'import_error',
+        statusValue: 'Select at least one imported order to combine.',
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data: selectedOrdersData, error: selectedOrdersError } = await supabase
+    .from('whatnot_orders')
+    .select(`
+      id,
+      break_id,
+      order_id,
+      order_numeric_id,
+      seller,
+      product_name,
+      processed_date,
+      processed_date_display,
+      subtotal,
+      shipping_price,
+      taxes,
+      total,
+      created_at
+    `)
+    .eq('user_id', user.id)
+    .is('break_id', null)
+    .in('id', orderIds)
+
+  if (selectedOrdersError) {
+    redirect(
+      buildImportedOrdersStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'import_error',
+        statusValue: selectedOrdersError.message,
+      })
+    )
+  }
+
+  const selectedOrders = (selectedOrdersData ?? []) as ImportedOrderRow[]
+
+  if (selectedOrders.length !== orderIds.length) {
+    redirect(
+      buildImportedOrdersStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'import_error',
+        statusValue: 'One or more selected imported orders were already linked, deleted, or could not be found.',
+      })
+    )
+  }
+
+  const sellers = Array.from(
+    new Set(selectedOrders.map((order) => cleanText(order.seller)).filter(Boolean))
+  )
+  const orderNumbers = selectedOrders
+    .map((order) => getImportedOrderNumber(order))
+    .filter((value) => value !== '—')
+  const totalCost = selectedOrders.reduce((sum, order) => sum + Number(order.total ?? 0), 0)
+  const sourceName = sellers.length === 1 ? sellers[0] : sellers.length > 1 ? 'Multiple sellers' : 'Imported orders'
+  const productName =
+    purchaseNameRaw ||
+    (selectedOrders.length === 1
+      ? getImportedOrderDescription(selectedOrders[0])
+      : `${sourceName} combined purchase (${selectedOrders.length} orders)`)
+  const orderNumber = orderNumbers.length > 0 ? orderNumbers.join(', ') : null
+  const generatedNotes = [
+    `Created from ${selectedOrders.length} imported order(s).`,
+    orderNumbers.length > 0 ? `Imported order numbers: ${orderNumbers.join(', ')}.` : '',
+    notesRaw,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  const { data: createdBreak, error: createError } = await supabase
+    .from('breaks')
+    .insert({
+      user_id: user.id,
+      break_date: purchaseDate,
+      source_name: sourceName,
+      order_number: orderNumber,
+      product_name: productName,
+      format_type: selectedOrders.length > 1 ? 'combined_imported_order' : 'imported_order',
+      teams: [],
+      total_cost: Number(totalCost.toFixed(2)),
+      allocation_method: 'equal_per_item',
+      cards_received: cardsReceived,
+      notes: generatedNotes,
+    })
+    .select('id')
+    .single()
+
+  if (createError || !createdBreak?.id) {
+    redirect(
+      buildImportedOrdersStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'import_error',
+        statusValue: createError?.message ?? 'Purchase could not be created.',
+      })
+    )
+  }
+
+  const { error: linkError } = await supabase
+    .from('whatnot_orders')
+    .update({ break_id: createdBreak.id })
+    .eq('user_id', user.id)
+    .is('break_id', null)
+    .in('id', orderIds)
+
+  if (linkError) {
+    redirect(
+      buildImportedOrdersStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'import_error',
+        statusValue: `Purchase was created, but imported orders could not be linked: ${linkError.message}`,
+      })
+    )
+  }
+
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/whatnot-orders')
+
+  redirect(`/app/breaks/${createdBreak.id}/add-cards`)
 }
 
 async function deleteBreakAction(formData: FormData) {
@@ -459,6 +756,373 @@ function SummaryCard({
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
     </div>
   )
+}
+
+function BulkImportedOrdersControl({
+  formId,
+  importedOrderCount,
+  defaultPurchaseDate,
+}: {
+  formId: string
+  importedOrderCount: number
+  defaultPurchaseDate: string
+}) {
+  return (
+    <div className="sticky top-[4.75rem] z-40 mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">Imported order actions</div>
+            <div className="mt-0.5 text-xs text-zinc-500">
+              Select imported orders, review the inline purchase details, then save them as one purchase.
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <div
+                id={IMPORTED_SELECTION_COUNT_ID}
+                data-imported-selected-count="true"
+                data-imported-page-count={importedOrderCount}
+                className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+              >
+                0 of {importedOrderCount} selected
+              </div>
+              <button
+                type="button"
+                data-imported-select-page="true"
+                className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+              >
+                Select all on page
+              </button>
+              <button
+                type="button"
+                data-imported-clear-selection="true"
+                className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+              >
+                Clear selection
+              </button>
+              <div
+                id={IMPORTED_PENDING_STATE_ID}
+                data-imported-pending-state="true"
+                className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
+                aria-live="polite"
+              >
+                Creating purchase…
+              </div>
+            </div>
+          </div>
+
+          <details className="group min-w-0 lg:min-w-[420px]">
+            <summary
+              data-imported-action-toggle="true"
+              className="app-button-primary cursor-pointer list-none whitespace-nowrap"
+            >
+              Combine Selected
+            </summary>
+
+            <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl">
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-semibold text-zinc-100">Create purchase from selected imports</div>
+                <div className="text-xs leading-relaxed text-zinc-400">
+                  This creates the normal purchase record first, then links the selected imported orders to it. Cost basis stays on the purchase record before item entry.
+                </div>
+                <div
+                  data-imported-panel-summary="true"
+                  className="mt-1 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300"
+                >
+                  Select imported orders to preview the combined total.
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="block text-xs font-medium text-zinc-400">
+                  Purchase name
+                  <input
+                    form={formId}
+                    name="purchase_name"
+                    placeholder="Example: Seller name combined order"
+                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  />
+                </label>
+
+                <label className="block text-xs font-medium text-zinc-400">
+                  Purchase date
+                  <input
+                    form={formId}
+                    type="date"
+                    name="purchase_date"
+                    defaultValue={defaultPurchaseDate}
+                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  />
+                </label>
+
+                <label className="block text-xs font-medium text-zinc-400">
+                  Items/cards expected
+                  <input
+                    form={formId}
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="cards_received"
+                    placeholder="How many items will you enter?"
+                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  />
+                </label>
+
+                <label className="block text-xs font-medium text-zinc-400 md:col-span-2">
+                  Notes
+                  <textarea
+                    form={formId}
+                    name="purchase_notes"
+                    rows={2}
+                    placeholder="Optional note, such as stream name, shipment, or grouping reason."
+                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  data-imported-submit="true"
+                  className="app-button-primary whitespace-nowrap"
+                >
+                  Save Purchase + Enter Items
+                </button>
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ImportedOrderSelectionScript({ formId }: { formId: string }) {
+  const script = `
+    (() => {
+      const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
+      const fieldName = 'selected_imported_order_ids';
+      const storageKey = 'card_business_os_imported_orders_bulk_selection_v1';
+      let isSubmitting = false;
+
+      const form = () => document.getElementById(formId);
+      const countNodes = () => Array.from(document.querySelectorAll('[data-imported-selected-count="true"]'));
+      const pendingNodes = () => Array.from(document.querySelectorAll('[data-imported-pending-state="true"]'));
+      const panelSummaryNodes = () => Array.from(document.querySelectorAll('[data-imported-panel-summary="true"]'));
+      const rowCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-imported-row-checkbox="true"]'));
+      const allSelectionCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
+      const pageToggleCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][data-imported-page-checkbox="true"][form="' + formId + '"]'));
+      const toggles = () => Array.from(document.querySelectorAll('[data-imported-action-toggle="true"]'));
+      const submitButtons = () => Array.from(document.querySelectorAll('[data-imported-submit="true"]'));
+      const selectPageButtons = () => Array.from(document.querySelectorAll('[data-imported-select-page="true"]'));
+      const clearButtons = () => Array.from(document.querySelectorAll('[data-imported-clear-selection="true"]'));
+
+      function loadStoredSelection() {
+        try {
+          const raw = window.sessionStorage.getItem(storageKey);
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (!Array.isArray(parsed)) return new Set();
+          return new Set(parsed.map((value) => String(value || '').trim()).filter(Boolean));
+        } catch (_error) {
+          return new Set();
+        }
+      }
+
+      function saveStoredSelection(selection) {
+        try {
+          window.sessionStorage.setItem(storageKey, JSON.stringify(Array.from(selection)));
+        } catch (_error) {}
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('import_error')) {
+        try { window.sessionStorage.removeItem(storageKey); } catch (_error) {}
+      }
+
+      let selectedIdsSet = loadStoredSelection();
+
+      function setDisabled(node, disabled) {
+        node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+        node.classList.toggle('pointer-events-none', disabled);
+        node.classList.toggle('opacity-50', disabled);
+        if ('disabled' in node) node.disabled = disabled;
+      }
+
+      function pageIds() {
+        return rowCheckboxes().map((checkbox) => checkbox.value).filter(Boolean);
+      }
+
+      function selectedIds() {
+        return Array.from(selectedIdsSet);
+      }
+
+      function formatMoney(value) {
+        const number = Number(value || 0);
+        try {
+          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(number);
+        } catch (_error) {
+          return '$' + number.toFixed(2);
+        }
+      }
+
+      function selectedTotal() {
+        return rowCheckboxes().reduce((sum, checkbox) => {
+          if (!selectedIdsSet.has(checkbox.value)) return sum;
+          return sum + Number(checkbox.getAttribute('data-imported-order-total') || 0);
+        }, 0);
+      }
+
+      function syncStoredInputs() {
+        const bulkForm = form();
+        if (!bulkForm) return;
+        bulkForm.querySelectorAll('input[data-imported-persisted-selection="true"]').forEach((input) => input.remove());
+        selectedIds().forEach((id) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = fieldName;
+          input.value = id;
+          input.setAttribute('data-imported-persisted-selection', 'true');
+          bulkForm.appendChild(input);
+        });
+      }
+
+      function syncPageCheckboxesFromStoredSelection() {
+        rowCheckboxes().forEach((checkbox) => {
+          checkbox.checked = selectedIdsSet.has(checkbox.value);
+        });
+      }
+
+      function updateImportedState() {
+        syncPageCheckboxesFromStoredSelection();
+        syncStoredInputs();
+        const currentPageIds = pageIds();
+        const totalOnPage = currentPageIds.length;
+        const selectedOnPage = currentPageIds.filter((id) => selectedIdsSet.has(id)).length;
+        const count = selectedIdsSet.size;
+        const hasSelection = count > 0;
+        const allPageSelected = totalOnPage > 0 && selectedOnPage === totalOnPage;
+        const total = selectedTotal();
+
+        countNodes().forEach((node) => {
+          node.textContent = count + ' selected' + (totalOnPage > 0 ? ' • ' + selectedOnPage + ' of ' + totalOnPage + ' on this page' : '');
+          node.classList.toggle('text-zinc-400', !hasSelection);
+          node.classList.toggle('text-zinc-100', hasSelection);
+          node.classList.toggle('border-zinc-800', !hasSelection);
+          node.classList.toggle('border-emerald-900/60', hasSelection);
+          node.classList.toggle('bg-zinc-950', !hasSelection);
+          node.classList.toggle('bg-emerald-950/20', hasSelection);
+        });
+        panelSummaryNodes().forEach((node) => {
+          node.textContent = hasSelection
+            ? count + ' imported order(s) selected • combined total ' + formatMoney(total)
+            : 'Select imported orders to preview the combined total.';
+        });
+        rowCheckboxes().forEach((checkbox) => {
+          const row = checkbox.closest('[data-imported-order-row-id]');
+          if (row) row.classList.toggle('bg-zinc-900/40', selectedIdsSet.has(checkbox.value) && !isSubmitting);
+        });
+        pageToggleCheckboxes().forEach((checkbox) => {
+          checkbox.checked = allPageSelected;
+          checkbox.indeterminate = selectedOnPage > 0 && !allPageSelected;
+          checkbox.setAttribute('aria-checked', checkbox.indeterminate ? 'mixed' : String(allPageSelected));
+          setDisabled(checkbox, totalOnPage === 0 || isSubmitting);
+        });
+        toggles().forEach((node) => setDisabled(node, !hasSelection || isSubmitting));
+        submitButtons().forEach((node) => setDisabled(node, !hasSelection || isSubmitting));
+        selectPageButtons().forEach((node) => {
+          setDisabled(node, totalOnPage === 0 || allPageSelected || isSubmitting);
+          node.textContent = allPageSelected ? 'All rows on this page selected' : 'Select all on page';
+        });
+        clearButtons().forEach((node) => setDisabled(node, !hasSelection || isSubmitting));
+      }
+
+      function applySubmittingState() {
+        isSubmitting = true;
+        const count = selectedIdsSet.size;
+        pendingNodes().forEach((node) => {
+          node.textContent = 'Creating purchase from ' + count + ' imported order(s)…';
+          node.classList.remove('hidden');
+        });
+        selectedIds().forEach((id) => {
+          const row = document.querySelector('[data-imported-order-row-id="' + CSS.escape(id) + '"]');
+          if (!row) return;
+          row.classList.add('transition', 'duration-150', 'opacity-40');
+          row.style.filter = 'grayscale(1)';
+        });
+        window.setTimeout(() => updateImportedState(), 0);
+      }
+
+      document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (target && target.matches && target.matches('input[type="checkbox"][data-imported-page-checkbox="true"][form="' + formId + '"]')) {
+          const shouldSelectPage = Boolean(target.checked);
+          pageIds().forEach((id) => { if (shouldSelectPage) selectedIdsSet.add(id); else selectedIdsSet.delete(id); });
+          saveStoredSelection(selectedIdsSet);
+          updateImportedState();
+          return;
+        }
+        if (target && target.matches && target.matches('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-imported-row-checkbox="true"]')) {
+          const id = String(target.value || '').trim();
+          if (id && target.checked) selectedIdsSet.add(id);
+          if (id && !target.checked) selectedIdsSet.delete(id);
+          saveStoredSelection(selectedIdsSet);
+          updateImportedState();
+          return;
+        }
+      }, true);
+
+      document.addEventListener('click', (event) => {
+        const toggle = event.target && event.target.closest ? event.target.closest('[data-imported-action-toggle="true"]') : null;
+        if (toggle && (selectedIdsSet.size === 0 || isSubmitting)) {
+          event.preventDefault();
+          updateImportedState();
+          return;
+        }
+        const selectPageButton = event.target && event.target.closest ? event.target.closest('[data-imported-select-page="true"]') : null;
+        if (selectPageButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isSubmitting) return;
+          pageIds().forEach((id) => selectedIdsSet.add(id));
+          saveStoredSelection(selectedIdsSet);
+          updateImportedState();
+          return;
+        }
+        const clearButton = event.target && event.target.closest ? event.target.closest('[data-imported-clear-selection="true"]') : null;
+        if (clearButton) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (isSubmitting) return;
+          selectedIdsSet = new Set();
+          saveStoredSelection(selectedIdsSet);
+          allSelectionCheckboxes().forEach((checkbox) => { checkbox.checked = false; checkbox.indeterminate = false; });
+          updateImportedState();
+          return;
+        }
+        const submitButton = event.target && event.target.closest ? event.target.closest('[data-imported-submit="true"]') : null;
+        if (submitButton) {
+          if (selectedIdsSet.size === 0 || isSubmitting) {
+            event.preventDefault();
+            updateImportedState();
+            return;
+          }
+          syncStoredInputs();
+          applySubmittingState();
+        }
+      }, true);
+
+      document.addEventListener('submit', (event) => {
+        if (event.target && event.target.id === formId) syncStoredInputs();
+      });
+
+      syncPageCheckboxesFromStoredSelection();
+      syncStoredInputs();
+      updateImportedState();
+    })();
+  `.replace('${FORM_ID_PLACEHOLDER}', formId)
+
+  return <Script id="imported-orders-selection-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
 }
 
 function BulkDeleteConfirmControl({ formId, pageBreakCount }: { formId: string; pageBreakCount: number }) {
@@ -862,12 +1526,14 @@ export default async function BreaksPage({
     limit?: string
     deleted_count?: string
     delete_error?: string
+    import_error?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim().toLowerCase()
   const deletedCount = String(params?.deleted_count ?? '').trim()
   const deleteError = String(params?.delete_error ?? '').trim()
+  const importError = String(params?.import_error ?? '').trim()
 
   const requestedPage = Number(String(params?.page ?? '1'))
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? Math.floor(requestedPage) : 1
@@ -904,7 +1570,7 @@ export default async function BreaksPage({
 
   if (!user) return null
 
-  const [breaksResponse, breakInventoryResponse] = await Promise.all([
+  const [breaksResponse, breakInventoryResponse, importedOrdersResponse] = await Promise.all([
     supabase
       .from('breaks')
       .select(`
@@ -929,11 +1595,39 @@ export default async function BreaksPage({
       .select('source_break_id, quantity')
       .eq('user_id', user.id)
       .eq('source_type', 'break'),
+
+    supabase
+      .from('whatnot_orders')
+      .select(`
+        id,
+        break_id,
+        order_id,
+        order_numeric_id,
+        buyer,
+        seller,
+        product_name,
+        processed_date,
+        processed_date_display,
+        order_status,
+        quantity,
+        subtotal,
+        shipping_price,
+        taxes,
+        total,
+        source_file_name,
+        created_at
+      `)
+      .eq('user_id', user.id)
+      .is('break_id', null)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(50),
   ])
 
   const allBreaks = (breaksResponse.data ?? []) as BreakRow[]
   const breakInventoryRows = (breakInventoryResponse.data ?? []) as BreakInventoryRow[]
+  const importedOrders = (importedOrdersResponse.data ?? []) as ImportedOrderRow[]
   const error = breaksResponse.error || breakInventoryResponse.error
+  const importedOrdersError = importedOrdersResponse.error
 
   const enteredMap = new Map<string, number>()
   for (const row of breakInventoryRows) {
@@ -994,17 +1688,19 @@ export default async function BreaksPage({
 
   const pageTitle =
     qRaw === 'active'
-      ? 'Breaks — Active'
+      ? 'Purchases — Active'
       : qRaw === 'open'
-        ? 'Breaks — Open'
-        : 'Breaks'
+        ? 'Purchases — Open'
+        : 'Purchases'
 
   const pageDescription =
     qRaw === 'active'
-      ? 'Showing active breaks that have not been reversed.'
+      ? 'Showing active purchases that have not been reversed.'
       : qRaw === 'open'
-        ? 'Showing breaks that still need item entry.'
-        : 'View and manage your recorded breaks.'
+        ? 'Showing purchases that still need item entry.'
+        : 'View and manage your recorded purchases.'
+
+  const defaultPurchaseDate = new Date().toISOString().slice(0, 10)
 
   return (
     <div className="app-page-wide space-y-3">
@@ -1015,7 +1711,7 @@ export default async function BreaksPage({
         </div>
 
         <Link href="/app/breaks/new" className="app-button-primary">
-          Add Break
+          Add Purchase
         </Link>
       </div>
 
@@ -1034,7 +1730,7 @@ export default async function BreaksPage({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard label="All Breaks" value={allRows.length} />
+        <SummaryCard label="All Purchases" value={allRows.length} />
         <SummaryCard label="Active" value={activeCount} />
         <SummaryCard label="Open" value={openCount} />
       </div>
@@ -1085,16 +1781,151 @@ export default async function BreaksPage({
 
       {error ? (
         <div className="app-alert-error">
-          Error loading breaks: {error.message}
+          Error loading purchases: {error.message}
         </div>
       ) : null}
+
+      <div id="imported-orders-status" className="scroll-mt-28 space-y-3">
+        {importError ? (
+          <div className="app-alert-error">
+            Import combine failed: {importError}
+          </div>
+        ) : null}
+      </div>
 
       <div className="app-section">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Breaks</h2>
+            <h2 className="text-lg font-semibold">Needs Review</h2>
             <p className="mt-0.5 text-sm text-zinc-400">
-              One row per break. Open details when you need the full record.
+              Imported orders that have not been turned into purchases yet. Select one or more rows, review the inline purchase details, then save and enter items.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/app/imports/whatnot" className="app-button whitespace-nowrap">
+              Import More
+            </Link>
+          </div>
+        </div>
+
+        {importedOrdersError ? (
+          <div className="app-alert-error mt-3">
+            Imported order load error: {importedOrdersError.message}
+          </div>
+        ) : null}
+
+        <form id={IMPORTED_ORDERS_FORM_ID} action={createPurchaseFromImportedOrdersAction} className="hidden">
+          <input type="hidden" name="q" value={qRaw} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+        </form>
+        <ImportedOrderSelectionScript formId={IMPORTED_ORDERS_FORM_ID} />
+
+        {importedOrders.length > 0 ? (
+          <div className="mt-3">
+            <BulkImportedOrdersControl
+              formId={IMPORTED_ORDERS_FORM_ID}
+              importedOrderCount={importedOrders.length}
+              defaultPurchaseDate={defaultPurchaseDate}
+            />
+          </div>
+        ) : null}
+
+        {importedOrders.length === 0 ? (
+          <div className="app-empty mt-4">
+            No imported orders need review.
+          </div>
+        ) : (
+          <div className="mt-3 app-table-wrap">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th w-16">
+                      <input
+                        form={IMPORTED_ORDERS_FORM_ID}
+                        type="checkbox"
+                        aria-label="Select all imported orders on this page"
+                        data-imported-page-checkbox="true"
+                        className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                      />
+                    </th>
+                    <th className="app-th">Order #</th>
+                    <th className="app-th">Date Added</th>
+                    <th className="app-th">Order Date</th>
+                    <th className="app-th">Purchased From</th>
+                    <th className="app-th min-w-[260px]">Description</th>
+                    <th className="app-th text-right">Total</th>
+                    <th className="app-th min-w-[140px]">Quick</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importedOrders.map((order) => {
+                    const orderNumber = getImportedOrderNumber(order)
+                    const importedDate = formatDate(order.created_at)
+                    const orderDate = formatDate(order.processed_date_display || order.processed_date)
+                    const seller = cleanText(order.seller || 'Unknown Seller')
+                    const description = getImportedOrderDescription(order)
+
+                    return (
+                      <tr key={order.id} data-imported-order-row-id={order.id} className="app-tr align-top">
+                        <td className="app-td">
+                          <input
+                            form={IMPORTED_ORDERS_FORM_ID}
+                            type="checkbox"
+                            name="selected_imported_order_ids"
+                            value={order.id}
+                            aria-label={`Select imported order ${orderNumber}`}
+                            data-imported-row-checkbox="true"
+                            data-imported-order-total={Number(order.total ?? 0)}
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <Link
+                            href={buildImportedOrderFocusHref(order)}
+                            className="font-medium text-zinc-100 hover:text-white hover:underline"
+                          >
+                            {orderNumber}
+                          </Link>
+                        </td>
+                        <td className="app-td whitespace-nowrap">{importedDate}</td>
+                        <td className="app-td whitespace-nowrap">{orderDate}</td>
+                        <td className="app-td">
+                          <div className="max-w-40 break-words" title={seller}>
+                            {seller}
+                          </div>
+                        </td>
+                        <td className="app-td">
+                          <div className="min-w-[240px] max-w-[560px] break-words" title={description}>
+                            {description}
+                          </div>
+                        </td>
+                        <td className="app-td whitespace-nowrap text-right">{money(order.total)}</td>
+                        <td className="app-td whitespace-nowrap">
+                          <Link href={buildImportedOrderFocusHref(order)} className="app-button whitespace-nowrap">
+                            Open
+                          </Link>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="app-section">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">Purchases</h2>
+            <p className="mt-0.5 text-sm text-zinc-400">
+              One row per purchase. Open details when you need the full record.
             </p>
           </div>
 
@@ -1142,7 +1973,7 @@ export default async function BreaksPage({
                   </th>
                   <th className="app-th min-w-[220px]">
                     <SortHeader
-                      label="Break"
+                      label="Purchase"
                       sortKey="product_name"
                       currentSortKey={sortKey}
                       currentSortDir={sortDir}
@@ -1303,7 +2134,7 @@ export default async function BreaksPage({
                 {breaks.length === 0 && (
                   <tr>
                     <td colSpan={11} className="px-4 py-8 text-center text-zinc-400">
-                      No breaks found for this view.
+                      No purchases found for this view.
                     </td>
                   </tr>
                 )}
@@ -1316,7 +2147,7 @@ export default async function BreaksPage({
       <div className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-zinc-300">
-            Showing page {page} with up to {limit} breaks.
+            Showing page {page} with up to {limit} purchases.
           </div>
 
           <div className="flex gap-2">
