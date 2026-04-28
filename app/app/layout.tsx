@@ -124,18 +124,20 @@ export default async function AppLayout({
               Inventory
             </Link>
 
+            {/* 🔥 Renamed from Breaks */}
             <Link
               href="/app/breaks"
               className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
-              Breaks
+              Purchases
             </Link>
 
+            {/* 🔥 Renamed from Orders */}
             <Link
               href="/app/whatnot-orders"
               className="block rounded-xl border border-zinc-800 px-4 py-3 hover:bg-zinc-800"
             >
-              Orders
+              Import
             </Link>
 
             <Link
