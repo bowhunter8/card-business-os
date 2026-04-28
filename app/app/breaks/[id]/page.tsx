@@ -578,7 +578,7 @@ async function BreakCardsAndMetricsSection({
     <>
       {cardsError ? (
         <div className="app-alert-error mt-4">
-          Error loading break cards: {cardsError.message}
+          Error loading break items: {cardsError.message}
         </div>
       ) : null}
 
@@ -591,7 +591,7 @@ async function BreakCardsAndMetricsSection({
 
           {deletableSelectedCards.length === 0 ? (
             <div className="mt-3 text-sm text-red-200">
-              No deletable items were selected. Select one or more cards, then click Delete Selected again.
+              No deletable items were selected. Select one or more items, then click Delete Selected again.
             </div>
           ) : (
             <>
@@ -675,22 +675,22 @@ async function BreakCardsAndMetricsSection({
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
         <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Cards Received</div>
+          <div className="text-sm text-zinc-400">Items Received</div>
           <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
         </div>
 
         <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Cards Entered</div>
+          <div className="text-sm text-zinc-400">Items Entered</div>
           <div className="mt-1 text-2xl font-semibold">{cardsEntered}</div>
         </div>
 
         <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Remaining To Enter</div>
+          <div className="text-sm text-zinc-400">Items Remaining</div>
           <div className="mt-1 text-2xl font-semibold">{remainingToEnter}</div>
         </div>
 
         <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Cards Available</div>
+          <div className="text-sm text-zinc-400">Items Available</div>
           <div className="mt-1 text-2xl font-semibold">{availableCards}</div>
         </div>
       </div>
@@ -711,7 +711,7 @@ async function BreakCardsAndMetricsSection({
         </div>
 
         <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Cards Sold</div>
+          <div className="text-sm text-zinc-400">Items Sold</div>
           <div className="mt-1 text-2xl font-semibold">{cardsSold}</div>
         </div>
 
@@ -771,21 +771,21 @@ async function BreakCardsAndMetricsSection({
       </div>
 
       <div className="mt-4 app-section">
-        <div className="text-sm text-zinc-400">Unsold Cards Outlook</div>
+        <div className="text-sm text-zinc-400">Unsold Items Outlook</div>
         <div className="mt-1 text-lg font-semibold">
           {availableCards > 0
-            ? `${availableCards} card(s) still contribute upside`
-            : 'No remaining cards from this break'}
+            ? `${availableCards} item(s) still contribute upside`
+            : 'No remaining items from this break'}
         </div>
       </div>
 
       <div className="mt-6 app-table-wrap">
         <div className="flex flex-col gap-2 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Cards From This Break</h2>
+            <h2 className="text-lg font-semibold">Items From This Break</h2>
             {!reversedAt ? (
               <div className="mt-0.5 text-sm text-zinc-400">
-                Select multiple cards with the checkboxes, then bulk delete the selected rows.
+                Select multiple items with the checkboxes, then bulk delete the selected rows.
               </div>
             ) : null}
           </div>
@@ -805,7 +805,7 @@ async function BreakCardsAndMetricsSection({
                   href={`/app/breaks/${breakId}/add-cards`}
                   className="app-button"
                 >
-                  Add More Cards
+                  Add More Items
                 </Link>
               </>
             ) : null}
@@ -852,7 +852,7 @@ async function BreakCardsAndMetricsSection({
                 <th className="app-th">
                   <BreakCardSortHeader
                     breakId={breakId}
-                    label="Card / Lot"
+                    label="Item / Lot"
                     sortKey="card"
                     currentSortKey={cardsSortKey}
                     currentSortDir={cardsSortDir}
@@ -991,7 +991,7 @@ async function BreakCardsAndMetricsSection({
               {breakCards.length === 0 && (
                 <tr>
                   <td colSpan={reversedAt ? 9 : 10} className="px-4 py-8 text-center text-zinc-400">
-                    No cards have been added from this break yet.
+                    No items have been added from this break yet.
                   </td>
                 </tr>
               )}
@@ -1135,7 +1135,7 @@ export default async function BreakDetailPage({
                 href={`/app/breaks/${item.id}/add-cards`}
                 className="app-button"
               >
-                Add Cards
+                Add Items
               </Link>
               <Link
                 href="/app/breaks/new"

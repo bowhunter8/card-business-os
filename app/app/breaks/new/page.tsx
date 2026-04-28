@@ -298,17 +298,17 @@ export default async function NewBreakPage({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Cards Received</label>
+          <label className="mb-1 block text-sm text-zinc-300">Items Received</label>
           <input
             name="cards_received"
             type="number"
             min={0}
             defaultValue={0}
-            placeholder="Total cards received in this break"
+            placeholder="Total items received in this break"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
           <p className="mt-1 text-xs text-zinc-500">
-            This will auto-set the row count on the Add Cards screen.
+            This will auto-set the row count on the Add Items screen.
           </p>
         </div>
 
@@ -409,7 +409,7 @@ export default async function NewBreakPage({
             <p>Purchase source and date</p>
             <p>Total break cost for basis allocation</p>
             <p>Optional order number for receipt matching</p>
-            <p>Total cards received for faster entry later</p>
+            <p>Total items received for faster entry later</p>
           </div>
         </div>
 

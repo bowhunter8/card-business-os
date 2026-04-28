@@ -148,7 +148,7 @@ export default async function EditBreakPage({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Cards Received</label>
+            <label className="mb-1 block text-sm text-zinc-300">Items Received</label>
             <input
               name="cards_received"
               type="number"
@@ -249,7 +249,7 @@ export default async function EditBreakPage({
             <div className="text-sm font-medium text-zinc-200">Edit notes</div>
             <div className="mt-2 space-y-1 text-sm text-zinc-400">
               <p>Update source, costs, and order info</p>
-              <p>Adjust cards received if needed</p>
+              <p>Adjust items received if needed</p>
               <p>Total cost will be recalculated on save</p>
             </div>
           </div>

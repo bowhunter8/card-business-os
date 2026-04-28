@@ -345,28 +345,14 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
   )
 }
 
-async function bulkUpdateInventoryStatusAction(formData: FormData) {
+async function updateInventoryStatusForBulkSelection(
+  formData: FormData,
+  requestedStatus: BulkStatus
+) {
   'use server'
 
   const itemIds = readFormIds(formData, 'selected_inventory_ids')
-  const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
   const { q, safeSort, safeDir, safePage, safeLimit } = readInventoryListFormState(formData)
-
-  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
-
-  if (!allowedStatuses.includes(requestedStatus)) {
-    redirect(
-      buildInventoryStatusHref({
-        q,
-        sort: safeSort,
-        dir: safeDir,
-        page: safePage,
-        limit: safeLimit,
-        statusKey: 'status_error',
-        statusValue: 'Choose a valid bulk status.',
-      })
-    )
-  }
 
   if (itemIds.length === 0) {
     redirect(
@@ -429,6 +415,26 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
       statusValue: `${itemIds.length} item(s) marked ${bulkStatusLabel(requestedStatus)}`,
     })
   )
+}
+
+async function bulkMarkAvailableInventoryItemsAction(formData: FormData) {
+  'use server'
+  await updateInventoryStatusForBulkSelection(formData, 'available')
+}
+
+async function bulkMarkListedInventoryItemsAction(formData: FormData) {
+  'use server'
+  await updateInventoryStatusForBulkSelection(formData, 'listed')
+}
+
+async function bulkMovePersonalInventoryItemsAction(formData: FormData) {
+  'use server'
+  await updateInventoryStatusForBulkSelection(formData, 'personal')
+}
+
+async function bulkMarkJunkInventoryItemsAction(formData: FormData) {
+  'use server'
+  await updateInventoryStatusForBulkSelection(formData, 'junk')
 }
 
 function getFilterHref(
@@ -531,14 +537,14 @@ function SummaryCard({
 
 function BulkStatusConfirmControl({
   formId,
-  status,
   label,
   helpText,
+  action,
 }: {
   formId: string
-  status: BulkStatus
   label: string
   helpText: string
+  action: (formData: FormData) => Promise<void>
 }) {
   return (
     <details className="group">
@@ -554,9 +560,7 @@ function BulkStatusConfirmControl({
           <button
             type="submit"
             form={formId}
-            name="bulk_status"
-            value={status}
-            formAction={bulkUpdateInventoryStatusAction}
+            formAction={action}
             className="app-button-primary whitespace-nowrap"
           >
             Yes, {label}
@@ -613,27 +617,27 @@ function BulkActionsPanel({ formId }: { formId: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <BulkStatusConfirmControl
             formId={formId}
-            status="available"
             label="Mark For Sale"
             helpText="This will mark the selected inventory items as For Sale / Available."
+            action={bulkMarkAvailableInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
-            status="listed"
             label="Mark Listed"
             helpText="This will mark the selected inventory items as Listed."
+            action={bulkMarkListedInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
-            status="personal"
             label="Move to Personal"
             helpText="This will move the selected inventory items to Personal Collection status."
+            action={bulkMovePersonalInventoryItemsAction}
           />
           <BulkStatusConfirmControl
             formId={formId}
-            status="junk"
             label="Mark Junk"
             helpText="This will mark the selected inventory items as Junk."
+            action={bulkMarkJunkInventoryItemsAction}
           />
           <BulkDeleteConfirmControl formId={formId} />
         </div>
@@ -955,7 +959,7 @@ export default async function InventoryPage({
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
 
-        <form id={BULK_INVENTORY_FORM_ID} action={bulkUpdateInventoryStatusAction} className="hidden">
+        <form id={BULK_INVENTORY_FORM_ID} className="hidden">
           <input type="hidden" name="q" value={q} />
           <input type="hidden" name="sort" value={sortKey} />
           <input type="hidden" name="dir" value={sortDir} />

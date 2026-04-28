@@ -1,7 +1,10 @@
 import Link from 'next/link'
-import { signInAction } from '@/app/actions/auth'
+import {
+  resendConfirmationAction,
+  signUpAction,
+} from '@/app/actions/auth'
 
-export default async function LoginPage({
+export default async function SignUpPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string; message?: string }>
@@ -16,11 +19,16 @@ export default async function LoginPage({
         <div className="app-card w-full">
           <div className="mb-6">
             <p className="app-subtitle">Card Business OS</p>
-            <h1 className="app-title mt-2">Sign in</h1>
+            <h1 className="app-title mt-2">Create account</h1>
             <p className="app-muted mt-2">
-              Sign in to your standalone inventory, sales, and tax tracking
-              system.
+              Sign up to start tracking your inventory, sales, and taxes.
             </p>
+          </div>
+
+          <div className="mb-4 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-100">
+            After signing up, you must confirm your email before logging in.
+            <br />
+            If you don&apos;t see the email, check your junk or spam folder.
           </div>
 
           {error ? (
@@ -35,7 +43,7 @@ export default async function LoginPage({
             </div>
           ) : null}
 
-          <form action={signInAction} className="space-y-4">
+          <form action={signUpAction} className="space-y-4">
             <div>
               <label className="app-label">Email</label>
               <input
@@ -53,33 +61,44 @@ export default async function LoginPage({
                 name="password"
                 type="password"
                 required
+                minLength={6}
                 className="app-input"
-                placeholder="Enter your password"
+                placeholder="Minimum 6 characters"
               />
             </div>
 
             <button type="submit" className="app-button w-full">
-              Sign in
+              Create account
             </button>
           </form>
 
-          <div className="mt-5 flex flex-col gap-2 text-center text-sm text-zinc-400">
-            <Link
-              href="/forgot-password"
-              className="text-zinc-400 hover:text-zinc-100"
-            >
-              Forgot password?
-            </Link>
+          <div className="mt-6 border-t border-zinc-800 pt-5">
+            <form action={resendConfirmationAction} className="space-y-3">
+              <div>
+                <label className="app-label">Resend confirmation email</label>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  className="app-input"
+                  placeholder="you@example.com"
+                />
+              </div>
 
-            <div>
-              Don&apos;t have an account?{' '}
-              <Link
-                href="/signup"
-                className="text-amber-300 hover:text-amber-200"
-              >
-                Sign up
-              </Link>
-            </div>
+              <button type="submit" className="app-button w-full">
+                Resend confirmation
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-5 text-center text-sm text-zinc-400">
+            Already have an account?{' '}
+            <Link
+              href="/login"
+              className="text-amber-300 hover:text-amber-200"
+            >
+              Sign in
+            </Link>
           </div>
         </div>
       </div>
