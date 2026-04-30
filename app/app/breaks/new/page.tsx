@@ -152,9 +152,9 @@ export default async function NewBreakPage({
     <div className="max-w-5xl">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">Add Break</h1>
+          <h1 className="text-3xl font-semibold">Add Order</h1>
           <p className="mt-2 text-zinc-400">
-            Record a break purchase for inventory, cost basis, and tax tracking.
+            Record an order purchased for inventory, cost basis, and tax tracking.
           </p>
         </div>
 
@@ -162,7 +162,7 @@ export default async function NewBreakPage({
           href="/app/breaks"
           className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
         >
-          Back to Breaks
+          Back to Orders
         </Link>
       </div>
 
@@ -176,7 +176,7 @@ export default async function NewBreakPage({
         <div className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/20 p-5">
           <div className="text-sm text-blue-300">Prefilled from selected Whatnot orders</div>
           <div className="mt-2 text-zinc-100">
-            This is the normal break-entry form, but it has been prefilled from your selected Whatnot orders. You can still edit anything before saving.
+            This is the normal order-entry form, but it has been prefilled from your selected orders. You can still edit anything before saving.
           </div>
           <div className="mt-3 text-sm text-zinc-300">
             Selected orders: {selectedOrders.length}
@@ -184,7 +184,7 @@ export default async function NewBreakPage({
 
           {hasAlreadyLinkedSelection ? (
             <div className="mt-3 rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-2 text-sm text-yellow-300">
-              One or more selected Whatnot orders are already linked to a break. Saving will be blocked until you remove those from the selection.
+              One or more selected orders are already linked to a combined order. Saving will be blocked until you remove those from the selection.
             </div>
           ) : null}
         </div>
@@ -252,7 +252,7 @@ export default async function NewBreakPage({
         ))}
 
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Break Date</label>
+          <label className="mb-1 block text-sm text-zinc-300">Order Date</label>
           <input
             name="break_date"
             type="date"
@@ -263,13 +263,13 @@ export default async function NewBreakPage({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm text-zinc-300">Source / Breaker</label>
+          <label className="mb-1 block text-sm text-zinc-300">Source/Vendor/Breaker</label>
           <input
             name="source_name"
             type="text"
             required
             defaultValue={defaultSourceName}
-            placeholder="Whatnot seller, eBay breaker, LCS, etc."
+            placeholder="Whatnot breaker, eBay seller, LCS, etc."
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
         </div>
@@ -304,7 +304,7 @@ export default async function NewBreakPage({
             type="number"
             min={0}
             defaultValue={0}
-            placeholder="Total items received in this break"
+            placeholder="Total items received in this order"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
           <p className="mt-1 text-xs text-zinc-500">
@@ -407,7 +407,7 @@ export default async function NewBreakPage({
           <div className="text-sm font-medium text-zinc-200">What this records</div>
           <div className="mt-2 space-y-1 text-sm text-zinc-400">
             <p>Purchase source and date</p>
-            <p>Total break cost for basis allocation</p>
+            <p>Total order cost for basis allocation</p>
             <p>Optional order number for receipt matching</p>
             <p>Total items received for faster entry later</p>
           </div>
@@ -419,7 +419,7 @@ export default async function NewBreakPage({
             name="notes"
             rows={4}
             defaultValue={defaultNotes}
-            placeholder="Optional remarks about this break purchase"
+            placeholder="Optional remarks about this purchase"
             className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
           />
         </div>
@@ -435,7 +435,7 @@ export default async function NewBreakPage({
             type="submit"
             className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
           >
-            Save Break
+            Save Order
           </button>
         </div>
       </form>

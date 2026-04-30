@@ -18,11 +18,9 @@ type BreakRow = {
   notes?: string | null
   reversed_at?: string | null
   cards_received?: number | null
-}
-
-type BreakInventoryRow = {
-  source_break_id: string | null
-  quantity: number | null
+  entered_count?: number | null
+  remaining_count?: number | null
+  completion_status?: string | null
 }
 
 type ImportedOrderRow = {
@@ -1570,31 +1568,77 @@ export default async function BreaksPage({
 
   if (!user) return null
 
-  const [breaksResponse, breakInventoryResponse, importedOrdersResponse] = await Promise.all([
-    supabase
-      .from('breaks')
-      .select(`
-        id,
-        break_date,
-        source_name,
-        order_number,
-        product_name,
-        format_type,
-        teams,
-        total_cost,
-        allocation_method,
-        notes,
-        reversed_at,
-        cards_received
-      `)
-      .eq('user_id', user.id)
-      .order('break_date', { ascending: false }),
+  const from = (page - 1) * limit
+  const to = from + limit - 1
+
+  const dbSortKey =
+    sortKey === 'completionStatus'
+      ? 'completion_status'
+      : sortKey === 'entered'
+        ? 'entered_count'
+        : sortKey === 'received'
+          ? 'cards_received'
+          : sortKey === 'remaining'
+            ? 'remaining_count'
+            : sortKey
+
+  let breaksQuery = supabase
+    .from('breaks')
+    .select(`
+      id,
+      break_date,
+      source_name,
+      order_number,
+      product_name,
+      format_type,
+      teams,
+      total_cost,
+      allocation_method,
+      notes,
+      reversed_at,
+      cards_received,
+      entered_count,
+      remaining_count,
+      completion_status
+    `)
+    .eq('user_id', user.id)
+
+  if (qRaw === 'active') {
+    breaksQuery = breaksQuery.is('reversed_at', null)
+  } else if (qRaw === 'open') {
+    breaksQuery = breaksQuery
+      .is('reversed_at', null)
+      .in('completion_status', ['Open', 'In Progress'])
+  }
+
+  const [
+    breaksResponse,
+    allOrdersCountResponse,
+    activeOrdersCountResponse,
+    openOrdersCountResponse,
+    importedOrdersResponse,
+  ] = await Promise.all([
+    breaksQuery
+      .order(dbSortKey, { ascending: sortDir === 'asc', nullsFirst: false })
+      .range(from, to),
 
     supabase
-      .from('inventory_items')
-      .select('source_break_id, quantity')
+      .from('breaks')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id),
+
+    supabase
+      .from('breaks')
+      .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
-      .eq('source_type', 'break'),
+      .is('reversed_at', null),
+
+    supabase
+      .from('breaks')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .is('reversed_at', null)
+      .in('completion_status', ['Open', 'In Progress']),
 
     supabase
       .from('whatnot_orders')
@@ -1620,85 +1664,60 @@ export default async function BreaksPage({
       .eq('user_id', user.id)
       .is('break_id', null)
       .order('created_at', { ascending: false, nullsFirst: false })
-      .limit(50),
+      .limit(5),
   ])
 
-  const allBreaks = (breaksResponse.data ?? []) as BreakRow[]
-  const breakInventoryRows = (breakInventoryResponse.data ?? []) as BreakInventoryRow[]
+  const pageBreakRows = (breaksResponse.data ?? []) as BreakRow[]
   const importedOrders = (importedOrdersResponse.data ?? []) as ImportedOrderRow[]
-  const error = breaksResponse.error || breakInventoryResponse.error
+  const error =
+    breaksResponse.error ||
+    allOrdersCountResponse.error ||
+    activeOrdersCountResponse.error ||
+    openOrdersCountResponse.error
   const importedOrdersError = importedOrdersResponse.error
 
-  const enteredMap = new Map<string, number>()
-  for (const row of breakInventoryRows) {
-    if (!row.source_break_id) continue
-    enteredMap.set(
-      row.source_break_id,
-      (enteredMap.get(row.source_break_id) ?? 0) + Number(row.quantity ?? 0)
-    )
-  }
-
-  const allRows: BreakViewRow[] = []
-  let activeCount = 0
-  let openCount = 0
-
-  for (const item of allBreaks) {
+  const breaks: BreakViewRow[] = pageBreakRows.map((item) => {
     const received = Number(item.cards_received ?? 0)
-    const entered = enteredMap.get(item.id) ?? 0
-    const remaining = Math.max(0, received - entered)
-    const completionStatus = getCompletionStatus(received, entered, item.reversed_at)
+    const entered = Number(item.entered_count ?? 0)
+    const remaining = Number(item.remaining_count ?? Math.max(0, received - entered))
+    const cachedStatus = String(item.completion_status ?? '').trim()
+    const completionStatus =
+      cachedStatus === 'Open' ||
+      cachedStatus === 'In Progress' ||
+      cachedStatus === 'Complete' ||
+      cachedStatus === 'Reversed'
+        ? cachedStatus
+        : getCompletionStatus(received, entered, item.reversed_at)
 
-    const row: BreakViewRow = {
+    return {
       ...item,
       received,
       entered,
       remaining,
       completionStatus,
     }
+  })
 
-    allRows.push(row)
-
-    if (!item.reversed_at) {
-      activeCount += 1
-      if (completionStatus === 'Open' || completionStatus === 'In Progress') {
-        openCount += 1
-      }
-    }
-  }
-
-  const filteredBreaks =
-    qRaw === 'active'
-      ? allRows.filter((item) => !item.reversed_at)
-      : qRaw === 'open'
-        ? allRows.filter(
-            (item) =>
-              !item.reversed_at &&
-              (item.completionStatus === 'Open' || item.completionStatus === 'In Progress')
-          )
-        : allRows
-
-  const sortedBreaks = sortRows(filteredBreaks, sortKey, sortDir)
-
-  const from = (page - 1) * limit
-  const to = from + limit
-  const breaks = sortedBreaks.slice(from, to)
+  const allOrdersCount = Number(allOrdersCountResponse.count ?? 0)
+  const activeCount = Number(activeOrdersCountResponse.count ?? 0)
+  const openCount = Number(openOrdersCountResponse.count ?? 0)
 
   const hasPreviousPage = page > 1
-  const hasNextPage = sortedBreaks.length > to
+  const hasNextPage = breaks.length === limit
 
   const pageTitle =
     qRaw === 'active'
-      ? 'Purchases — Active'
+      ? 'Orders — Active'
       : qRaw === 'open'
-        ? 'Purchases — Open'
-        : 'Purchases'
+        ? 'Orders — Open'
+        : 'Orders'
 
   const pageDescription =
     qRaw === 'active'
-      ? 'Showing active purchases that have not been reversed.'
+      ? 'Showing active orders that have not been reversed.'
       : qRaw === 'open'
-        ? 'Showing purchases that still need item entry.'
-        : 'View and manage your recorded purchases.'
+        ? 'Showing orders that still need item entry.'
+        : 'View and manage your recorded orders.'
 
   const defaultPurchaseDate = new Date().toISOString().slice(0, 10)
 
@@ -1711,7 +1730,7 @@ export default async function BreaksPage({
         </div>
 
         <Link href="/app/breaks/new" className="app-button-primary">
-          Add Purchase
+          Add Order
         </Link>
       </div>
 
@@ -1730,7 +1749,7 @@ export default async function BreaksPage({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard label="All Purchases" value={allRows.length} />
+        <SummaryCard label="All Orders" value={allOrdersCount} />
         <SummaryCard label="Active" value={activeCount} />
         <SummaryCard label="Open" value={openCount} />
       </div>
@@ -1781,7 +1800,7 @@ export default async function BreaksPage({
 
       {error ? (
         <div className="app-alert-error">
-          Error loading purchases: {error.message}
+          Error loading orders: {error.message}
         </div>
       ) : null}
 
@@ -1793,20 +1812,29 @@ export default async function BreaksPage({
         ) : null}
       </div>
 
-      <div className="app-section">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <details open className="app-section group">
+        <summary className="flex cursor-pointer list-none flex-col gap-2 rounded-2xl outline-none md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Needs Review</h2>
+            <h2 className="text-lg font-semibold">Orders</h2>
             <p className="mt-0.5 text-sm text-zinc-400">
-              Imported orders that have not been turned into purchases yet. Select one or more rows, review the inline purchase details, then save and enter items.
+              Orders Paid For But Not Entered Into Inventory
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Link href="/app/imports/whatnot" className="app-button whitespace-nowrap">
-              Import More
-            </Link>
+            <span className="app-chip app-chip-idle whitespace-nowrap">
+              {importedOrders.length} recent imported
+            </span>
+            <span className="app-button whitespace-nowrap">
+              Collapse / Expand
+            </span>
           </div>
+        </summary>
+
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <Link href="/app/imports/whatnot" className="app-button whitespace-nowrap">
+            Import More
+          </Link>
         </div>
 
         {importedOrdersError ? (
@@ -1857,7 +1885,7 @@ export default async function BreaksPage({
                     <th className="app-th">Date Added</th>
                     <th className="app-th">Order Date</th>
                     <th className="app-th">Purchased From</th>
-                    <th className="app-th min-w-[260px]">Description</th>
+                    <th className="app-th min-w-[260px]">Purchase</th>
                     <th className="app-th text-right">Total</th>
                     <th className="app-th min-w-[140px]">Quick</th>
                   </tr>
@@ -1900,9 +1928,13 @@ export default async function BreaksPage({
                           </div>
                         </td>
                         <td className="app-td">
-                          <div className="min-w-[240px] max-w-[560px] break-words" title={description}>
+                          <Link
+                            href={buildImportedOrderFocusHref(order)}
+                            className="block min-w-[240px] max-w-[560px] break-words text-zinc-100 hover:text-white hover:underline"
+                            title={description}
+                          >
                             {description}
-                          </div>
+                          </Link>
                         </td>
                         <td className="app-td whitespace-nowrap text-right">{money(order.total)}</td>
                         <td className="app-td whitespace-nowrap">
@@ -1918,14 +1950,14 @@ export default async function BreaksPage({
             </div>
           </div>
         )}
-      </div>
+      </details>
 
       <div className="app-section">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Purchases</h2>
+            <h2 className="text-lg font-semibold">Orders Received</h2>
             <p className="mt-0.5 text-sm text-zinc-400">
-              One row per purchase. Open details when you need the full record.
+              Orders Received And Entered Into Inventory
             </p>
           </div>
 
@@ -2134,7 +2166,7 @@ export default async function BreaksPage({
                 {breaks.length === 0 && (
                   <tr>
                     <td colSpan={11} className="px-4 py-8 text-center text-zinc-400">
-                      No purchases found for this view.
+                      No orders found for this view.
                     </td>
                   </tr>
                 )}
@@ -2147,7 +2179,7 @@ export default async function BreaksPage({
       <div className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-zinc-300">
-            Showing page {page} with up to {limit} purchases.
+            Showing page {page} with up to {limit} orders.
           </div>
 
           <div className="flex gap-2">

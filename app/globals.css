@@ -1,8 +1,73 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root,
+[data-theme="dark-pro"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --app-surface: #18181b;
+  --app-surface-2: #09090b;
+  --app-border: #27272a;
+  --app-border-strong: #71717a;
+  --app-text: #ededed;
+  --app-text-muted: #a1a1aa;
+  --app-button-bg: #09090b;
+  --app-button-text: #e4e4e7;
+  --app-button-border: #3f3f46;
+  --app-button-hover: #27272a;
+  --app-primary-bg: #ffffff;
+  --app-primary-text: #000000;
+  --app-primary-hover: #e4e4e7;
+  --app-chip-active-bg: #27272a;
+  --app-chip-active-text: #f4f4f5;
+  --app-chip-idle-text: #d4d4d8;
+  --app-table-head-bg: #09090b;
+  --app-accent: #38bdf8;
+}
+
+[data-theme="light"] {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --app-surface: #ffffff;
+  --app-surface-2: #f1f5f9;
+  --app-border: #cbd5e1;
+  --app-border-strong: #64748b;
+  --app-text: #0f172a;
+  --app-text-muted: #475569;
+  --app-button-bg: #ffffff;
+  --app-button-text: #0f172a;
+  --app-button-border: #cbd5e1;
+  --app-button-hover: #e2e8f0;
+  --app-primary-bg: #0f172a;
+  --app-primary-text: #ffffff;
+  --app-primary-hover: #1e293b;
+  --app-chip-active-bg: #e2e8f0;
+  --app-chip-active-text: #0f172a;
+  --app-chip-idle-text: #334155;
+  --app-table-head-bg: #e2e8f0;
+  --app-accent: #2563eb;
+}
+
+[data-theme="retro-terminal"] {
+  --background: #020403;
+  --foreground: #39ff14;
+  --app-surface: #031006;
+  --app-surface-2: #000000;
+  --app-border: #14532d;
+  --app-border-strong: #39ff14;
+  --app-text: #39ff14;
+  --app-text-muted: #22c55e;
+  --app-button-bg: #000000;
+  --app-button-text: #39ff14;
+  --app-button-border: #15803d;
+  --app-button-hover: #052e16;
+  --app-primary-bg: #39ff14;
+  --app-primary-text: #001b07;
+  --app-primary-hover: #86efac;
+  --app-chip-active-bg: #052e16;
+  --app-chip-active-text: #bbf7d0;
+  --app-chip-idle-text: #4ade80;
+  --app-table-head-bg: #000000;
+  --app-accent: #39ff14;
 }
 
 @theme inline {
@@ -12,21 +77,19 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+[data-theme="retro-terminal"] body,
+body[data-theme="retro-terminal"] {
+  font-family: "Courier New", Consolas, monospace;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0 4px rgba(57, 255, 20, 0.35);
 }
 
 @layer components {
@@ -185,4 +248,128 @@ body {
   .app-alert-info {
     @apply rounded-xl border border-blue-900 bg-blue-950/30 px-3.5 py-2.5 text-sm text-blue-200;
   }
+}
+
+@layer components {
+  .app-subtitle { color: var(--app-text-muted); }
+  .app-section, .app-card, .app-metric-card, .app-search-panel, .app-table-wrap {
+    background-color: var(--app-surface);
+    border-color: var(--app-border);
+    color: var(--app-text);
+  }
+  .app-section-tight, .app-card-tight, .app-empty {
+    background-color: var(--app-surface-2);
+    border-color: var(--app-border);
+    color: var(--app-text-muted);
+  }
+  .app-chip { border-color: var(--app-button-border); color: var(--app-chip-idle-text); }
+  .app-chip:hover { background-color: var(--app-button-hover); }
+  .app-chip-active { border-color: var(--app-border-strong); background-color: var(--app-chip-active-bg); color: var(--app-chip-active-text); }
+  .app-chip-idle { border-color: var(--app-button-border); color: var(--app-chip-idle-text); }
+  .app-button { background-color: var(--app-button-bg); border-color: var(--app-button-border); color: var(--app-button-text); }
+  .app-button:hover { background-color: var(--app-button-hover); }
+  .app-button-primary { background-color: var(--app-primary-bg); color: var(--app-primary-text); }
+  .app-button-primary:hover { background-color: var(--app-primary-hover); }
+  .app-input, .app-select, .app-textarea { background-color: var(--app-surface-2); border-color: var(--app-button-border); color: var(--app-text); }
+  .app-input::placeholder, .app-textarea::placeholder { color: var(--app-text-muted); }
+  .app-input:focus, .app-select:focus, .app-textarea:focus { border-color: var(--app-accent); }
+  .app-thead { background-color: var(--app-table-head-bg); color: var(--app-text-muted); }
+  .app-tr { border-color: var(--app-border); }
+  .app-title, .app-page-header, .app-table, .app-card-tight, .app-metric-card { color: var(--app-text); }
+}
+
+/* Theme-safe fallback overrides for hard-coded Tailwind zinc utilities.
+   These keep existing app pages theme-aware without rewriting working components. */
+[data-theme] .bg-zinc-950,
+[data-theme] .bg-zinc-950\/60,
+[data-theme] .bg-zinc-950\/70,
+[data-theme] .bg-zinc-950\/80,
+[data-theme] .bg-zinc-950\/90,
+[data-theme] .bg-zinc-950\/95 {
+  background-color: var(--app-surface-2) !important;
+}
+
+[data-theme] .bg-zinc-900,
+[data-theme] .bg-zinc-900\/40,
+[data-theme] .bg-zinc-900\/50,
+[data-theme] .bg-zinc-900\/60,
+[data-theme] .bg-zinc-900\/70,
+[data-theme] .bg-zinc-900\/80,
+[data-theme] .bg-zinc-900\/90,
+[data-theme] .bg-zinc-900\/95 {
+  background-color: var(--app-surface) !important;
+}
+
+[data-theme] .bg-zinc-800,
+[data-theme] .bg-zinc-800\/40,
+[data-theme] .bg-zinc-800\/50,
+[data-theme] .bg-zinc-800\/60,
+[data-theme] .bg-zinc-800\/70,
+[data-theme] .bg-zinc-800\/80,
+[data-theme] .bg-zinc-800\/90,
+[data-theme] .hover\:bg-zinc-800:hover,
+[data-theme] .hover\:bg-zinc-800\/40:hover,
+[data-theme] .hover\:bg-zinc-800\/50:hover {
+  background-color: var(--app-button-hover) !important;
+}
+
+[data-theme] .border-zinc-900,
+[data-theme] .border-zinc-800,
+[data-theme] .border-zinc-700,
+[data-theme] .border-zinc-600 {
+  border-color: var(--app-border) !important;
+}
+
+[data-theme] .border-zinc-500,
+[data-theme] .border-zinc-400 {
+  border-color: var(--app-border-strong) !important;
+}
+
+[data-theme] .text-zinc-50,
+[data-theme] .text-zinc-100,
+[data-theme] .text-zinc-200,
+[data-theme] .text-zinc-300 {
+  color: var(--app-text) !important;
+}
+
+[data-theme] .text-zinc-400,
+[data-theme] .text-zinc-500,
+[data-theme] .text-zinc-600 {
+  color: var(--app-text-muted) !important;
+}
+
+[data-theme] .placeholder\:text-zinc-500::placeholder,
+[data-theme] .placeholder\:text-zinc-400::placeholder {
+  color: var(--app-text-muted) !important;
+}
+
+[data-theme] .hover\:text-zinc-100:hover,
+[data-theme] .hover\:text-zinc-200:hover,
+[data-theme] .hover\:text-white:hover {
+  color: var(--app-text) !important;
+}
+
+[data-theme] .hover\:border-zinc-500:hover,
+[data-theme] .hover\:border-zinc-400:hover {
+  border-color: var(--app-border-strong) !important;
+}
+
+[data-theme] .shadow-black\/40,
+[data-theme] .shadow-black\/30,
+[data-theme] .shadow-black\/20 {
+  --tw-shadow-color: color-mix(in srgb, var(--background) 70%, black 30%) !important;
+}
+
+[data-theme="retro-terminal"] .app-section,
+[data-theme="retro-terminal"] .app-card,
+[data-theme="retro-terminal"] .app-metric-card,
+[data-theme="retro-terminal"] .app-search-panel,
+[data-theme="retro-terminal"] .app-table-wrap {
+  box-shadow: 0 0 0 1px rgba(57, 255, 20, 0.05), 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="retro-terminal"] .app-card-tight,
+[data-theme="retro-terminal"] .app-section-tight,
+[data-theme="retro-terminal"] .app-empty {
+  box-shadow: inset 0 0 0 1px rgba(57, 255, 20, 0.03);
 }

@@ -17,53 +17,85 @@ function extractOrderNumbers(input: string): string[] {
   return Array.from(new Set(input.match(/\d{6,}/g) || []))
 }
 
+function normalizeSearchInput(value: string) {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
 export default function AppGlobalSearch() {
   const router = useRouter()
   const pathname = usePathname()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const lastSubmittedRef = useRef('')
+  const isOcrRunningRef = useRef(false)
 
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('')
+  const [isOcrRunning, setIsOcrRunning] = useState(false)
   const [isPending, startTransition] = useTransition()
+
+  const isBusy = isPending || isOcrRunning
 
   useEffect(() => {
     setQuery('')
     setStatus('')
+    lastSubmittedRef.current = ''
   }, [pathname])
 
   function submitSearch(value: string) {
-    const clean = value.trim()
+    const clean = normalizeSearchInput(value)
 
     if (!clean) {
       setQuery('')
       setStatus('')
+      lastSubmittedRef.current = ''
+
       startTransition(() => {
         router.push('/app/search')
       })
+
       return
     }
+
+    if (lastSubmittedRef.current === clean) {
+      return
+    }
+
+    lastSubmittedRef.current = clean
 
     const params = new URLSearchParams()
     params.set('q', clean)
 
     setStatus('Searching...')
+    setQuery('')
 
     startTransition(() => {
       router.push(`/app/search?${params.toString()}`)
-      setQuery('')
-      setStatus('')
     })
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
+
+    if (isBusy) return
+
     submitSearch(query)
   }
 
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (!file) return
 
+    if (!file) return
+    if (isOcrRunningRef.current) return
+
+    isOcrRunningRef.current = true
+    setIsOcrRunning(true)
     setStatus('Reading screenshot...')
 
     try {
@@ -100,6 +132,9 @@ export default function AppGlobalSearch() {
       const msg = err instanceof Error ? err.message : 'OCR failed'
       setStatus(msg)
     } finally {
+      isOcrRunningRef.current = false
+      setIsOcrRunning(false)
+
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -117,15 +152,17 @@ export default function AppGlobalSearch() {
             onChange={(e) => {
               setQuery(e.target.value)
               if (status === 'Searching...') setStatus('')
+              if (lastSubmittedRef.current) lastSubmittedRef.current = ''
             }}
             placeholder="Search orders, breaks, players, sets, order IDs... or paste multiple orders"
             className="app-input"
             autoComplete="off"
+            disabled={isBusy}
           />
 
           <button
             type="submit"
-            disabled={isPending}
+            disabled={isBusy}
             className="app-button-primary whitespace-nowrap disabled:opacity-60"
           >
             {isPending ? 'Searching...' : 'Search'}
@@ -134,9 +171,10 @@ export default function AppGlobalSearch() {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="app-button whitespace-nowrap"
+            disabled={isBusy}
+            className="app-button whitespace-nowrap disabled:opacity-60"
           >
-            Upload
+            {isOcrRunning ? 'Reading...' : 'Upload'}
           </button>
         </div>
 
@@ -152,6 +190,7 @@ export default function AppGlobalSearch() {
           accept="image/png,image/jpeg,image/webp"
           onChange={handleImageUpload}
           className="hidden"
+          disabled={isBusy}
         />
       </form>
     </div>

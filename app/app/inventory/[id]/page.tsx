@@ -6,6 +6,7 @@ import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
 import { updateInventoryItemAction } from '@/app/actions/inventory'
 import { markAsGiveawayAction } from '@/app/actions/inventory-giveaway'
 import DeleteInventoryItemButton from '../DeleteInventoryItemButton'
+import EstimateValueHelper from './EstimateValueHelper'
 
 type InventoryItem = {
   id: string
@@ -83,10 +84,11 @@ function formatDateTime(value: string | null | undefined) {
 
 function buildDisplay(item: InventoryItem) {
   const parts = [
+    item.player_name,
     item.year,
     item.set_name,
-    item.player_name,
     item.card_number ? `#${item.card_number}` : null,
+    item.parallel_name,
     item.notes,
   ]
 
@@ -205,6 +207,53 @@ function EditableSelect({
   )
 }
 
+function EstimateValueMetric({
+  item,
+  formId,
+}: {
+  item: InventoryItem
+  formId: string
+}) {
+  return (
+    <div className="app-metric-card p-3 md:col-span-2">
+      <input
+        id="estimated_value_unit"
+        form={formId}
+        name="estimated_value_unit"
+        type="hidden"
+        defaultValue={item.estimated_value_unit ?? 0}
+      />
+
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-[140px]">
+          <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+            Estimated Value
+          </div>
+          <div className="mt-1 text-lg font-semibold leading-tight">
+            {money(item.estimated_value_unit)}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <EstimateValueHelper
+            inputId="estimated_value_unit"
+            item={{
+              title: item.title,
+              playerName: item.player_name,
+              year: item.year,
+              brand: item.brand,
+              setName: item.set_name,
+              cardNumber: item.card_number,
+              parallel: item.parallel_name,
+              team: item.team,
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default async function InventoryDetailPage({
   params,
   searchParams,
@@ -233,68 +282,69 @@ export default async function InventoryDetailPage({
 
   if (!user) return null
 
-  const itemResponse = await supabase
-    .from('inventory_items')
-    .select(`
-      id,
-      status,
-      item_type,
-      title,
-      player_name,
-      year,
-      brand,
-      set_name,
-      card_number,
-      parallel_name,
-      team,
-      quantity,
-      available_quantity,
-      cost_basis_unit,
-      cost_basis_total,
-      estimated_value_unit,
-      estimated_value_total,
-      storage_location,
-      notes,
-      source_type,
-      source_break_id,
-      created_at,
-      updated_at,
-      listed_price,
-      listed_platform,
-      listed_date
-    `)
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+  const [itemResponse, salesResponse] = await Promise.all([
+    supabase
+      .from('inventory_items')
+      .select(`
+        id,
+        status,
+        item_type,
+        title,
+        player_name,
+        year,
+        brand,
+        set_name,
+        card_number,
+        parallel_name,
+        team,
+        quantity,
+        available_quantity,
+        cost_basis_unit,
+        cost_basis_total,
+        estimated_value_unit,
+        estimated_value_total,
+        storage_location,
+        notes,
+        source_type,
+        source_break_id,
+        created_at,
+        updated_at,
+        listed_price,
+        listed_platform,
+        listed_date
+      `)
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single(),
+
+    supabase
+      .from('sales')
+      .select(`
+        id,
+        sale_date,
+        quantity_sold,
+        gross_sale,
+        platform_fees,
+        shipping_cost,
+        other_costs,
+        net_proceeds,
+        cost_of_goods_sold,
+        profit,
+        platform,
+        notes,
+        reversed_at,
+        reversal_reason
+      `)
+      .eq('user_id', user.id)
+      .eq('inventory_item_id', id)
+      .order('sale_date', { ascending: false }),
+  ])
 
   if (itemResponse.error || !itemResponse.data) {
     notFound()
   }
 
   const item = itemResponse.data as InventoryItem
-
-  const salesResponse = await supabase
-    .from('sales')
-    .select(`
-      id,
-      sale_date,
-      quantity_sold,
-      gross_sale,
-      platform_fees,
-      shipping_cost,
-      other_costs,
-      net_proceeds,
-      cost_of_goods_sold,
-      profit,
-      platform,
-      notes,
-      reversed_at,
-      reversal_reason
-    `)
-    .eq('user_id', user.id)
-    .eq('inventory_item_id', item.id)
-    .order('sale_date', { ascending: false })
-
   const sales: SaleRow[] = (salesResponse.data ?? []) as SaleRow[]
 
   const activeSales = sales.filter((sale) => !sale.reversed_at)
@@ -420,18 +470,7 @@ export default async function InventoryDetailPage({
       <div className="grid gap-2 md:grid-cols-4">
         <ReadonlyMetric label="Unit Cost" value={money(item.cost_basis_unit)} />
         <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
-
-        <EditableField
-          label="Est. Value / Unit"
-          name="estimated_value_unit"
-          type="number"
-          step="0.01"
-          min={0}
-          defaultValue={item.estimated_value_unit ?? 0}
-          formId={itemFormId}
-        />
-
-        <ReadonlyMetric label="Est. Value Total" value={money(item.estimated_value_total)} />
+        <EstimateValueMetric item={item} formId={itemFormId} />
       </div>
 
       <div className="app-section mt-0 p-4">
@@ -459,7 +498,7 @@ export default async function InventoryDetailPage({
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Player
+              Item Name
             </label>
             <input
               form={itemFormId}
@@ -498,7 +537,7 @@ export default async function InventoryDetailPage({
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Card #
+              Item #
             </label>
             <input
               form={itemFormId}
@@ -637,13 +676,13 @@ export default async function InventoryDetailPage({
       </div>
 
       <div className="app-section mt-0 p-4">
-        <h2 className="text-base font-semibold leading-tight">Card Details</h2>
+        <h2 className="text-base font-semibold leading-tight">Item Details</h2>
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <Detail label="Year" value={item.year?.toString() || '—'} />
           <Detail label="Set" value={item.set_name || '—'} />
-          <Detail label="Player" value={item.player_name || '—'} />
-          <Detail label="Card #" value={item.card_number || '—'} />
+          <Detail label="Item Name" value={item.player_name || '—'} />
+          <Detail label="Item #" value={item.card_number || '—'} />
           <Detail label="Brand" value={item.brand || '—'} />
           <Detail label="Parallel" value={item.parallel_name || '—'} />
           <Detail label="Team" value={item.team || '—'} />

@@ -29,6 +29,15 @@ type InventoryRow = {
   created_at?: string
 }
 
+
+type InventoryStatusSummary = {
+  quantity: number
+  cost: number
+  value: number
+}
+
+type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'sold' | 'personal'
+
 type SaleRow = {
   id: string
   inventory_item_id: string
@@ -57,6 +66,16 @@ const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
 const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
 const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
 const BULK_PENDING_STATE_ID = 'bulk-inventory-pending-state'
+
+const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
+  available: 'Available',
+  listed: 'Listed',
+  junk: 'Junk',
+  sold: 'Sold',
+  personal: 'Personal',
+}
+
+const STATUS_FILTERS: InventoryStatusFilter[] = ['available', 'listed', 'junk', 'sold', 'personal']
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -485,7 +504,7 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
 }
 
 function getFilterHref(
-  filter: '' | 'listed' | 'junk' | 'personal',
+  filter: '' | InventoryStatusFilter,
   sortKey: SortKey,
   sortDir: SortDir,
   limit: number
@@ -579,6 +598,63 @@ function SummaryCard({
       <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
     </div>
+  )
+}
+
+
+function StatusSummaryCard({
+  label,
+  href,
+  summary,
+  active,
+  status,
+}: {
+  label: string
+  href: string
+  summary: InventoryStatusSummary
+  active: boolean
+  status: InventoryStatusFilter
+}) {
+  const toneClass =
+    status === 'available'
+      ? 'hover:border-emerald-800/70 hover:bg-emerald-950/20'
+      : status === 'listed'
+        ? 'hover:border-sky-800/70 hover:bg-sky-950/20'
+        : status === 'junk'
+          ? 'hover:border-zinc-600 hover:bg-zinc-800/70'
+          : status === 'sold'
+            ? 'hover:border-amber-800/70 hover:bg-amber-950/20'
+            : 'hover:border-blue-800/70 hover:bg-blue-950/20'
+
+  const activeClass =
+    status === 'available'
+      ? 'border-emerald-800 bg-emerald-950/20'
+      : status === 'listed'
+        ? 'border-sky-800 bg-sky-950/20'
+        : status === 'junk'
+          ? 'border-zinc-600 bg-zinc-800/60'
+          : status === 'sold'
+            ? 'border-amber-800 bg-amber-950/20'
+            : 'border-blue-800 bg-blue-950/20'
+
+  return (
+    <Link
+      href={href}
+      className={`app-card-tight block p-2.5 text-center transition ${active ? activeClass : toneClass}`}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">{label}</div>
+      <div className="mt-0.5 text-lg font-bold leading-none text-zinc-100">{summary.quantity}</div>
+      <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] leading-tight text-zinc-500">
+        <div>
+          <div className="uppercase tracking-wide">Cost</div>
+          <div className="font-semibold text-zinc-200">{money(summary.cost)}</div>
+        </div>
+        <div>
+          <div className="uppercase tracking-wide">Value</div>
+          <div className="font-semibold text-zinc-200">{money(summary.value)}</div>
+        </div>
+      </div>
+    </Link>
   )
 }
 
@@ -1171,10 +1247,14 @@ export default async function InventoryPage({
     query = query.neq('status', 'junk')
   }
 
-  if (qNormalized === 'listed') {
+  if (qNormalized === 'available') {
+    query = query.eq('status', 'available')
+  } else if (qNormalized === 'listed') {
     query = query.eq('status', 'listed')
   } else if (qNormalized === 'junk') {
     query = query.eq('status', 'junk')
+  } else if (qNormalized === 'sold') {
+    query = query.eq('status', 'sold')
   } else if (qNormalized === 'personal') {
     query = query.eq('status', 'personal')
   } else if (q) {
@@ -1198,13 +1278,22 @@ export default async function InventoryPage({
   const from = (page - 1) * limit
   const to = from + limit - 1
 
-  const response = await query
+  const inventoryRowsPromise = query
     .order(dbSortKey, { ascending: sortDir === 'asc' })
     .range(from, to)
 
+  const summaryRowsPromise = supabase
+    .from('inventory_items')
+    .select('status, quantity, available_quantity, cost_basis_total, estimated_value_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('status', STATUS_FILTERS)
+
+  const [response, summaryResponse] = await Promise.all([inventoryRowsPromise, summaryRowsPromise])
+
   const rawItems = (response.data ?? []) as InventoryRow[]
   const items = sortKey === 'card' ? sortRows(rawItems, sortKey, sortDir) : rawItems
-  const error = response.error
+  const error = response.error || summaryResponse.error
 
   const soldOutItemIds = items
     .filter((item) => Number(item.available_quantity ?? 0) <= 0)
@@ -1235,36 +1324,44 @@ export default async function InventoryPage({
     }
   }
 
+  const activeStatusFilter = STATUS_FILTERS.includes(qNormalized as InventoryStatusFilter)
+    ? (qNormalized as InventoryStatusFilter)
+    : null
+
   const pageDescription =
-    qNormalized === 'listed'
-      ? 'Showing listed inventory items.'
-      : qNormalized === 'junk'
-        ? 'Showing junk items you are not planning to sell.'
-        : qNormalized === 'personal'
-          ? 'Showing personal collection items.'
-          : 'View and manage your inventory items.'
-
-  const showingSearchText =
-    q && qNormalized !== 'listed' && qNormalized !== 'junk' && qNormalized !== 'personal'
-      ? `Showing results for "${q}"`
+    qNormalized === 'available'
+      ? 'Showing available inventory items.'
       : qNormalized === 'listed'
-        ? 'Showing listed inventory.'
+        ? 'Showing listed inventory items.'
         : qNormalized === 'junk'
-          ? 'Showing junk inventory.'
-          : qNormalized === 'personal'
-            ? 'Showing personal inventory.'
-            : ''
+          ? 'Showing junk items you are not planning to sell.'
+          : qNormalized === 'sold'
+            ? 'Showing sold inventory items.'
+            : qNormalized === 'personal'
+              ? 'Showing personal collection items.'
+              : 'View and manage your inventory items.'
 
-  const totalItems = items.length
-  const totalAvailableUnits = items.reduce(
-    (sum, item) => sum + Number(item.available_quantity ?? 0),
-    0
+  const statusSummaries = STATUS_FILTERS.reduce(
+    (acc, status) => {
+      acc[status] = { quantity: 0, cost: 0, value: 0 }
+      return acc
+    },
+    {} as Record<InventoryStatusFilter, InventoryStatusSummary>
   )
-  const totalCost = items.reduce((sum, item) => sum + Number(item.cost_basis_total ?? 0), 0)
-  const totalEstimatedValue = items.reduce(
-    (sum, item) => sum + Number(item.estimated_value_total ?? 0),
-    0
-  )
+
+  for (const item of (summaryResponse.data ?? []) as Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity' | 'cost_basis_total' | 'estimated_value_total'>[]) {
+    const status = String(item.status ?? '') as InventoryStatusFilter
+    if (!STATUS_FILTERS.includes(status)) continue
+
+    const quantity =
+      status === 'sold'
+        ? Number(item.quantity ?? 0)
+        : Number(item.available_quantity ?? item.quantity ?? 0)
+
+    statusSummaries[status].quantity += quantity
+    statusSummaries[status].cost += Number(item.cost_basis_total ?? 0)
+    statusSummaries[status].value += Number(item.estimated_value_total ?? 0)
+  }
 
   const hasPreviousPage = page > 1
   const hasNextPage = items.length === limit
@@ -1314,11 +1411,17 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Rows On This Page" value={totalItems} />
-        <SummaryCard label="Available Units" value={totalAvailableUnits} />
-        <SummaryCard label="Total Cost" value={money(totalCost)} />
-        <SummaryCard label="Est. Value" value={money(totalEstimatedValue)} />
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        {STATUS_FILTERS.map((status) => (
+          <StatusSummaryCard
+            key={status}
+            label={STATUS_LABELS[status]}
+            href={getFilterHref(status, sortKey, sortDir, limit)}
+            summary={statusSummaries[status]}
+            active={activeStatusFilter === status}
+            status={status}
+          />
+        ))}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -1328,69 +1431,13 @@ export default async function InventoryPage({
         >
           All
         </Link>
-        <Link
-          href={getFilterHref('listed', sortKey, sortDir, limit)}
-          className={`app-chip ${qNormalized === 'listed' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          Listed
-        </Link>
-        <Link
-          href={getFilterHref('personal', sortKey, sortDir, limit)}
-          className={`app-chip ${qNormalized === 'personal' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          Personal
-        </Link>
-        <Link
-          href={getFilterHref('junk', sortKey, sortDir, limit)}
-          className={`app-chip ${qNormalized === 'junk' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          Junk
-        </Link>
       </div>
 
-      <div className="app-section p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            {showingSearchText ? (
-              <div className="text-xs text-zinc-400">{showingSearchText}</div>
-            ) : (
-              <div className="text-xs text-zinc-500">
-                Use the global search bar at the top for new searches.
-              </div>
-            )}
-            <div className="mt-1 text-xs text-zinc-500">Page {page}</div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {LIMIT_OPTIONS.map((option) => (
-              <Link
-                key={option}
-                href={buildLimitHref({
-                  q,
-                  sort: sortKey,
-                  dir: sortDir,
-                  limit: option,
-                })}
-                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
-              >
-                {option} rows
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 
       <div className="app-section">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Inventory</h2>
-            <p className="mt-0.5 text-sm text-zinc-400">
-              One row per item. Open details when you need the full record.
-            </p>
-          </div>
-
+        <div className="flex justify-end">
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
 
@@ -1479,26 +1526,6 @@ export default async function InventoryPage({
                   </th>
                   <th className="app-th">
                     <SortHeader
-                      label="Total Cost"
-                      sortKey="cost_basis_total"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      q={q}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Est. Value"
-                      sortKey="estimated_value_total"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      q={q}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
                       label="Location"
                       sortKey="storage_location"
                       currentSortKey={sortKey}
@@ -1570,9 +1597,6 @@ export default async function InventoryPage({
                       </td>
 
                       <td className="app-td whitespace-nowrap">{money(item.cost_basis_unit)}</td>
-                      <td className="app-td whitespace-nowrap">{money(item.cost_basis_total)}</td>
-                      <td className="app-td whitespace-nowrap">{money(item.estimated_value_total)}</td>
-
                       <td className="app-td">
                         <div className="max-w-28 break-words" title={item.storage_location || '—'}>
                           {item.storage_location || '—'}
@@ -1616,7 +1640,7 @@ export default async function InventoryPage({
 
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-zinc-400">
+                    <td colSpan={8} className="px-4 py-8 text-center text-zinc-400">
                       {q ? 'No inventory items match your search.' : 'No inventory items found.'}
                     </td>
                   </tr>

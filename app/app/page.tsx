@@ -1,42 +1,46 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 
-function money(value: number | null | undefined) {
+function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
   }).format(Number(value ?? 0))
 }
 
-type InventoryRow = {
-  id: string
-  status: string | null
-  available_quantity: number | null
-  cost_basis_total: number | null
-  estimated_value_total: number | null
-  listed_price: number | null
-  source_break_id: string | null
-  quantity: number | null
-  source_type: string | null
+type DashboardInventoryAgg = {
+  inventory_count: number | string | null
+  available_units: number | string | null
+  inventory_cost: number | string | null
+  inventory_value: number | string | null
+  listed_item_count: number | string | null
+  listed_item_total: number | string | null
 }
 
-type BreakRow = {
-  id: string
-  total_cost: number | null
-  reversed_at: string | null
-  cards_received: number | null
+type DashboardBreaksAgg = {
+  break_count: number | string | null
+  break_spend: number | string | null
+  open_break_count: number | string | null
+  incomplete_breaks_count: number | string | null
+  no_cards_declared_breaks_count: number | string | null
 }
 
-type SaleRow = {
-  gross_sale: number | null
-  net_proceeds: number | null
-  profit: number | null
-  reversed_at: string | null
+type DashboardSalesAgg = {
+  sale_count: number | string | null
+  gross_sales: number | string | null
+  net_sales: number | string | null
+  total_profit: number | string | null
 }
 
-type WhatnotOrderRow = {
-  break_id: string | null
-  total: number | null
+type DashboardWhatnotAgg = {
+  order_count: number | string | null
+  unassigned_count: number | string | null
+  unassigned_total: number | string | null
+}
+
+function numberValue(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 export default async function AppHomePage() {
@@ -48,119 +52,41 @@ export default async function AppHomePage() {
 
   if (!user) return null
 
+  const dashboardSupabase = supabase as any
+
   const [inventoryRes, breaksRes, salesRes, whatnotRes] = await Promise.all([
-    supabase
-      .from('inventory_items')
-      .select(
-        'id, status, available_quantity, cost_basis_total, estimated_value_total, listed_price, source_break_id, quantity, source_type',
-        { count: 'exact' }
-      )
-      .eq('user_id', user.id),
-
-    supabase
-      .from('breaks')
-      .select('id, total_cost, reversed_at, cards_received', { count: 'exact' })
-      .eq('user_id', user.id),
-
-    supabase
-      .from('sales')
-      .select('gross_sale, net_proceeds, profit, reversed_at', { count: 'exact' })
-      .eq('user_id', user.id),
-
-    supabase
-      .from('whatnot_orders')
-      .select('break_id, total', { count: 'exact' })
-      .eq('user_id', user.id),
+    dashboardSupabase.rpc('dashboard_inventory_agg', { user_id_input: user.id }),
+    dashboardSupabase.rpc('dashboard_breaks_agg', { user_id_input: user.id }),
+    dashboardSupabase.rpc('dashboard_sales_agg', { user_id_input: user.id }),
+    dashboardSupabase.rpc('dashboard_whatnot_agg', { user_id_input: user.id }),
   ])
 
-  const inventory = (inventoryRes.data ?? []) as InventoryRow[]
-  const breaks = (breaksRes.data ?? []) as BreakRow[]
-  const sales = (salesRes.data ?? []) as SaleRow[]
-  const whatnotOrders = (whatnotRes.data ?? []) as WhatnotOrderRow[]
+  const inventoryAgg = ((inventoryRes.data ?? [])[0] ?? {}) as DashboardInventoryAgg
+  const breaksAgg = ((breaksRes.data ?? [])[0] ?? {}) as DashboardBreaksAgg
+  const salesAgg = ((salesRes.data ?? [])[0] ?? {}) as DashboardSalesAgg
+  const whatnotAgg = ((whatnotRes.data ?? [])[0] ?? {}) as DashboardWhatnotAgg
 
-  let availableUnits = 0
-  let inventoryCost = 0
-  let inventoryEstimatedValue = 0
-  let listedItemCount = 0
-  let listedItemTotal = 0
+  const availableUnits = numberValue(inventoryAgg.available_units)
+  const inventoryCost = numberValue(inventoryAgg.inventory_cost)
+  const inventoryEstimatedValue = numberValue(inventoryAgg.inventory_value)
+  const listedItemCount = numberValue(inventoryAgg.listed_item_count)
+  const listedItemTotal = numberValue(inventoryAgg.listed_item_total)
+  const inventoryCount = numberValue(inventoryAgg.inventory_count)
 
-  const breakEnteredMap = new Map<string, number>()
+  const breakCount = numberValue(breaksAgg.break_count)
+  const breakSpend = numberValue(breaksAgg.break_spend)
+  const openBreakCount = numberValue(breaksAgg.open_break_count)
+  const incompleteBreaksCount = numberValue(breaksAgg.incomplete_breaks_count)
+  const noCardsDeclaredBreaksCount = numberValue(breaksAgg.no_cards_declared_breaks_count)
 
-  for (const item of inventory) {
-    availableUnits += Number(item.available_quantity ?? 0)
-    inventoryCost += Number(item.cost_basis_total ?? 0)
-    inventoryEstimatedValue += Number(item.estimated_value_total ?? 0)
+  const saleCount = numberValue(salesAgg.sale_count)
+  const grossSales = numberValue(salesAgg.gross_sales)
+  const netSales = numberValue(salesAgg.net_sales)
+  const totalProfit = numberValue(salesAgg.total_profit)
 
-    const normalizedStatus = String(item.status ?? '').toLowerCase()
-    if (normalizedStatus === 'listed') {
-      listedItemCount += 1
-      listedItemTotal += Number(
-        item.listed_price ?? item.estimated_value_total ?? 0
-      )
-    }
-
-    if (item.source_type === 'break' && item.source_break_id) {
-      breakEnteredMap.set(
-        item.source_break_id,
-        (breakEnteredMap.get(item.source_break_id) ?? 0) +
-          Number(item.quantity ?? 0)
-      )
-    }
-  }
-
-  let breakCount = 0
-  let breakSpend = 0
-  let openBreakCount = 0
-  let incompleteBreaksCount = 0
-  let noCardsDeclaredBreaksCount = 0
-
-  for (const breakRow of breaks) {
-    if (breakRow.reversed_at) continue
-
-    breakCount += 1
-    breakSpend += Number(breakRow.total_cost ?? 0)
-
-    const received = Number(breakRow.cards_received ?? 0)
-    const entered = breakEnteredMap.get(breakRow.id) ?? 0
-
-    if (received <= 0) {
-      openBreakCount += 1
-      noCardsDeclaredBreaksCount += 1
-      continue
-    }
-
-    if (entered < received) {
-      openBreakCount += 1
-      incompleteBreaksCount += 1
-    }
-  }
-
-  let saleCount = 0
-  let grossSales = 0
-  let netSales = 0
-  let totalProfit = 0
-
-  for (const sale of sales) {
-    if (sale.reversed_at) continue
-
-    saleCount += 1
-    grossSales += Number(sale.gross_sale ?? 0)
-    netSales += Number(sale.net_proceeds ?? 0)
-    totalProfit += Number(sale.profit ?? 0)
-  }
-
-  let unassignedWhatnotOrdersCount = 0
-  let whatnotUnassignedTotal = 0
-
-  for (const order of whatnotOrders) {
-    if (!order.break_id) {
-      unassignedWhatnotOrdersCount += 1
-      whatnotUnassignedTotal += Number(order.total ?? 0)
-    }
-  }
-
-  const inventoryCount = inventoryRes.count ?? inventory.length
-  const whatnotCount = whatnotRes.count ?? whatnotOrders.length
+  const whatnotCount = numberValue(whatnotAgg.order_count)
+  const unassignedWhatnotOrdersCount = numberValue(whatnotAgg.unassigned_count)
+  const whatnotUnassignedTotal = numberValue(whatnotAgg.unassigned_total)
 
   return (
     <div className="app-page-wide">
@@ -315,13 +241,13 @@ export default async function AppHomePage() {
           <h2 className="text-lg font-semibold">Workflow</h2>
           <div className="mt-3 space-y-2.5 text-sm text-zinc-400">
             <p>
-              Use <span className="text-zinc-200">Breaks</span> to create and manage break purchases.
+              Use <span className="text-zinc-200">Orders</span> to create and manage purchases.
             </p>
             <p>
               Use <span className="text-zinc-200">Inventory</span> to view items, sell them, and reverse sales if needed.
             </p>
             <p>
-              Use <span className="text-zinc-200">Utilities</span> for shipping profiles, imports, exports, Whatnot order staging, and tax reports.
+              Use <span className="text-zinc-200">Utilities</span> for shipping profiles, imports, exports, order staging, and tax reports.
             </p>
           </div>
         </div>

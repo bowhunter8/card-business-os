@@ -441,6 +441,8 @@ async function BreakCardsAndMetricsSection({
 }) {
   const supabase = await createClient()
 
+  const dbCardSortKey = cardsSortKey === 'card' ? 'created_at' : cardsSortKey
+
   const cardsResponse = await supabase
     .from('inventory_items')
     .select(`
@@ -466,10 +468,13 @@ async function BreakCardsAndMetricsSection({
     .eq('user_id', userId)
     .eq('source_type', 'break')
     .eq('source_break_id', breakId)
-    .order('created_at', { ascending: false })
+    .order(dbCardSortKey, { ascending: cardsSortDir === 'asc', nullsFirst: false })
 
   const rawBreakCards = (cardsResponse.data ?? []) as BreakCardRow[]
-  const breakCards = sortBreakCards(rawBreakCards, cardsSortKey, cardsSortDir)
+  const breakCards =
+    cardsSortKey === 'card'
+      ? sortBreakCards(rawBreakCards, cardsSortKey, cardsSortDir)
+      : rawBreakCards
   const cardsError = cardsResponse.error
   const breakCardIds = rawBreakCards.map((card) => card.id)
 
@@ -493,6 +498,7 @@ async function BreakCardsAndMetricsSection({
       `)
       .eq('user_id', userId)
       .in('inventory_item_id', breakCardIds)
+      .order('inventory_item_id', { ascending: true })
 
     breakSales = (salesResponse.data ?? []) as SaleRow[]
   }

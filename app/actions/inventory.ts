@@ -14,6 +14,37 @@ function isSellableStatus(value: string) {
   return value === 'available' || value === 'listed'
 }
 
+function cleanText(value: string | number | null | undefined) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function cleanItemNumber(value: string | null | undefined) {
+  return cleanText(value).replace(/^#+/, '').trim()
+}
+
+function buildInventoryTitle({
+  fallbackTitle,
+  playerName,
+  year,
+  setName,
+  cardNumber,
+}: {
+  fallbackTitle: string
+  playerName: string
+  year: number | null
+  setName: string
+  cardNumber: string
+}) {
+  const itemName = cleanText(playerName)
+  const yearText = year ? String(year) : ''
+  const setText = cleanText(setName)
+  const itemNumber = cleanItemNumber(cardNumber)
+
+  const structuredTitle = [itemName, yearText, setText, itemNumber].filter(Boolean).join(' ')
+
+  return structuredTitle || cleanText(fallbackTitle) || itemName || null
+}
+
 export async function createInventoryItemAction(formData: FormData) {
   const supabase = await createClient()
 
@@ -26,7 +57,7 @@ export async function createInventoryItemAction(formData: FormData) {
   }
 
   const itemType = String(formData.get('item_type') ?? 'single_card').trim()
-  const title = String(formData.get('title') ?? '').trim()
+  const rawTitle = String(formData.get('title') ?? '').trim()
   const playerName = String(formData.get('player_name') ?? '').trim()
   const yearRaw = String(formData.get('year') ?? '').trim()
   const brand = String(formData.get('brand') ?? '').trim()
@@ -45,6 +76,14 @@ export async function createInventoryItemAction(formData: FormData) {
   }
 
   const year = yearRaw ? Number(yearRaw) : null
+  const safeYear = year && !Number.isNaN(year) ? year : null
+  const title = buildInventoryTitle({
+    fallbackTitle: rawTitle,
+    playerName,
+    year: safeYear,
+    setName,
+    cardNumber,
+  })
   const costBasisTotal = Number((costBasisUnit * quantity).toFixed(2))
   const estimatedValueTotal = Number((estimatedValueUnit * quantity).toFixed(2))
 
@@ -56,9 +95,9 @@ export async function createInventoryItemAction(formData: FormData) {
       status: 'available',
       quantity,
       available_quantity: quantity,
-      title: title || null,
+      title,
       player_name: playerName || null,
-      year: year && !Number.isNaN(year) ? year : null,
+      year: safeYear,
       brand: brand || null,
       set_name: setName || null,
       card_number: cardNumber || null,
@@ -108,7 +147,7 @@ export async function updateInventoryItemAction(formData: FormData) {
   }
 
   const inventoryItemId = String(formData.get('inventory_item_id') ?? '').trim()
-  const title = String(formData.get('title') ?? '').trim()
+  const rawTitle = String(formData.get('title') ?? '').trim()
   const playerName = String(formData.get('player_name') ?? '').trim()
   const yearRaw = String(formData.get('year') ?? '').trim()
   const brand = String(formData.get('brand') ?? '').trim()
@@ -200,6 +239,14 @@ export async function updateInventoryItemAction(formData: FormData) {
 
   const costBasisUnit = Number(item.cost_basis_unit ?? 0)
   const year = yearRaw ? Number(yearRaw) : null
+  const safeYear = year && !Number.isNaN(year) ? year : null
+  const title = buildInventoryTitle({
+    fallbackTitle: rawTitle,
+    playerName,
+    year: safeYear,
+    setName,
+    cardNumber,
+  })
 
   const costBasisTotal = Number((costBasisUnit * newQuantity).toFixed(2))
   const estimatedValueTotal = Number((estimatedValueUnit * newQuantity).toFixed(2))
@@ -207,9 +254,9 @@ export async function updateInventoryItemAction(formData: FormData) {
   const updateResponse = await supabase
     .from('inventory_items')
     .update({
-      title: title || null,
+      title,
       player_name: playerName || null,
-      year: year && !Number.isNaN(year) ? year : null,
+      year: safeYear,
       brand: brand || null,
       set_name: setName || null,
       card_number: cardNumber || null,

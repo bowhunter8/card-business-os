@@ -262,14 +262,14 @@ export default async function WhatnotOrderFocusPage({
 
   if (error) {
     return (
-      <div className="max-w-5xl space-y-6">
+      <div className="app-page-wide space-y-3">
         <div>
-          <h1 className="text-3xl font-semibold">Focused Whatnot Order</h1>
-          <p className="mt-2 text-zinc-400">Single-order view for scanner matches.</p>
+          <h1 className="app-title">Focused Order</h1>
+          <p className="app-subtitle">Single-order view for scanner matches.</p>
         </div>
 
-        <div className="rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          Failed to load Whatnot orders: {error.message}
+        <div className="app-alert-error">
+          Failed to load orders: {error.message}
         </div>
       </div>
     )
@@ -294,23 +294,23 @@ export default async function WhatnotOrderFocusPage({
 
   if (!primaryOrder) {
     return (
-      <div className="max-w-5xl space-y-6">
+      <div className="app-page-wide space-y-3">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold">Focused Whatnot Order</h1>
-            <p className="mt-2 text-zinc-400">Single-order view for scanner matches.</p>
+            <h1 className="app-title">Focused Order</h1>
+            <p className="app-subtitle">Single-order view for scanner matches.</p>
           </div>
 
           <Link
             href="/app/whatnot-orders"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+            className="app-button"
           >
             Back to All Orders
           </Link>
         </div>
 
-        <div className="rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-300">
-          No matching Whatnot order was found for this focus request.
+        <div className="app-alert-warning">
+          No matching order was found for this focus request.
         </div>
       </div>
     )
@@ -350,225 +350,207 @@ export default async function WhatnotOrderFocusPage({
   )
 
   return (
-    <div className="max-w-6xl space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Focused Whatnot Order</h1>
-          <p className="mt-2 text-zinc-400">
-            Clean scanner view for one matched order and everything directly tied to it.
+    <div className="app-page-wide space-y-3">
+      <div className="app-page-header gap-3">
+        <div className="min-w-0">
+          <h1 className="app-title">Focused Order</h1>
+          <p className="app-subtitle">
+            Scanner match, linked record status, and related rows in one compact view.
           </p>
         </div>
 
-        <div className="flex gap-3">
-          <Link
-            href="/app/whatnot-orders"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Back to All Orders
+        <div className="flex flex-wrap gap-2">
+          <Link href="/app/whatnot-orders" className="app-button whitespace-nowrap">
+            Back to Orders
           </Link>
 
-          <Link
-            href={buildAllOrdersHref(primaryOrder)}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-          >
-            Open in All Orders
+          <Link href={buildAllOrdersHref(primaryOrder)} className="app-button whitespace-nowrap">
+            Open in Orders
           </Link>
 
           {primaryOrder.break_id ? (
             <Link
               href={`/app/breaks/${primaryOrder.break_id}`}
-              className="rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
+              className="app-button-primary whitespace-nowrap"
             >
-              Open Linked Break
+              Open Linked Purchase
             </Link>
           ) : null}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-blue-900 bg-blue-950/20 p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-zinc-500">
-                Matched Order
-              </div>
-              <div className="mt-1 text-2xl font-semibold">
-                {primaryOrder.order_numeric_id
-                  ? `#${primaryOrder.order_numeric_id}`
-                  : 'No order number'}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Seller</div>
-                <div className="mt-1 font-medium">{primaryOrder.seller || '—'}</div>
-              </div>
-
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Buyer</div>
-                <div className="mt-1 font-medium">{primaryOrder.buyer || '—'}</div>
-              </div>
-
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Processed Date</div>
-                <div className="mt-1 font-medium">
-                  {primaryOrder.processed_date_display ||
-                    dateDisplay(primaryOrder.processed_date)}
+      <div className="app-section border-blue-900/50 bg-blue-950/15 p-3">
+        <div className="grid gap-3 xl:grid-cols-[1fr_260px]">
+          <div className="min-w-0 space-y-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-zinc-500">Matched Order</div>
+                <div className="mt-0.5 truncate text-xl font-semibold">
+                  {primaryOrder.order_numeric_id
+                    ? `#${primaryOrder.order_numeric_id}`
+                    : 'No order number'}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Status</div>
-                <div className="mt-1 font-medium">{primaryOrder.order_status || '—'}</div>
+              <div className="text-xs text-zinc-500">
+                {primaryOrder.processed_date_display || dateDisplay(primaryOrder.processed_date)}
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+              <div className="app-card-tight p-2.5 xl:col-span-2">
+                <div className="text-[11px] text-zinc-500">Seller</div>
+                <div className="mt-0.5 truncate text-sm font-medium">{primaryOrder.seller || '—'}</div>
               </div>
 
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Quantity</div>
-                <div className="mt-1 font-medium">{primaryOrder.quantity ?? 0}</div>
+              <div className="app-card-tight p-2.5 xl:col-span-2">
+                <div className="text-[11px] text-zinc-500">Buyer</div>
+                <div className="mt-0.5 truncate text-sm font-medium">{primaryOrder.buyer || '—'}</div>
               </div>
 
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="text-xs text-zinc-500">Source File</div>
-                <div className="mt-1 font-medium">{primaryOrder.source_file_name || '—'}</div>
+              <div className="app-card-tight p-2.5">
+                <div className="text-[11px] text-zinc-500">Status</div>
+                <div className="mt-0.5 truncate text-sm font-medium">{primaryOrder.order_status || '—'}</div>
+              </div>
+
+              <div className="app-card-tight p-2.5">
+                <div className="text-[11px] text-zinc-500">Qty</div>
+                <div className="mt-0.5 text-sm font-medium">{primaryOrder.quantity ?? 0}</div>
+              </div>
+            </div>
+
+            <div className="grid gap-2 lg:grid-cols-[1fr_280px]">
+              <div className="app-card-tight p-2.5">
+                <div className="text-[11px] text-zinc-500">Product</div>
+                <div className="mt-0.5 line-clamp-2 text-sm font-medium">
+                  {primaryOrder.product_name || '—'}
+                </div>
+              </div>
+
+              <div className="app-card-tight p-2.5">
+                <div className="text-[11px] text-zinc-500">Source File</div>
+                <div className="mt-0.5 truncate text-sm font-medium">
+                  {primaryOrder.source_file_name || '—'}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="min-w-[260px] rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-            <div className="text-sm font-medium text-zinc-300">Link Status</div>
+          <div className="app-card-tight h-fit p-3">
+            <div className="text-sm font-semibold text-zinc-200">Link Status</div>
 
             {primaryOrder.break_id ? (
-              <div className="mt-3 space-y-3">
-                <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
-                  This order is linked to a break.
+              <div className="mt-2 space-y-2">
+                <div className="app-alert-success py-2 text-xs">
+                  Linked to a purchase.
                 </div>
 
-                <Link
-                  href={`/app/breaks/${primaryOrder.break_id}`}
-                  className="inline-flex rounded-xl bg-white px-4 py-2 font-medium text-black hover:bg-zinc-200"
-                >
-                  Open Linked Break
+                <Link href={`/app/breaks/${primaryOrder.break_id}`} className="app-button-primary w-full justify-center">
+                  Open Linked Purchase
                 </Link>
               </div>
             ) : (
-              <div className="mt-3 rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-2 text-sm text-yellow-300">
+              <div className="app-alert-warning mt-2 py-2 text-xs">
                 Still in staging / not linked yet
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <div className="text-xs text-zinc-500">Product</div>
-          <div className="mt-1 text-base">{primaryOrder.product_name || '—'}</div>
+      <div className="grid gap-2 md:grid-cols-4">
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] text-zinc-400">Matched Rows</div>
+          <div className="mt-0.5 text-lg font-semibold">{relatedOrders.length}</div>
+        </div>
+
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] text-zinc-400">Subtotal</div>
+          <div className="mt-0.5 text-lg font-semibold">{money(relatedTotals.subtotal)}</div>
+        </div>
+
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] text-zinc-400">Shipping</div>
+          <div className="mt-0.5 text-lg font-semibold">{money(relatedTotals.shipping)}</div>
+        </div>
+
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] text-zinc-400">Total Paid</div>
+          <div className="mt-0.5 text-lg font-semibold">{money(relatedTotals.total)}</div>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Matched Rows</div>
-          <div className="mt-1 text-2xl font-semibold">{relatedOrders.length}</div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Subtotal</div>
-          <div className="mt-1 text-2xl font-semibold">{money(relatedTotals.subtotal)}</div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Shipping</div>
-          <div className="mt-1 text-2xl font-semibold">{money(relatedTotals.shipping)}</div>
-        </div>
-
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <div className="text-xs text-zinc-400">Total Paid</div>
-          <div className="mt-1 text-2xl font-semibold">{money(relatedTotals.total)}</div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+      <div className="app-section p-3">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-semibold">Every Matching Place This Order Appears</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Exact matches based on row id, Whatnot order id, or Whatnot numeric order number.
+            <h2 className="text-lg font-semibold">Matching Records</h2>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Exact matches based on row id, order id, or numeric order number.
             </p>
           </div>
         </div>
 
-        <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="min-w-full text-sm">
-            <thead className="bg-zinc-950 text-zinc-300">
+        <div className="mt-3 app-table-scroll">
+          <table className="app-table">
+            <thead className="app-thead">
               <tr>
-                <th className="px-3 py-2 text-left">Row</th>
-                <th className="px-3 py-2 text-left">Status</th>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Seller</th>
-                <th className="px-3 py-2 text-left">Order #</th>
-                <th className="px-3 py-2 text-left">Product</th>
-                <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2 text-right">Total</th>
-                <th className="px-3 py-2 text-left">Break</th>
+                <th className="app-th">Row</th>
+                <th className="app-th">Status</th>
+                <th className="app-th">Date</th>
+                <th className="app-th">Seller</th>
+                <th className="app-th">Order #</th>
+                <th className="app-th">Product</th>
+                <th className="app-th text-right">Qty</th>
+                <th className="app-th text-right">Total</th>
+                <th className="app-th">Purchase</th>
               </tr>
             </thead>
             <tbody>
               {relatedOrders.map((order, index) => (
                 <tr
                   key={order.id}
-                  className={`border-t ${
-                    order.id === primaryOrder.id
-                      ? 'border-blue-500 bg-blue-950/20'
-                      : 'border-zinc-800'
-                  }`}
+                  className={`app-tr ${order.id === primaryOrder.id ? 'bg-blue-950/20' : ''}`}
                 >
-                  <td className="px-3 py-2">
+                  <td className="app-td">
                     <div className="font-medium">#{index + 1}</div>
-                    <div className="text-xs text-zinc-500">{order.id}</div>
+                    <div className="max-w-36 truncate text-xs text-zinc-500">{order.id}</div>
                   </td>
 
-                  <td className="px-3 py-2">
+                  <td className="app-td">
                     {order.break_id ? (
-                      <span className="rounded-full border border-emerald-800 bg-emerald-950/40 px-2 py-1 text-xs text-emerald-300">
-                        Linked
-                      </span>
+                      <span className="app-badge app-badge-success">Linked</span>
                     ) : (
-                      <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                        Staging
-                      </span>
+                      <span className="app-badge app-badge-warning">Staging</span>
                     )}
                   </td>
 
-                  <td className="px-3 py-2 whitespace-nowrap">
+                  <td className="app-td whitespace-nowrap">
                     {order.processed_date_display || dateDisplay(order.processed_date)}
                   </td>
 
-                  <td className="px-3 py-2">{order.seller || '—'}</td>
+                  <td className="app-td">{order.seller || '—'}</td>
 
-                  <td className="px-3 py-2 whitespace-nowrap">
+                  <td className="app-td whitespace-nowrap">
                     {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
                   </td>
 
-                  <td className="px-3 py-2 min-w-[320px]">
-                    <div>{order.product_name || '—'}</div>
+                  <td className="app-td min-w-[320px]">
+                    <div className="line-clamp-1">{order.product_name || '—'}</div>
                     <div className="text-xs text-zinc-500">
                       {order.source_file_name || 'No source file'}
                     </div>
                   </td>
 
-                  <td className="px-3 py-2 text-right">{order.quantity ?? 0}</td>
-                  <td className="px-3 py-2 text-right">{money(order.total)}</td>
+                  <td className="app-td text-right">{order.quantity ?? 0}</td>
+                  <td className="app-td text-right">{money(order.total)}</td>
 
-                  <td className="px-3 py-2">
+                  <td className="app-td">
                     {order.break_id ? (
-                      <Link
-                        href={`/app/breaks/${order.break_id}`}
-                        className="text-emerald-300 hover:text-emerald-200"
-                      >
-                        Open Linked Break
+                      <Link href={`/app/breaks/${order.break_id}`} className="text-emerald-300 hover:text-emerald-200">
+                        Open
                       </Link>
                     ) : (
-                      <span className="text-zinc-500">Not linked yet</span>
+                      <span className="text-zinc-500">Not linked</span>
                     )}
                   </td>
                 </tr>
@@ -602,25 +584,25 @@ export default async function WhatnotOrderFocusPage({
       ) : null}
 
       {recommendedAssociatedOrders.length > 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <div className="app-section p-3">
           <div>
-            <h2 className="text-xl font-semibold">Suggested Associated Orders</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Narrowed to likely companion orders based on same seller, same source file, and tighter product/date similarity.
+            <h2 className="text-lg font-semibold">Suggested Associated Orders</h2>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Likely companion orders based on seller, source file, product, and date similarity.
             </p>
           </div>
 
-          <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-950 text-zinc-300">
+          <div className="mt-3 app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
                 <tr>
-                  <th className="px-3 py-2 text-left">Date</th>
-                  <th className="px-3 py-2 text-left">Seller</th>
-                  <th className="px-3 py-2 text-left">Order #</th>
-                  <th className="px-3 py-2 text-left">Product</th>
-                  <th className="px-3 py-2 text-left">Why Suggested</th>
-                  <th className="px-3 py-2 text-right">Total</th>
-                  <th className="px-3 py-2 text-left">Focus</th>
+                  <th className="app-th">Date</th>
+                  <th className="app-th">Seller</th>
+                  <th className="app-th">Order #</th>
+                  <th className="app-th">Product</th>
+                  <th className="app-th">Why Suggested</th>
+                  <th className="app-th text-right">Total</th>
+                  <th className="app-th">Focus</th>
                 </tr>
               </thead>
               <tbody>
@@ -635,32 +617,30 @@ export default async function WhatnotOrderFocusPage({
                   }
 
                   return (
-                    <tr key={order.id} className="border-t border-zinc-800">
-                      <td className="px-3 py-2 whitespace-nowrap">
+                    <tr key={order.id} className="app-tr">
+                      <td className="app-td whitespace-nowrap">
                         {order.processed_date_display || dateDisplay(order.processed_date)}
                       </td>
-                      <td className="px-3 py-2">{order.seller || '—'}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
+                      <td className="app-td">{order.seller || '—'}</td>
+                      <td className="app-td whitespace-nowrap">
                         {order.order_numeric_id ? `#${order.order_numeric_id}` : '—'}
                       </td>
-                      <td className="px-3 py-2 min-w-[320px]">
-                        <div>{order.product_name || '—'}</div>
+                      <td className="app-td min-w-[320px]">
+                        <div className="line-clamp-1">{order.product_name || '—'}</div>
                         <div className="text-xs text-zinc-500">
                           {order.source_file_name || 'No source file'}
                         </div>
                       </td>
-                      <td className="px-3 py-2">
-                        <span className="text-zinc-300">
-                          {order.recommendation_reason}
-                        </span>
+                      <td className="app-td">
+                        <span className="text-zinc-300">{order.recommendation_reason}</span>
                       </td>
-                      <td className="px-3 py-2 text-right">{money(order.total)}</td>
-                      <td className="px-3 py-2">
+                      <td className="app-td text-right">{money(order.total)}</td>
+                      <td className="app-td">
                         <Link
                           href={`/app/whatnot-orders/focus?${focusParams.toString()}`}
-                          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
+                          className="app-button whitespace-nowrap text-xs"
                         >
-                          Open Focus
+                          Open
                         </Link>
                       </td>
                     </tr>
