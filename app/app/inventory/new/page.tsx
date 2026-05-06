@@ -367,21 +367,23 @@ export default function NewInventoryPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl p-6">
-      <div className="mb-6 flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">New Inventory Entry</h1>
-        <p className="text-sm text-neutral-600">
-          Add a single card or create a bulk lot with child items.
-        </p>
+    <div className="app-page-wide">
+      <div className="app-page-header">
+        <div>
+          <h1 className="app-title">New Inventory Entry</h1>
+          <p className="app-subtitle">
+            Add a single card or create a bulk lot with child items.
+          </p>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <div className="mb-4 grid gap-4 md:grid-cols-3">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <section className="app-section">
+          <div className="grid gap-3 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm font-medium">Entry Mode</label>
+              <label className="mb-1 block text-sm text-zinc-400">Entry Mode</label>
               <select
-                className="w-full rounded-xl border px-3 py-2"
+                className="app-select"
                 value={form.entryMode}
                 onChange={(e) =>
                   updateForm("entryMode", e.target.value as EntryMode)
@@ -393,21 +395,21 @@ export default function NewInventoryPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">
+              <label className="mb-1 block text-sm text-zinc-400">
                 Acquired Date
               </label>
               <input
                 type="date"
-                className="w-full rounded-xl border px-3 py-2"
+                className="app-input"
                 value={form.acquiredDate}
                 onChange={(e) => updateForm("acquiredDate", e.target.value)}
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">Source</label>
+              <label className="mb-1 block text-sm text-zinc-400">Source</label>
               <input
-                className="w-full rounded-xl border px-3 py-2"
+                className="app-input"
                 value={form.source}
                 onChange={(e) => updateForm("source", e.target.value)}
                 placeholder="Break, eBay, trade, giveaway, etc."
@@ -415,11 +417,11 @@ export default function NewInventoryPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm font-medium">Break ID</label>
+              <label className="mb-1 block text-sm text-zinc-400">Break ID</label>
               <input
-                className="w-full rounded-xl border px-3 py-2"
+                className="app-input"
                 value={form.breakId}
                 onChange={(e) => updateForm("breakId", e.target.value)}
                 placeholder="Optional"
@@ -427,12 +429,12 @@ export default function NewInventoryPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium">Unit Cost</label>
+              <label className="mb-1 block text-sm text-zinc-400">Unit Cost</label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
-                className="w-full rounded-xl border px-3 py-2"
+                className="app-input"
                 value={form.unitCost}
                 onChange={(e) => updateForm("unitCost", e.target.value)}
               />
@@ -440,23 +442,23 @@ export default function NewInventoryPage() {
 
             {!isBulkLot ? (
               <div>
-                <label className="mb-1 block text-sm font-medium">Quantity</label>
+                <label className="mb-1 block text-sm text-zinc-400">Quantity</label>
                 <input
                   type="number"
                   min="1"
                   step="1"
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.quantity}
                   onChange={(e) => updateForm("quantity", e.target.value)}
                 />
               </div>
             ) : (
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label className="mb-1 block text-sm text-zinc-400">
                   Lot Quantity
                 </label>
                 <input
-                  className="w-full rounded-xl border bg-neutral-50 px-3 py-2"
+                  className="app-input opacity-75"
                   value={bulkItems.length}
                   readOnly
                 />
@@ -466,23 +468,23 @@ export default function NewInventoryPage() {
         </section>
 
         {!isBulkLot ? (
-          <section className="rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
+          <section className="app-section">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold">Single Card Details</h2>
               <button
                 type="button"
                 onClick={autoFillTitleForSingleCard}
-                className="rounded-xl border px-3 py-2 text-sm"
+                className="app-button"
               >
                 Auto Fill Title
               </button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="md:col-span-3">
-                <label className="mb-1 block text-sm font-medium">Title</label>
+                <label className="mb-1 block text-sm text-zinc-400">Title</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.title}
                   onChange={(e) => updateForm("title", e.target.value)}
                   placeholder="Optional display title"
@@ -490,85 +492,85 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Player</label>
+                <label className="mb-1 block text-sm text-zinc-400">Player</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.player}
                   onChange={(e) => updateForm("player", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Year</label>
+                <label className="mb-1 block text-sm text-zinc-400">Year</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.year}
                   onChange={(e) => updateForm("year", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Brand</label>
+                <label className="mb-1 block text-sm text-zinc-400">Brand</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.brand}
                   onChange={(e) => updateForm("brand", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Set Name</label>
+                <label className="mb-1 block text-sm text-zinc-400">Set Name</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.setName}
                   onChange={(e) => updateForm("setName", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label className="mb-1 block text-sm text-zinc-400">
                   Card Number
                 </label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.cardNumber}
                   onChange={(e) => updateForm("cardNumber", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Team</label>
+                <label className="mb-1 block text-sm text-zinc-400">Team</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.team}
                   onChange={(e) => updateForm("team", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Parallel</label>
+                <label className="mb-1 block text-sm text-zinc-400">Parallel</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.parallel}
                   onChange={(e) => updateForm("parallel", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Variation</label>
+                <label className="mb-1 block text-sm text-zinc-400">Variation</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.variation}
                   onChange={(e) => updateForm("variation", e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label className="mb-1 block text-sm text-zinc-400">
                   Serial Number
                 </label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.serialNumber}
                   onChange={(e) => updateForm("serialNumber", e.target.value)}
                   placeholder="e.g. 12/50"
@@ -576,9 +578,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Grade</label>
+                <label className="mb-1 block text-sm text-zinc-400">Grade</label>
                 <input
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.grade}
                   onChange={(e) => updateForm("grade", e.target.value)}
                   placeholder="Raw, PSA 10, etc."
@@ -586,14 +588,14 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">
+                <label className="mb-1 block text-sm text-zinc-400">
                   Est. Value
                 </label>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
-                  className="w-full rounded-xl border px-3 py-2"
+                  className="app-input"
                   value={form.estimatedValue}
                   onChange={(e) => updateForm("estimatedValue", e.target.value)}
                 />
@@ -601,7 +603,7 @@ export default function NewInventoryPage() {
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <label className="flex items-center gap-2 rounded-xl border p-3">
+              <label className="app-card-tight flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={form.rookie}
@@ -610,7 +612,7 @@ export default function NewInventoryPage() {
                 <span className="text-sm">Rookie</span>
               </label>
 
-              <label className="flex items-center gap-2 rounded-xl border p-3">
+              <label className="app-card-tight flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={form.autograph}
@@ -619,7 +621,7 @@ export default function NewInventoryPage() {
                 <span className="text-sm">Autograph</span>
               </label>
 
-              <label className="flex items-center gap-2 rounded-xl border p-3">
+              <label className="app-card-tight flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={form.relic}
@@ -631,23 +633,23 @@ export default function NewInventoryPage() {
           </section>
         ) : (
           <>
-            <section className="rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-3">
+            <section className="app-section">
+              <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold">Bulk Lot Details</h2>
                 <button
                   type="button"
                   onClick={autoFillTitleForLot}
-                  className="rounded-xl border px-3 py-2 text-sm"
+                  className="app-button"
                 >
                   Auto Fill Title
                 </button>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-3">
                 <div className="md:col-span-2">
-                  <label className="mb-1 block text-sm font-medium">Lot Name</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Lot Name</label>
                   <input
-                    className="w-full rounded-xl border px-3 py-2"
+                    className="app-input"
                     value={form.lotName}
                     onChange={(e) => updateForm("lotName", e.target.value)}
                     placeholder="Example: 2026 Heritage Commons Lot"
@@ -655,9 +657,9 @@ export default function NewInventoryPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Title</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Title</label>
                   <input
-                    className="w-full rounded-xl border px-3 py-2"
+                    className="app-input"
                     value={form.title}
                     onChange={(e) => updateForm("title", e.target.value)}
                     placeholder="Display title"
@@ -665,38 +667,38 @@ export default function NewInventoryPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Year</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Year</label>
                   <input
-                    className="w-full rounded-xl border px-3 py-2"
+                    className="app-input"
                     value={form.year}
                     onChange={(e) => updateForm("year", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Brand</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Brand</label>
                   <input
-                    className="w-full rounded-xl border px-3 py-2"
+                    className="app-input"
                     value={form.brand}
                     onChange={(e) => updateForm("brand", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium">Set Name</label>
+                  <label className="mb-1 block text-sm text-zinc-400">Set Name</label>
                   <input
-                    className="w-full rounded-xl border px-3 py-2"
+                    className="app-input"
                     value={form.setName}
                     onChange={(e) => updateForm("setName", e.target.value)}
                   />
                 </div>
 
                 <div className="md:col-span-3">
-                  <label className="mb-1 block text-sm font-medium">
+                  <label className="mb-1 block text-sm text-zinc-400">
                     Lot Description / Notes
                   </label>
                   <textarea
-                    className="min-h-[96px] w-full rounded-xl border px-3 py-2"
+                    className="app-textarea min-h-[96px]"
                     value={form.lotDescription}
                     onChange={(e) => updateForm("lotDescription", e.target.value)}
                     placeholder="Example: Commons from Break B041, grouped for kid lots or donation review later."
@@ -705,11 +707,11 @@ export default function NewInventoryPage() {
               </div>
             </section>
 
-            <section className="rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <section className="app-section">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold">Bulk Lot Items</h2>
-                  <p className="text-sm text-neutral-600">
+                  <p className="app-subtitle">
                     These child items stay tied to the lot for future splitting,
                     selling, or donation handling.
                   </p>
@@ -719,25 +721,25 @@ export default function NewInventoryPage() {
                   <button
                     type="button"
                     onClick={addBulkItem}
-                    className="rounded-xl border px-3 py-2 text-sm"
+                    className="app-button"
                   >
                     Add Item
                   </button>
                   <button
                     type="button"
                     onClick={clearBulkItems}
-                    className="rounded-xl border px-3 py-2 text-sm"
+                    className="app-button"
                   >
                     Reset Items
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {bulkItems.map((item, index) => (
                   <div
                     key={item.id}
-                    className="rounded-2xl border border-neutral-200 p-4"
+                    className="app-card-tight"
                   >
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <h3 className="font-medium">Item #{index + 1}</h3>
@@ -745,14 +747,14 @@ export default function NewInventoryPage() {
                         <button
                           type="button"
                           onClick={() => duplicateBulkItem(item.id)}
-                          className="rounded-xl border px-3 py-1.5 text-sm"
+                          className="app-button"
                         >
                           Duplicate
                         </button>
                         <button
                           type="button"
                           onClick={() => removeBulkItem(item.id)}
-                          className="rounded-xl border px-3 py-1.5 text-sm"
+                          className="app-button-danger"
                         >
                           Remove
                         </button>
@@ -761,11 +763,11 @@ export default function NewInventoryPage() {
 
                     <div className="grid gap-3 md:grid-cols-4">
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Player
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.player}
                           onChange={(e) =>
                             updateBulkItem(item.id, { player: e.target.value })
@@ -774,11 +776,11 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Card #
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.cardNumber}
                           onChange={(e) =>
                             updateBulkItem(item.id, {
@@ -789,11 +791,11 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Year
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.year}
                           onChange={(e) =>
                             updateBulkItem(item.id, { year: e.target.value })
@@ -802,14 +804,14 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Est. Value
                         </label>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.estimatedValue}
                           onChange={(e) =>
                             updateBulkItem(item.id, {
@@ -820,11 +822,11 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Brand
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.brand}
                           onChange={(e) =>
                             updateBulkItem(item.id, { brand: e.target.value })
@@ -833,11 +835,11 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Set Name
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.setName}
                           onChange={(e) =>
                             updateBulkItem(item.id, { setName: e.target.value })
@@ -846,11 +848,11 @@ export default function NewInventoryPage() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Parallel
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.parallel}
                           onChange={(e) =>
                             updateBulkItem(item.id, { parallel: e.target.value })
@@ -858,7 +860,7 @@ export default function NewInventoryPage() {
                         />
                       </div>
 
-                      <label className="flex items-center gap-2 rounded-xl border px-3 py-2">
+                      <label className="app-card-tight flex items-center gap-2">
                         <input
                           type="checkbox"
                           checked={item.rookie}
@@ -870,11 +872,11 @@ export default function NewInventoryPage() {
                       </label>
 
                       <div className="md:col-span-4">
-                        <label className="mb-1 block text-sm font-medium">
+                        <label className="mb-1 block text-sm text-zinc-400">
                           Notes
                         </label>
                         <input
-                          className="w-full rounded-xl border px-3 py-2"
+                          className="app-input"
                           value={item.notes}
                           onChange={(e) =>
                             updateBulkItem(item.id, { notes: e.target.value })
@@ -890,39 +892,39 @@ export default function NewInventoryPage() {
           </>
         )}
 
-        <section className="rounded-2xl border bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold">General Notes</h2>
+        <section className="app-section">
+          <h2 className="mb-3 text-lg font-semibold">General Notes</h2>
           <textarea
-            className="min-h-[120px] w-full rounded-xl border px-3 py-2"
+            className="app-textarea min-h-[120px]"
             value={form.notes}
             onChange={(e) => updateForm("notes", e.target.value)}
             placeholder="Optional notes for this entry"
           />
         </section>
 
-        <section className="rounded-2xl border bg-neutral-50 p-5">
-          <h2 className="mb-4 text-lg font-semibold">Summary</h2>
+        <section className="app-section">
+          <h2 className="mb-3 text-lg font-semibold">Summary</h2>
 
-          <div className="grid gap-4 md:grid-cols-4">
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm text-neutral-500">Mode</div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="app-metric-card py-2 px-3">
+              <div className="text-sm text-zinc-400">Mode</div>
               <div className="mt-1 font-semibold">
                 {isBulkLot ? "Bulk Lot" : "Single Card"}
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm text-neutral-500">Quantity</div>
+            <div className="app-metric-card py-2 px-3">
+              <div className="text-sm text-zinc-400">Quantity</div>
               <div className="mt-1 font-semibold">{quantityNumber}</div>
             </div>
 
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm text-neutral-500">Total Cost</div>
+            <div className="app-metric-card py-2 px-3">
+              <div className="text-sm text-zinc-400">Total Cost</div>
               <div className="mt-1 font-semibold">${money(totalCost)}</div>
             </div>
 
-            <div className="rounded-2xl border bg-white p-4">
-              <div className="text-sm text-neutral-500">Estimated Value</div>
+            <div className="app-metric-card py-2 px-3">
+              <div className="text-sm text-zinc-400">Estimated Value</div>
               <div className="mt-1 font-semibold">
                 ${money(totalEstimatedValue)}
               </div>
@@ -930,17 +932,17 @@ export default function NewInventoryPage() {
           </div>
 
           {isBulkLot && (
-            <div className="mt-4 rounded-2xl border bg-white p-4 text-sm">
+            <div className="app-card-tight mt-4 text-sm">
               <div>
                 Child items: <span className="font-semibold">{bulkItems.length}</span>
               </div>
               <div className="mt-1">
-                Avg est. value per item:{" "}
+                Avg est. value per item: {" "}
                 <span className="font-semibold">
                   ${money(bulkEstimatedPerCard)}
                 </span>
               </div>
-              <div className="mt-1 text-neutral-600">
+              <div className="mt-1 text-zinc-400">
                 Parent record will save as a bulk lot, with child items included in
                 the POST payload for backend creation.
               </div>
@@ -948,22 +950,22 @@ export default function NewInventoryPage() {
           )}
 
           {!!error && (
-            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="app-alert-error mt-4">
               {error}
             </div>
           )}
 
           {!!success && (
-            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+            <div className="app-alert-success mt-4">
               {success}
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          <div className="mt-5 flex flex-wrap gap-3">
             <button
               type="submit"
               disabled={saving}
-              className="rounded-xl bg-black px-4 py-2 text-white disabled:opacity-50"
+              className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving
                 ? "Saving..."
@@ -975,7 +977,7 @@ export default function NewInventoryPage() {
             <button
               type="button"
               onClick={() => router.push("/inventory")}
-              className="rounded-xl border px-4 py-2"
+              className="app-button"
             >
               Cancel
             </button>

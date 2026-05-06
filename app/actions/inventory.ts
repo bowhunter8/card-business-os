@@ -7,6 +7,7 @@ function normalizeInventoryStatus(value: string) {
   if (value === 'personal') return 'personal'
   if (value === 'junk') return 'junk'
   if (value === 'listed') return 'listed'
+  if (value === 'giveaway') return 'giveaway'
   return 'available'
 }
 
@@ -289,7 +290,13 @@ export async function updateInventoryItemAction(formData: FormData) {
       to_status: normalizedStatus,
       amount: 0,
       event_date: new Date().toISOString().slice(0, 10),
-      notes: `Inventory status changed from ${currentStatus} to ${normalizedStatus}`,
+      notes: normalizedStatus === 'giveaway'
+          ? `Inventory moved to giveaway (marketing). Do not also deduct separately as expense.`
+          : normalizedStatus === 'personal'
+            ? `Inventory moved to personal collection. Treated as withdrawal, not deductible.`
+            : normalizedStatus === 'junk'
+              ? `Inventory marked as junk. No deduction taken until final disposal or donation.`
+              : `Inventory status changed from ${currentStatus} to ${normalizedStatus}`,
     })
   }
 

@@ -9,8 +9,9 @@ type ThemeOption = {
 }
 
 const THEME_OPTIONS: ThemeOption[] = [
-  { value: 'dark-pro', label: 'Dark Pro' },
-  { value: 'light', label: 'Light' },
+  { value: 'dark-pro', label: 'HITS Blackout' },
+  { value: 'hits', label: 'HITS Blue & Gold' },
+  { value: 'light', label: 'HITS Light' },
   { value: 'retro-terminal', label: 'Retro Terminal' },
 ]
 
@@ -34,7 +35,7 @@ export default function SettingsPage() {
   }
 
   const selectedThemeLabel =
-    THEME_OPTIONS.find((theme) => theme.value === selectedTheme)?.label || 'Dark Pro'
+    THEME_OPTIONS.find((theme) => theme.value === selectedTheme)?.label || 'HITS Blackout'
 
   return (
     <div className="app-page-wide">
@@ -62,6 +63,13 @@ export default function SettingsPage() {
           </div>
         </Link>
 
+        <Link href="/app/settings/tax" className="app-card transition hover:bg-zinc-800">
+          <div className="text-lg font-semibold">Tax Year Settings</div>
+          <div className="mt-1 text-sm text-zinc-400">
+            Set beginning inventory, lock ending inventory snapshots, and store Schedule C support numbers for CPA-ready tax reports.
+          </div>
+        </Link>
+
         <Link href="/app/settings/shipping" className="app-card transition hover:bg-zinc-800">
           <div className="text-lg font-semibold">Shipping Profiles</div>
           <div className="mt-1 text-sm text-zinc-400">
@@ -74,7 +82,7 @@ export default function SettingsPage() {
             <div>
               <div className="text-lg font-semibold">Preferences</div>
               <div className="mt-1 text-sm text-zinc-400">
-                Personalize the app with light, dark, or retro themes.
+                Personalize the app with official HITS branded themes.
               </div>
             </div>
 
@@ -82,6 +90,7 @@ export default function SettingsPage() {
               <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 App Theme
               </span>
+
               <select
                 value={selectedTheme}
                 onChange={(event) => handleThemeChange(event.target.value)}
@@ -104,6 +113,7 @@ export default function SettingsPage() {
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
                 Quick Themes
               </div>
+
               <div className="flex flex-wrap gap-2">
                 {THEME_OPTIONS.map((theme) => (
                   <button

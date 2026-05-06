@@ -25,6 +25,9 @@ type ExpenseRow = {
 
 type TaxYearSettingsRow = {
   beginning_inventory: number | null
+  ending_inventory_snapshot: number | null
+  ending_inventory_item_count: number | null
+  ending_inventory_locked_at: string | null
   business_use_of_home: number | null
   vehicle_expense: number | null
   depreciation_expense: number | null
@@ -378,6 +381,9 @@ export async function GET(request: NextRequest) {
       .from('tax_year_settings')
       .select(`
         beginning_inventory,
+        ending_inventory_snapshot,
+        ending_inventory_item_count,
+        ending_inventory_locked_at,
         business_use_of_home,
         vehicle_expense,
         depreciation_expense,
@@ -449,7 +455,7 @@ export async function GET(request: NextRequest) {
     sales.reduce((sum, row) => sum + Number(row.cost_of_goods_sold ?? 0), 0)
   )
 
-  const endingInventoryCost = roundMoney(
+  const liveEndingInventoryCost = roundMoney(
     endingInventory.reduce((sum, row) => {
       const availableQty = Number(row.available_quantity ?? 0)
       const unitCost = Number(row.cost_basis_unit ?? 0)
@@ -462,6 +468,14 @@ export async function GET(request: NextRequest) {
       return sum + fallbackTotal
     }, 0)
   )
+
+  const lockedEndingInventoryCost =
+    taxSettings?.ending_inventory_snapshot != null
+      ? roundMoney(Number(taxSettings.ending_inventory_snapshot ?? 0))
+      : null
+
+  const endingInventoryCost = lockedEndingInventoryCost ?? liveEndingInventoryCost
+  const endingInventoryIsLocked = lockedEndingInventoryCost != null
 
   const expenseByCategory = new Map<string, { amount: number; count: number }>()
 
@@ -489,6 +503,16 @@ export async function GET(request: NextRequest) {
 
   const grossIncomeLine7 = roundMoney(totalGrossSales - totalCOGS)
   const purchasesForCogsSupport = roundMoney(totalCOGS + endingInventoryCost - beginningInventory)
+
+  const manualCommissionsAndFees = roundMoney(
+    expenseCategoryRows
+      .filter((row) => row.scheduleCArea === 'Commissions and fees')
+      .reduce((sum, row) => sum + row.amount, 0)
+  )
+
+  const turbotaxCommissionsAndFees = roundMoney(
+    totalPlatformFees + manualCommissionsAndFees
+  )
 
   const turbotaxAdvertising = roundMoney(
     expenseCategoryRows
@@ -598,7 +622,7 @@ export async function GET(request: NextRequest) {
   const totalBusinessExpenses = roundMoney(
     turbotaxAdvertising +
       vehicleExpense +
-      totalPlatformFees +
+      turbotaxCommissionsAndFees +
       depreciationExpense +
       insuranceExpense +
       legalProfessional +
@@ -630,6 +654,7 @@ export async function GET(request: NextRequest) {
       .filter((row) => row.scheduleCArea === area)
       .reduce((sum, row) => sum + row.count, 0)
 
+  const commissionsAndFeesCount = countForScheduleArea('Commissions and fees')
   const advertisingCount = countForScheduleArea('Advertising')
   const suppliesCount = countForScheduleArea('Supplies')
   const officeCount = countForScheduleArea('Office expense')
@@ -649,6 +674,22 @@ export async function GET(request: NextRequest) {
 
   if (beginningInventory === 0 && (totalCOGS > 0 || endingInventoryCost > 0)) {
     warnings.push('Beginning inventory is zero. Confirm this is correct before filing.')
+  }
+
+  if (purchasesForCogsSupport < 0) {
+    warnings.push('COGS support produced negative purchases. Review beginning inventory and ending inventory before filing.')
+  }
+
+  if (endingInventoryIsLocked) {
+    warnings.push(
+      `Ending inventory is LOCKED for this tax year${taxSettings?.ending_inventory_locked_at ? ` at ${taxSettings.ending_inventory_locked_at}` : ''}. This PDF is CPA-safe for filed-year reporting.`
+    )
+  } else {
+    warnings.push('Ending inventory is NOT locked. PDF values may change if inventory changes. Lock the tax-year snapshot before filing or sending final numbers to a CPA.')
+  }
+
+  if (manualCommissionsAndFees > 0) {
+    warnings.push('Manual commission / fee expenses are included on Schedule C Line 10. Confirm these are not duplicates of sale-level platform fees.')
   }
 
   if (uncategorizedCount > 0 || otherExpensesUncategorized > 0) {
@@ -685,7 +726,9 @@ export async function GET(request: NextRequest) {
     },
     {
       label:
-        'Amounts are based on tracked sales, expenses, inventory, beginning inventory settings, and COGS records in Card Business OS.',
+        endingInventoryIsLocked
+          ? 'Amounts are based on tracked sales, expenses, locked ending inventory, beginning inventory settings, and COGS records in Card Business OS.'
+          : 'Amounts are based on tracked sales, expenses, live inventory, beginning inventory settings, and COGS records in Card Business OS. Lock ending inventory before filing.',
       type: 'note',
     },
     { label: '', type: 'spacer' },
@@ -750,12 +793,17 @@ export async function GET(request: NextRequest) {
     },
     {
       label: 'Line 10: Commissions and fees',
-      amount: totalPlatformFees,
+      amount: turbotaxCommissionsAndFees,
       type: 'main',
     },
     {
       label: `Sale-level marketplace / platform fees (${saleCount} sales reviewed)`,
       amount: totalPlatformFees,
+      type: 'sub',
+    },
+    {
+      label: `Manual commissions / fee expenses (${commissionsAndFeesCount} tracked manual entries)`,
+      amount: manualCommissionsAndFees,
       type: 'sub',
     },
     {
@@ -967,6 +1015,17 @@ export async function GET(request: NextRequest) {
       type: 'main',
     },
     {
+      label: endingInventoryIsLocked
+        ? `Ending inventory source: locked tax-year snapshot${taxSettings?.ending_inventory_locked_at ? ` locked at ${taxSettings.ending_inventory_locked_at}` : ''}`
+        : 'Ending inventory source: live inventory at PDF export time. Lock before filing.',
+      type: 'note',
+    },
+    {
+      label: 'Live ending inventory reference',
+      amount: liveEndingInventoryCost,
+      type: 'sub',
+    },
+    {
       label: 'Line 42: Cost of goods sold',
       amount: totalCOGS,
       type: 'main',
@@ -989,8 +1048,28 @@ export async function GET(request: NextRequest) {
       type: 'main',
     },
     {
+      label: 'Ending inventory source',
+      type: 'main',
+    },
+    {
+      label: endingInventoryIsLocked
+        ? `Locked snapshot${taxSettings?.ending_inventory_locked_at ? ` locked at ${taxSettings.ending_inventory_locked_at}` : ''}`
+        : 'Live inventory value at export time',
+      type: 'note',
+    },
+    {
+      label: 'Live ending inventory reference',
+      amount: liveEndingInventoryCost,
+      type: 'sub',
+    },
+    {
       label: 'Advertising entries',
       amount: advertisingCount,
+      type: 'sub',
+    },
+    {
+      label: 'Manual commissions / fees entries',
+      amount: commissionsAndFeesCount,
       type: 'sub',
     },
     {
@@ -1033,6 +1112,11 @@ export async function GET(request: NextRequest) {
     {
       label: 'Sale-level platform fees',
       amount: totalPlatformFees,
+      type: 'sub',
+    },
+    {
+      label: 'Manual commissions / fee expenses',
+      amount: manualCommissionsAndFees,
       type: 'sub',
     },
     {

@@ -71,6 +71,8 @@ export default function SaleEntryForm({
   const totalRevenue = grossSaleNum + shippingChargedNum
   const totalCosts =
     platformFeesNum + postageCostNum + suppliesCostNum + otherCostsNum
+
+  const quantitySoldNum = Math.max(1, Math.min(Number(quantitySold || 0), availableQty))
   const net = totalRevenue - totalCosts
 
   return (
@@ -79,6 +81,7 @@ export default function SaleEntryForm({
       className="mt-6 grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 md:grid-cols-2"
     >
       <input type="hidden" name="inventory_item_id" value={itemId} />
+      <input type="hidden" name="quantity_sold" value={quantitySoldNum} />
 
       {/* DATE */}
       <div>
@@ -95,7 +98,7 @@ export default function SaleEntryForm({
       <div>
         <label className="text-sm text-zinc-300">Quantity</label>
         <input
-          name="quantity_sold"
+          name="quantity_sold_display"
           type="number"
           min={1}
           max={availableQty}
@@ -199,6 +202,25 @@ export default function SaleEntryForm({
           className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
         />
       </div>
+
+
+      {(quantitySoldNum > availableQty) ? (
+        <div className="app-alert-warning">
+          Quantity exceeds available inventory. This will be corrected automatically.
+        </div>
+      ) : null}
+
+      {(postageCostNum + suppliesCostNum > 0 && shippingChargedNum === 0) ? (
+        <div className="app-alert-warning">
+          You have entered shipping costs but no shipping charged. Ensure this is intentional for tax accuracy.
+        </div>
+      ) : null}
+
+      {(suppliesCostNum > 0) ? (
+        <div className="app-alert-info">
+          Supplies should not also be entered separately as expenses to avoid double counting.
+        </div>
+      ) : null}
 
       {/* PREVIEW */}
       <div className="md:col-span-2 bg-zinc-950 p-4 rounded-xl border border-zinc-800">

@@ -24,6 +24,7 @@ const themeScript = `
 
     var allowed = {
       "dark-pro": true,
+      "hits": true,
       "light": true,
       "retro-terminal": true
     };

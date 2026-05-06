@@ -36,7 +36,7 @@ type InventoryStatusSummary = {
   value: number
 }
 
-type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'sold' | 'personal'
+type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'sold' | 'personal' | 'giveaway'
 
 type SaleRow = {
   id: string
@@ -73,9 +73,17 @@ const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   junk: 'Junk',
   sold: 'Sold',
   personal: 'Personal',
+  giveaway: 'Giveaway',
 }
 
-const STATUS_FILTERS: InventoryStatusFilter[] = ['available', 'listed', 'junk', 'sold', 'personal']
+const STATUS_FILTERS: InventoryStatusFilter[] = [
+  'available',
+  'listed',
+  'junk',
+  'sold',
+  'personal',
+  'giveaway',
+]
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -189,6 +197,40 @@ function renderStatusPill(status: string | null) {
     </span>
   )
 }
+
+function remainingCostBasis(item: Pick<InventoryRow, 'available_quantity' | 'quantity' | 'cost_basis_unit' | 'cost_basis_total'>) {
+  const availableQty = Number(item.available_quantity ?? 0)
+  const quantity = Number(item.quantity ?? 0)
+  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const totalCost = Number(item.cost_basis_total ?? 0)
+
+  if (availableQty > 0 && unitCost > 0) {
+    return availableQty * unitCost
+  }
+
+  if (availableQty > 0 && quantity > 0 && totalCost > 0) {
+    return (totalCost / quantity) * availableQty
+  }
+
+  return totalCost
+}
+
+function inventoryTaxSafetyNote(status: InventoryStatusFilter | null) {
+  if (status === 'personal') {
+    return 'Personal items are removed from active sale inventory. Keep the cost basis as a withdrawal record and do not also deduct the same item as an expense.'
+  }
+
+  if (status === 'giveaway') {
+    return 'Giveaway items should have business intent and either come from inventory or be recorded as an expense, never both.'
+  }
+
+  if (status === 'junk') {
+    return 'Junk keeps the item visible for recordkeeping. Do not deduct it as a loss, donation, or disposal until a final documented disposition exists.'
+  }
+
+  return null
+}
+
 
 function bulkStatusLabel(status: BulkStatus) {
   if (status === 'available') return 'For Sale'
@@ -343,10 +385,59 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
     redirect('/login')
   }
 
+  const { data: activeSalesForSelectedItems, error: activeSalesCheckError } =
+    await supabase
+      .from('sales')
+      .select('id, inventory_item_id')
+      .eq('user_id', user.id)
+      .is('reversed_at', null)
+      .in('inventory_item_id', itemIds)
+
+  if (activeSalesCheckError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: activeSalesCheckError.message,
+        scrollY,
+      })
+    )
+  }
+
+  if ((activeSalesForSelectedItems ?? []).length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue:
+          'One or more selected inventory items have active sales. Reverse the sale first so COGS and inventory stay audit-safe.',
+        scrollY,
+      })
+    )
+  }
+
+  const deletedAt = new Date().toISOString()
+
+  const { data: itemsBeforeDelete } = await supabase
+    .from('inventory_items')
+    .select('id, title, quantity, available_quantity, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
   const { error } = await supabase
     .from('inventory_items')
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: deletedAt })
     .eq('user_id', user.id)
+    .is('deleted_at', null)
     .in('id', itemIds)
 
   if (error) {
@@ -364,9 +455,23 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
     )
   }
 
+  const deletionTransactionRows = (itemsBeforeDelete ?? []).map((item) => ({
+    user_id: user.id,
+    inventory_item_id: item.id,
+    transaction_type: 'soft_delete',
+    quantity: Number(item.available_quantity ?? item.quantity ?? 0),
+    notes: `Inventory item soft deleted from inventory list as an administrative correction. Cost basis at deletion time: ${money(Number(item.cost_basis_total ?? 0))}. Do not use delete for personal withdrawals, giveaways, junk, donations, or sold items.`,
+    created_at: deletedAt,
+  }))
+
+  if (deletionTransactionRows.length > 0) {
+    await supabase.from('inventory_transactions').insert(deletionTransactionRows)
+  }
+
   revalidatePath('/app/inventory')
   revalidatePath('/app/search')
   revalidatePath('/app/breaks')
+  revalidatePath('/app/reports/tax')
 
   redirect(
     buildInventoryStatusHref({
@@ -473,9 +578,11 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
         transaction_type: 'status_change',
         quantity: Number(item.available_quantity ?? item.quantity ?? 0),
         notes:
-          requestedStatus === 'junk'
-            ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review.`
-            : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
+          requestedStatus === 'personal'
+            ? `Bulk personal withdrawal: ${itemTitle} changed from ${previousStatus} to Personal. Cost basis preserved as inventory withdrawn for personal collection; do not also deduct this item as an expense.`
+            : requestedStatus === 'junk'
+              ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review; no automatic deduction was taken.`
+              : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
         created_at: new Date().toISOString(),
       }
     })
@@ -624,7 +731,9 @@ function StatusSummaryCard({
           ? 'hover:border-zinc-600 hover:bg-zinc-800/70'
           : status === 'sold'
             ? 'hover:border-amber-800/70 hover:bg-amber-950/20'
-            : 'hover:border-blue-800/70 hover:bg-blue-950/20'
+            : status === 'giveaway'
+              ? 'hover:border-purple-800/70 hover:bg-purple-950/20'
+              : 'hover:border-blue-800/70 hover:bg-blue-950/20'
 
   const activeClass =
     status === 'available'
@@ -635,7 +744,9 @@ function StatusSummaryCard({
           ? 'border-zinc-600 bg-zinc-800/60'
           : status === 'sold'
             ? 'border-amber-800 bg-amber-950/20'
-            : 'border-blue-800 bg-blue-950/20'
+            : status === 'giveaway'
+              ? 'border-purple-800 bg-purple-950/20'
+              : 'border-blue-800 bg-blue-950/20'
 
   return (
     <Link
@@ -798,13 +909,13 @@ function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemC
             formId={formId}
             status="personal"
             label="Move to Personal"
-            helpText="This will move the selected inventory items to Personal Collection status."
+            helpText="This will move the selected inventory items to Personal Collection status. Cost basis is preserved as a personal withdrawal record; do not also deduct these items as expenses."
           />
           <BulkStatusConfirmControl
             formId={formId}
             status="junk"
             label="Mark Junk"
-            helpText="This will mark the selected inventory items as Junk and add a status-change transaction note so the cost basis is preserved for future donation, disposal, or write-off review."
+            helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
           />
           <BulkDeleteConfirmControl formId={formId} />
         </div>
@@ -1257,6 +1368,8 @@ export default async function InventoryPage({
     query = query.eq('status', 'sold')
   } else if (qNormalized === 'personal') {
     query = query.eq('status', 'personal')
+  } else if (qNormalized === 'giveaway') {
+    query = query.eq('status', 'giveaway')
   } else if (q) {
     query = query.or(
       [
@@ -1284,7 +1397,7 @@ export default async function InventoryPage({
 
   const summaryRowsPromise = supabase
     .from('inventory_items')
-    .select('status, quantity, available_quantity, cost_basis_total, estimated_value_total')
+    .select('status, quantity, available_quantity, cost_basis_unit, cost_basis_total, estimated_value_total')
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .in('status', STATUS_FILTERS)
@@ -1349,7 +1462,7 @@ export default async function InventoryPage({
     {} as Record<InventoryStatusFilter, InventoryStatusSummary>
   )
 
-  for (const item of (summaryResponse.data ?? []) as Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity' | 'cost_basis_total' | 'estimated_value_total'>[]) {
+  for (const item of (summaryResponse.data ?? []) as Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'>[]) {
     const status = String(item.status ?? '') as InventoryStatusFilter
     if (!STATUS_FILTERS.includes(status)) continue
 
@@ -1359,7 +1472,7 @@ export default async function InventoryPage({
         : Number(item.available_quantity ?? item.quantity ?? 0)
 
     statusSummaries[status].quantity += quantity
-    statusSummaries[status].cost += Number(item.cost_basis_total ?? 0)
+    statusSummaries[status].cost += remainingCostBasis(item)
     statusSummaries[status].value += Number(item.estimated_value_total ?? 0)
   }
 
@@ -1411,7 +1524,7 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
         {STATUS_FILTERS.map((status) => (
           <StatusSummaryCard
             key={status}
@@ -1432,6 +1545,12 @@ export default async function InventoryPage({
           All
         </Link>
       </div>
+
+      {activeStatusFilter && inventoryTaxSafetyNote(activeStatusFilter) ? (
+        <div className="app-alert-info">
+          {inventoryTaxSafetyNote(activeStatusFilter)}
+        </div>
+      ) : null}
 
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}

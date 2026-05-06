@@ -318,6 +318,82 @@ function BreakCardSortHeader({
   )
 }
 
+async function TopBreakItemCountsSection({
+  breakId,
+  userId,
+  declaredCardsReceived,
+}: {
+  breakId: string
+  userId: string
+  declaredCardsReceived: number
+}) {
+  const supabase = await createClient()
+
+  const topCountsResponse = await supabase
+    .from('inventory_items')
+    .select('quantity, available_quantity')
+    .eq('user_id', userId)
+    .eq('source_type', 'break')
+    .eq('source_break_id', breakId)
+
+  const topCountRows = (topCountsResponse.data ?? []) as Array<{
+    quantity: number | null
+    available_quantity: number | null
+  }>
+
+  const itemsEntered = topCountRows.reduce(
+    (sum, item) => sum + Number(item.quantity ?? 0),
+    0
+  )
+
+  const itemsAvailable = topCountRows.reduce(
+    (sum, item) => sum + Number(item.available_quantity ?? 0),
+    0
+  )
+
+  const itemsRemaining = Math.max(0, declaredCardsReceived - itemsEntered)
+
+  if (topCountsResponse.error) {
+    return (
+      <div className="app-alert-error mt-3">
+        Error loading item counts: {topCountsResponse.error.message}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 grid gap-3 md:grid-cols-4">
+      <Link href={`/app/breaks/${breakId}/edit`} className="block">
+        <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+          <div className="text-sm text-zinc-400">Items Received</div>
+          <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
+        </div>
+      </Link>
+
+      <Link href="#break-items" className="block">
+        <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+          <div className="text-sm text-zinc-400">Items Entered</div>
+          <div className="mt-1 text-2xl font-semibold">{itemsEntered}</div>
+        </div>
+      </Link>
+
+      <Link href="#break-items" className="block">
+        <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+          <div className="text-sm text-zinc-400">Items Remaining</div>
+          <div className="mt-1 text-2xl font-semibold">{itemsRemaining}</div>
+        </div>
+      </Link>
+
+      <Link href="#break-items" className="block">
+        <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+          <div className="text-sm text-zinc-400">Items Available</div>
+          <div className="mt-1 text-2xl font-semibold">{itemsAvailable}</div>
+        </div>
+      </Link>
+    </div>
+  )
+}
+
 async function LinkedWhatnotOrdersSection({
   breakId,
   userId,
@@ -680,25 +756,33 @@ async function BreakCardsAndMetricsSection({
       ) : null}
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Items Received</div>
-          <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
-        </div>
+        <Link href={`/app/breaks/${breakId}/edit`} className="block">
+          <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+            <div className="text-sm text-zinc-400">Items Received</div>
+            <div className="mt-1 text-2xl font-semibold">{declaredCardsReceived}</div>
+          </div>
+        </Link>
 
-        <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Items Entered</div>
-          <div className="mt-1 text-2xl font-semibold">{cardsEntered}</div>
-        </div>
+        <Link href="#break-items" className="block">
+          <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+            <div className="text-sm text-zinc-400">Items Entered</div>
+            <div className="mt-1 text-2xl font-semibold">{cardsEntered}</div>
+          </div>
+        </Link>
 
-        <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Items Remaining</div>
-          <div className="mt-1 text-2xl font-semibold">{remainingToEnter}</div>
-        </div>
+        <Link href="#break-items" className="block">
+          <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+            <div className="text-sm text-zinc-400">Items Remaining</div>
+            <div className="mt-1 text-2xl font-semibold">{remainingToEnter}</div>
+          </div>
+        </Link>
 
-        <div className="app-metric-card py-2 px-3">
-          <div className="text-sm text-zinc-400">Items Available</div>
-          <div className="mt-1 text-2xl font-semibold">{availableCards}</div>
-        </div>
+        <Link href="#break-items" className="block">
+          <div className="app-metric-card py-2 px-3 transition hover:bg-zinc-800/70">
+            <div className="text-sm text-zinc-400">Items Available</div>
+            <div className="mt-1 text-2xl font-semibold">{availableCards}</div>
+          </div>
+        </Link>
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
@@ -785,7 +869,7 @@ async function BreakCardsAndMetricsSection({
         </div>
       </div>
 
-      <div className="mt-6 app-table-wrap">
+      <div id="break-items" className="mt-6 scroll-mt-28 app-table-wrap">
         <div className="flex flex-col gap-2 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold">Items From This Break</h2>
@@ -959,7 +1043,7 @@ async function BreakCardsAndMetricsSection({
                     <td className="app-td">
                       <div className="flex flex-wrap gap-1.5">
                         <Link
-                          href={`/app/inventory/${card.id}`}
+                          href={`/app/inventory/${card.id}/edit?from=break&break_id=${breakId}`}
                           className="app-button"
                         >
                           Quick Edit
@@ -1165,6 +1249,14 @@ export default async function BreakDetailPage({
           {successMessage}
         </div>
       ) : null}
+
+      <Suspense fallback={<MetricsLoading />}>
+        <TopBreakItemCountsSection
+          breakId={item.id}
+          userId={user.id}
+          declaredCardsReceived={declaredCardsReceived}
+        />
+      </Suspense>
 
       {item.reversed_at ? (
         <div className="app-alert-warning mt-4">

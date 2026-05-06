@@ -428,6 +428,13 @@ export default async function InventoryDetailPage({
       {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
       {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
 
+      {(item.status === 'personal' || item.status === 'giveaway' || item.status === 'junk') ? (
+        <div className="app-alert-warning">
+          This status change affects tax reporting. Ensure this item is not also counted as an expense or inventory elsewhere to avoid double counting.
+        </div>
+      ) : null}
+
+
       {item.status === 'junk' ? (
         <div className="app-alert-info">
           This item is marked as Junk and is being kept for recordkeeping, not active selling.

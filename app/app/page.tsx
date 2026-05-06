@@ -52,6 +52,14 @@ export default async function AppHomePage() {
 
   if (!user) return null
 
+  const { data: appUser } = await supabase
+    .from('app_users')
+    .select('display_name')
+    .eq('email', user.email)
+    .maybeSingle()
+
+  const displayName = appUser?.display_name || user.email
+
   const dashboardSupabase = supabase as any
 
   const [inventoryRes, breaksRes, salesRes, whatnotRes] = await Promise.all([
@@ -99,7 +107,7 @@ export default async function AppHomePage() {
         </div>
 
         <div className="text-xs text-zinc-500">
-          Signed in as <span className="text-zinc-300">{user.email}</span>
+          Signed in as <span className="text-zinc-300">{displayName}</span>
         </div>
       </div>
 

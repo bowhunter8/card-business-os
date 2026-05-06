@@ -213,11 +213,11 @@ export default async function AddBreakCardsPage({
   const hasExistingItems = existingItemsCount > 0
 
   return (
-    <div className="max-w-7xl">
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">Add Items From Break</h1>
-          <p className="mt-2 text-zinc-400">
+          <h1 className="app-title">Add Items From Break</h1>
+          <p className="app-subtitle">
             Enter items or lots from this break, choose for sale, personal, or junk, and quantity will count toward the total items received.
           </p>
         </div>
@@ -225,7 +225,7 @@ export default async function AddBreakCardsPage({
         <div className="flex gap-3">
           <Link
             href={`/app/breaks/${item.id}`}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+            className="app-button-secondary"
           >
             Back to Break
           </Link>
@@ -234,7 +234,15 @@ export default async function AddBreakCardsPage({
 
       {pageError ? (
         <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-          {pageError}
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>{pageError}</div>
+            <Link
+              href={`/app/breaks/${item.id}/edit`}
+              className="app-button-danger whitespace-nowrap"
+            >
+              Edit Items Received
+            </Link>
+          </div>
         </div>
       ) : null}
 
@@ -255,67 +263,62 @@ export default async function AddBreakCardsPage({
         Autosave is enabled on this page. Large entries should now stay recoverable in this browser even if the page refreshes or errors.
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-6">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Break</div>
-          <div className="mt-2 text-lg font-semibold">
+      <div className="mt-4 grid gap-2 md:grid-cols-6">
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Break</div>
+          <div
+            className="mt-1 truncate text-sm font-semibold leading-tight"
+            title={item.product_name || 'Untitled break'}
+          >
             {item.product_name || 'Untitled break'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Date</div>
-          <div className="mt-2 text-lg font-semibold">{item.break_date}</div>
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Date</div>
+          <div className="mt-1 truncate text-sm font-semibold leading-tight">{item.break_date}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Source</div>
-          <div className="mt-2 text-lg font-semibold">
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Source</div>
+          <div
+            className="mt-1 truncate text-sm font-semibold leading-tight"
+            title={item.source_name || '—'}
+          >
             {item.source_name || '—'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Order #</div>
-          <div className="mt-2 text-lg font-semibold">
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Order #</div>
+          <div
+            className="mt-1 truncate text-sm font-semibold leading-tight"
+            title={item.order_number || '—'}
+          >
             {item.order_number || '—'}
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Total Cost</div>
-          <div className="mt-2 text-lg font-semibold">{money(item.total_cost)}</div>
+        <div className="app-card-tight p-2.5">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Total Cost</div>
+          <div className="mt-1 truncate text-sm font-semibold leading-tight">{money(item.total_cost)}</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm text-zinc-400">Items Received</div>
-          <div className="mt-2 text-lg font-semibold">{itemsReceived}</div>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-        <div className="text-sm font-medium text-zinc-200">How this works</div>
-        <div className="mt-2 space-y-1 text-sm text-zinc-400">
-          <p>Use Single Item for individual items and Lot for grouped items like team lots.</p>
-          <p>Defaults are Single Item, Qty 1, and For Sale.</p>
-          <p>Default year is pulled from the break title first, then linked Whatnot order titles, and falls back to the current year.</p>
-          <p>Blank rows are ignored completely.</p>
-          <p>Only rows you actually fill in count toward the total items received.</p>
-          <p>If you want a lot, enter it explicitly, such as Blue Jays Lot with Qty 10.</p>
-          <p>Quantity counts toward the total items received for this break.</p>
-          <p>Choose each row as For Sale, Personal Collection, or Junk during entry.</p>
-          <p>Junk items remain tracked for recordkeeping but are not available for sale.</p>
-          <p>Autosave keeps your in-progress entry in this browser for this break.</p>
-          <p>If total entered quantity is too high, small restore payloads can still stay on the page so you can fix them instead of starting over.</p>
-          <p>Large entries should not rely on URL restore anymore.</p>
-          <p>Equal break cost is split across the total quantity you entered.</p>
-          <p>Speed mode: Tab works normally, and Enter/Return moves to the next row’s Item / Player / Lot Name field.</p>
-        </div>
+        <Link
+          href={`/app/breaks/${item.id}/edit`}
+          className="app-card-tight p-2.5 transition hover:bg-zinc-800/70"
+        >
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400">Items Received</div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold leading-tight">{itemsReceived}</span>
+            <span className="whitespace-nowrap text-[11px] text-zinc-500">Edit</span>
+          </div>
+        </Link>
       </div>
 
       <form
         action={addBreakCardsAction}
-        className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6"
+        className="app-card mt-6"
       >
         <input type="hidden" name="break_id" value={item.id} />
         <input type="hidden" name="card_count" value={rowCount} />
@@ -328,7 +331,7 @@ export default async function AddBreakCardsPage({
         <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
           <button
             type="submit"
-            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+            className="app-button-primary"
           >
             Add Items To Inventory
           </button>
@@ -346,13 +349,13 @@ export default async function AddBreakCardsPage({
         <div className="mt-5 flex justify-end gap-3">
           <Link
             href={`/app/breaks/${item.id}`}
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+            className="app-button-secondary"
           >
             Cancel
           </Link>
           <button
             type="submit"
-            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+            className="app-button-primary"
           >
             Add Items To Inventory
           </button>

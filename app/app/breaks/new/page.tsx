@@ -36,6 +36,11 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   )
 }
 
+function buildOrderSelectionHref(orderIds: string[]) {
+  if (orderIds.length === 0) return '/app/breaks/new'
+  return `/app/breaks/new?whatnot_order_ids=${encodeURIComponent(orderIds.join(','))}`
+}
+
 export default async function NewBreakPage({
   searchParams,
 }: {
@@ -93,6 +98,11 @@ export default async function NewBreakPage({
     selectedOrders = (data ?? []) as WhatnotOrderRow[]
   }
 
+  const selectedOrderIdSet = new Set(selectedOrders.map((order) => order.id))
+  const activeSelectedWhatnotOrderIds = selectedWhatnotOrderIds.filter((id) =>
+    selectedOrderIdSet.has(id)
+  )
+
   const prefillFromWhatnot = selectedOrders.length > 0
 
   const distinctSellers = uniqueStrings(selectedOrders.map((order) => order.seller))
@@ -149,296 +159,339 @@ export default async function NewBreakPage({
   const hasAlreadyLinkedSelection = selectedOrders.some((order) => !!order.break_id)
 
   return (
-    <div className="max-w-5xl">
-      <div className="flex items-center justify-between gap-4">
+    <div className="app-page-wide">
+      <div className="app-page-header">
         <div>
-          <h1 className="text-3xl font-semibold">Add Order</h1>
-          <p className="mt-2 text-zinc-400">
-            Record an order purchased for inventory, cost basis, and tax tracking.
+          <h1 className="app-title">Add Order</h1>
+          <p className="app-subtitle">
+            Enter the total items received, then save this order.
           </p>
         </div>
 
-        <Link
-          href="/app/breaks"
-          className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
-        >
-          Back to Orders
-        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="submit"
+            form="break-form"
+            className="app-button-primary whitespace-nowrap"
+          >
+            Save Order
+          </button>
+
+          <Link
+            href="/app/breaks"
+            className="app-button"
+          >
+            Back to Orders
+          </Link>
+        </div>
       </div>
 
       {error ? (
-        <div className="mt-6 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+        <div className="app-alert-error mt-4">
           {error}
         </div>
       ) : null}
 
-      {prefillFromWhatnot ? (
-        <div className="mt-6 rounded-2xl border border-blue-900 bg-blue-950/20 p-5">
-          <div className="text-sm text-blue-300">Prefilled from selected Whatnot orders</div>
-          <div className="mt-2 text-zinc-100">
-            This is the normal order-entry form, but it has been prefilled from your selected orders. You can still edit anything before saving.
-          </div>
-          <div className="mt-3 text-sm text-zinc-300">
-            Selected orders: {selectedOrders.length}
-          </div>
-
-          {hasAlreadyLinkedSelection ? (
-            <div className="mt-3 rounded-xl border border-yellow-800 bg-yellow-950/30 px-3 py-2 text-sm text-yellow-300">
-              One or more selected orders are already linked to a combined order. Saving will be blocked until you remove those from the selection.
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {prefillFromWhatnot ? (
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-          <div className="text-sm font-medium text-zinc-200">Selected Whatnot Orders</div>
-
-          <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-zinc-950 text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium">Order #</th>
-                  <th className="px-4 py-3 text-left font-medium">Date</th>
-                  <th className="px-4 py-3 text-left font-medium">Seller</th>
-                  <th className="px-4 py-3 text-left font-medium">Product</th>
-                  <th className="px-4 py-3 text-left font-medium">Subtotal</th>
-                  <th className="px-4 py-3 text-left font-medium">Shipping</th>
-                  <th className="px-4 py-3 text-left font-medium">Taxes</th>
-                  <th className="px-4 py-3 text-left font-medium">Total</th>
-                  <th className="px-4 py-3 text-left font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedOrders.map((order) => (
-                  <tr key={order.id} className="border-t border-zinc-800">
-                    <td className="px-4 py-3">
-                      {order.order_numeric_id ? `#${order.order_numeric_id}` : order.order_id || '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {order.processed_date_display || order.processed_date || '—'}
-                    </td>
-                    <td className="px-4 py-3">{order.seller || '—'}</td>
-                    <td className="px-4 py-3">{order.product_name || '—'}</td>
-                    <td className="px-4 py-3">${safeNumber(order.subtotal).toFixed(2)}</td>
-                    <td className="px-4 py-3">${safeNumber(order.shipping_price).toFixed(2)}</td>
-                    <td className="px-4 py-3">${safeNumber(order.taxes).toFixed(2)}</td>
-                    <td className="px-4 py-3">${safeNumber(order.total).toFixed(2)}</td>
-                    <td className="px-4 py-3">
-                      {order.break_id ? (
-                        <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
-                          Already linked
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
-                          Staging
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {hasAlreadyLinkedSelection ? (
+        <div className="app-alert-warning mt-4">
+          One or more selected orders are already linked to a combined order. Saving will be blocked until you remove those from the selection.
         </div>
       ) : null}
 
       <form
+        id="break-form"
         action={createBreakAction}
-        className="mt-6 grid gap-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 md:grid-cols-2"
+        className="app-section mt-6"
       >
-        {selectedWhatnotOrderIds.map((id) => (
+        {activeSelectedWhatnotOrderIds.map((id) => (
           <input key={id} type="hidden" name="whatnot_order_ids" value={id} />
         ))}
 
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Order Date</label>
-          <input
-            name="break_date"
-            type="date"
-            required
-            defaultValue={defaultBreakDate}
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
+        <div className="rounded-2xl border border-emerald-700/70 bg-emerald-950/20 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-emerald-200">Next step</div>
+              <label className="mt-2 block text-base font-semibold text-zinc-100">
+                Items Received
+              </label>
+              <input
+                name="cards_received"
+                type="number"
+                min={0}
+                defaultValue={0}
+                placeholder="Total items received in this order"
+                autoFocus
+                className="app-input mt-2 text-lg font-semibold"
+              />
+              <p className="mt-2 text-xs text-zinc-400">
+                Enter the total number of items from this order. This auto-sets the row count on the Add Items screen.
+              </p>
+            </div>
 
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Source/Vendor/Breaker</label>
-          <input
-            name="source_name"
-            type="text"
-            required
-            defaultValue={defaultSourceName}
-            placeholder="Whatnot breaker, eBay seller, LCS, etc."
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Product Name</label>
-          <input
-            name="product_name"
-            type="text"
-            required
-            defaultValue={defaultProductName}
-            placeholder="2024 Topps Chrome Hobby"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Order #</label>
-          <input
-            name="order_number"
-            type="text"
-            defaultValue={defaultOrderNumber}
-            placeholder="Optional order / invoice / transaction number"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Items Received</label>
-          <input
-            name="cards_received"
-            type="number"
-            min={0}
-            defaultValue={0}
-            placeholder="Total items received in this order"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-zinc-500">
-            This will auto-set the row count on the Add Items screen.
-          </p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Format Type</label>
-          <input
-            name="format_type"
-            type="text"
-            defaultValue={prefillFromWhatnot ? 'Whatnot import group' : ''}
-            placeholder="PYT, Random Team, Personal Box, etc."
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Teams / Spots</label>
-          <input
-            name="teams"
-            type="text"
-            placeholder="Mariners, Dodgers, Orioles"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-          <p className="mt-1 text-xs text-zinc-500">
-            Optional. Separate multiple teams or spots with commas.
-          </p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Purchase Price</label>
-          <input
-            name="purchase_price"
-            type="number"
-            min={0}
-            step="0.01"
-            defaultValue={prefillFromWhatnot ? defaultPurchasePrice : '0.00'}
-            required
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Sales Tax</label>
-          <input
-            name="sales_tax"
-            type="number"
-            min={0}
-            step="0.01"
-            defaultValue={prefillFromWhatnot ? defaultSalesTax : '0.00'}
-            required
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Shipping Cost</label>
-          <input
-            name="shipping_cost"
-            type="number"
-            min={0}
-            step="0.01"
-            defaultValue={prefillFromWhatnot ? defaultShippingCost : '0.00'}
-            required
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Other Fees</label>
-          <input
-            name="other_fees"
-            type="number"
-            min={0}
-            step="0.01"
-            defaultValue="0.00"
-            required
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm text-zinc-300">Allocation Method</label>
-          <select
-            name="allocation_method"
-            defaultValue="equal_per_item"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          >
-            <option value="equal_per_item">Equal Per Item</option>
-            <option value="equal_per_sellable_item">Equal Per Sellable Item</option>
-            <option value="manual">Manual</option>
-            <option value="bulk_common_split">Bulk Common Split</option>
-            <option value="hybrid">Hybrid</option>
-          </select>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
-          <div className="text-sm font-medium text-zinc-200">What this records</div>
-          <div className="mt-2 space-y-1 text-sm text-zinc-400">
-            <p>Purchase source and date</p>
-            <p>Total order cost for basis allocation</p>
-            <p>Optional order number for receipt matching</p>
-            <p>Total items received for faster entry later</p>
+            <button
+              type="submit"
+              className="app-button-primary whitespace-nowrap"
+            >
+              Save Order
+            </button>
           </div>
         </div>
 
-        <div className="md:col-span-2">
-          <label className="mb-1 block text-sm text-zinc-300">Notes</label>
-          <textarea
-            name="notes"
-            rows={4}
-            defaultValue={defaultNotes}
-            placeholder="Optional remarks about this purchase"
-            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
-          />
-        </div>
+        <details className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+          <summary className="cursor-pointer select-none text-sm font-semibold text-zinc-200">
+            Review / edit prefilled order details
+            <span className="ml-2 text-xs font-normal text-zinc-500">
+              Date, seller, order number, costs, teams, allocation, and notes
+            </span>
+          </summary>
 
-        <div className="md:col-span-2 flex justify-end gap-3 pt-2">
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Order Date</label>
+              <input
+                name="break_date"
+                type="date"
+                required
+                defaultValue={defaultBreakDate}
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Source/Vendor/Breaker</label>
+              <input
+                name="source_name"
+                type="text"
+                required
+                defaultValue={defaultSourceName}
+                placeholder="Whatnot breaker, eBay seller, LCS, etc."
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Product Name</label>
+              <input
+                name="product_name"
+                type="text"
+                required
+                defaultValue={defaultProductName}
+                placeholder="2024 Topps Chrome Hobby"
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Order #</label>
+              <input
+                name="order_number"
+                type="text"
+                defaultValue={defaultOrderNumber}
+                placeholder="Optional order / invoice / transaction number"
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Format Type</label>
+              <input
+                name="format_type"
+                type="text"
+                defaultValue={prefillFromWhatnot ? 'Whatnot import group' : ''}
+                placeholder="PYT, Random Team, Personal Box, etc."
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Teams / Spots</label>
+              <input
+                name="teams"
+                type="text"
+                placeholder="Mariners, Dodgers, Orioles"
+                className="app-input"
+              />
+              <p className="mt-1 text-xs text-zinc-500">
+                Optional. Separate multiple teams or spots with commas.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Purchase Price</label>
+              <input
+                name="purchase_price"
+                type="number"
+                min={0}
+                step="0.01"
+                defaultValue={prefillFromWhatnot ? defaultPurchasePrice : '0.00'}
+                required
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Sales Tax</label>
+              <input
+                name="sales_tax"
+                type="number"
+                min={0}
+                step="0.01"
+                defaultValue={prefillFromWhatnot ? defaultSalesTax : '0.00'}
+                required
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Shipping Cost</label>
+              <input
+                name="shipping_cost"
+                type="number"
+                min={0}
+                step="0.01"
+                defaultValue={prefillFromWhatnot ? defaultShippingCost : '0.00'}
+                required
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Other Fees</label>
+              <input
+                name="other_fees"
+                type="number"
+                min={0}
+                step="0.01"
+                defaultValue="0.00"
+                required
+                className="app-input"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-300">Allocation Method</label>
+              <select
+                name="allocation_method"
+                defaultValue="equal_per_item"
+                className="app-select"
+              >
+                <option value="equal_per_item">Equal Per Item</option>
+                <option value="equal_per_sellable_item">Equal Per Sellable Item</option>
+                <option value="manual">Manual</option>
+                <option value="bulk_common_split">Bulk Common Split</option>
+                <option value="hybrid">Hybrid</option>
+              </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm text-zinc-300">Notes</label>
+              <textarea
+                name="notes"
+                rows={4}
+                defaultValue={defaultNotes}
+                placeholder="Optional remarks about this purchase"
+                className="app-textarea"
+              />
+            </div>
+          </div>
+        </details>
+
+        <div className="mt-4 flex justify-end gap-3 pt-2">
           <Link
             href="/app/breaks"
-            className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
+            className="app-button"
           >
             Cancel
           </Link>
           <button
             type="submit"
-            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+            className="app-button-primary"
           >
             Save Order
           </button>
         </div>
       </form>
+
+      {prefillFromWhatnot ? (
+        <div className="app-section mt-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-sm font-medium text-zinc-200">Selected Orders</div>
+              <p className="mt-1 text-sm text-zinc-400">
+                Review the selected orders below. Remove any order that should not be included before saving.
+              </p>
+            </div>
+
+            <div className="text-sm text-zinc-400">
+              {selectedOrders.length} selected
+            </div>
+          </div>
+
+          <div className="app-table-wrap mt-4">
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead className="app-thead">
+                  <tr>
+                    <th className="app-th">Order #</th>
+                    <th className="app-th">Date</th>
+                    <th className="app-th">Seller</th>
+                    <th className="app-th">Product</th>
+                    <th className="app-th">Subtotal</th>
+                    <th className="app-th">Shipping</th>
+                    <th className="app-th">Taxes</th>
+                    <th className="app-th">Total</th>
+                    <th className="app-th">Status</th>
+                    <th className="app-th">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedOrders.map((order) => {
+                    const remainingOrderIds = activeSelectedWhatnotOrderIds.filter(
+                      (id) => id !== order.id
+                    )
+
+                    return (
+                      <tr key={order.id} className="app-tr">
+                        <td className="app-td">
+                          {order.order_numeric_id ? `#${order.order_numeric_id}` : order.order_id || '—'}
+                        </td>
+                        <td className="app-td">
+                          {order.processed_date_display || order.processed_date || '—'}
+                        </td>
+                        <td className="app-td">{order.seller || '—'}</td>
+                        <td className="app-td">{order.product_name || '—'}</td>
+                        <td className="app-td">${safeNumber(order.subtotal).toFixed(2)}</td>
+                        <td className="app-td">${safeNumber(order.shipping_price).toFixed(2)}</td>
+                        <td className="app-td">${safeNumber(order.taxes).toFixed(2)}</td>
+                        <td className="app-td">${safeNumber(order.total).toFixed(2)}</td>
+                        <td className="app-td">
+                          {order.break_id ? (
+                            <span className="rounded-full border border-yellow-800 bg-yellow-950/40 px-2 py-1 text-xs text-yellow-300">
+                              Already linked
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
+                              Staging
+                            </span>
+                          )}
+                        </td>
+                        <td className="app-td">
+                          <Link
+                            href={buildOrderSelectionHref(remainingOrderIds)}
+                            className="app-button-danger"
+                          >
+                            Remove
+                          </Link>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

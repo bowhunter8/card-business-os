@@ -291,6 +291,205 @@ async function bulkDeleteOrdersAction(formData: FormData) {
   redirect(buildSearchRedirect(q, 'deleted_count', `${orderIds.length} unassigned order(s)`))
 }
 
+async function bulkCombineOrdersAction(formData: FormData) {
+  'use server'
+
+  const orderIds = readFormIds(formData, 'selected_order_ids')
+  const q = String(formData.get('q') ?? '').trim()
+
+  if (orderIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'combine_error', 'Select at least one unassigned order to combine.'))
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const uniqueOrderIds = Array.from(new Set(orderIds))
+
+  const { data: selectedOrders, error: selectedOrdersError } = await supabase
+    .from('whatnot_orders')
+    .select(`
+      id,
+      break_id,
+      order_id,
+      order_numeric_id,
+      buyer,
+      seller,
+      product_name,
+      processed_date,
+      processed_date_display,
+      order_status,
+      quantity,
+      subtotal,
+      shipping_price,
+      taxes,
+      total,
+      source_file_name
+    `)
+    .eq('user_id', user.id)
+    .in('id', uniqueOrderIds)
+
+  const orders = (selectedOrders ?? []) as WhatnotOrderRow[]
+
+  if (selectedOrdersError || orders.length !== uniqueOrderIds.length) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'combine_error',
+        selectedOrdersError?.message || 'Could not load all selected orders.'
+      )
+    )
+  }
+
+  const linkedOrders = orders.filter((order) => Boolean(order.break_id))
+  if (linkedOrders.length > 0) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'combine_error',
+        'One or more selected orders are already linked to a break. Open that break or roll it back first.'
+      )
+    )
+  }
+
+  const sellers = Array.from(
+    new Set(
+      orders
+        .map((order) => cleanText(order.seller || ''))
+        .filter(Boolean)
+    )
+  )
+
+  if (sellers.length > 1) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'combine_error',
+        'Please combine orders from only one seller at a time.'
+      )
+    )
+  }
+
+  const datedOrders = orders
+    .map((order) => {
+      const rawDate = order.processed_date || order.processed_date_display || ''
+      const parsed = rawDate ? new Date(rawDate) : null
+
+      return { order, parsed }
+    })
+    .filter((entry) => entry.parsed && !Number.isNaN(entry.parsed.getTime())) as Array<{
+      order: WhatnotOrderRow
+      parsed: Date
+    }>
+
+  const newestDate =
+    datedOrders.length > 0
+      ? datedOrders.reduce(
+          (newest, entry) =>
+            entry.parsed.getTime() > newest.getTime() ? entry.parsed : newest,
+          datedOrders[0].parsed
+        )
+      : new Date()
+
+  const breakDate = newestDate.toISOString().slice(0, 10)
+  const sourceName = sellers[0] || 'Imported Orders'
+  const orderNumbers = orders
+    .map((order) => cleanText(order.order_numeric_id || order.order_id || ''))
+    .filter(Boolean)
+  const productNames = orders
+    .map((order) => cleanText(order.product_name || ''))
+    .filter(Boolean)
+
+  const purchasePrice = Number(
+    orders.reduce((sum, order) => sum + Number(order.subtotal ?? 0), 0).toFixed(2)
+  )
+  const salesTax = Number(
+    orders.reduce((sum, order) => sum + Number(order.taxes ?? 0), 0).toFixed(2)
+  )
+  const shippingCost = Number(
+    orders.reduce((sum, order) => sum + Number(order.shipping_price ?? 0), 0).toFixed(2)
+  )
+  const orderTotal = Number(
+    orders.reduce((sum, order) => sum + Number(order.total ?? 0), 0).toFixed(2)
+  )
+  const calculatedTotal = Number((purchasePrice + salesTax + shippingCost).toFixed(2))
+  const otherFees = Number((orderTotal - calculatedTotal).toFixed(2))
+  const totalCost = Number((purchasePrice + salesTax + shippingCost + otherFees).toFixed(2))
+
+  const { data: newBreak, error: createError } = await supabase
+    .from('breaks')
+    .insert({
+      user_id: user.id,
+      break_date: breakDate,
+      source_name: sourceName,
+      product_name: `Combined Imported Orders (${orders.length} orders)`,
+      format_type: 'Imported order group',
+      teams: [],
+      order_number: orderNumbers.length > 0 ? `MULTI: ${orderNumbers.join(', ')}` : null,
+      purchase_price: purchasePrice,
+      sales_tax: salesTax,
+      shipping_cost: shippingCost,
+      other_fees: otherFees,
+      total_cost: totalCost,
+      allocation_method: 'equal_per_item',
+      cards_received: 0,
+      notes: [
+        'Drafted from selected imported orders',
+        `Seller: ${sourceName}`,
+        orderNumbers.length > 0 ? `Order Numbers: ${orderNumbers.join(', ')}` : '',
+        productNames.length > 0 ? `Products: ${productNames.join(' | ')}` : '',
+        `Selected order row IDs: ${uniqueOrderIds.join(', ')}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    })
+    .select('id')
+    .single()
+
+  if (createError || !newBreak) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'combine_error',
+        createError?.message || 'Could not create the combined break.'
+      )
+    )
+  }
+
+  const { error: linkError } = await supabase
+    .from('whatnot_orders')
+    .update({ break_id: newBreak.id })
+    .eq('user_id', user.id)
+    .in('id', uniqueOrderIds)
+
+  if (linkError) {
+    redirect(
+      buildSearchRedirect(
+        q,
+        'combine_error',
+        `Break was created, but selected orders could not be linked: ${linkError.message}`
+      )
+    )
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/whatnot-orders')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    `/app/breaks/${newBreak.id}/edit?success=${encodeURIComponent(
+      'Combined selected orders into a break. Enter Items Received, then add items.'
+    )}`
+  )
+}
+
 async function bulkDeleteInventoryItemsAction(formData: FormData) {
   'use server'
 
@@ -614,6 +813,78 @@ function DeleteOrderConfirmControl({
   )
 }
 
+function BulkOrderActionsControl({
+  formId,
+}: {
+  formId: string
+}) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Select unassigned orders, then combine them into one break or delete them.
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap">
+              Combine Selected
+            </summary>
+
+            <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl md:min-w-80">
+              <div className="text-sm font-semibold text-zinc-200">Create combined break?</div>
+              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                This creates one break from the selected unassigned orders, uses the newest selected order date as the break date, and sends you to edit Items Received before adding inventory.
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  formAction={bulkCombineOrdersAction}
+                  className="app-button-primary whitespace-nowrap"
+                >
+                  Yes, Combine Selected
+                </button>
+
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+              Delete Selected
+            </summary>
+
+            <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+              <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                This will delete the selected unassigned orders. This cannot be undone from this screen.
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  form={formId}
+                  className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+                >
+                  Yes, Delete Selected
+                </button>
+
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function BulkDeleteConfirmControl({
   label,
   formId,
@@ -668,6 +939,7 @@ export default async function GlobalSearchPage({
     deleted?: string
     deleted_count?: string
     delete_error?: string
+    combine_error?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -677,6 +949,7 @@ export default async function GlobalSearchPage({
   const deleted = String(params?.deleted ?? '').trim()
   const deletedCount = String(params?.deleted_count ?? '').trim()
   const deleteError = String(params?.delete_error ?? '').trim()
+  const combineError = String(params?.combine_error ?? '').trim()
 
   const isLikelyReceiptPaste =
     extractedNumbers.length > 0 &&
@@ -704,33 +977,70 @@ export default async function GlobalSearchPage({
 
   if (qRaw) {
     if (isMultiOrderSearch) {
-      const ordersResponse = await supabase
-        .from('whatnot_orders')
-        .select(`
-          id,
-          break_id,
-          order_id,
-          order_numeric_id,
-          buyer,
-          seller,
-          product_name,
-          processed_date,
-          processed_date_display,
-          order_status,
-          quantity,
-          subtotal,
-          shipping_price,
-          taxes,
-          total,
-          source_file_name
-        `)
-        .eq('user_id', user.id)
-        .in('order_numeric_id', extractedNumbers)
-        .order('processed_date', { ascending: false })
-        .limit(SECTION_LIMIT)
+      const orderFilters = extractedNumbers.flatMap((number) => [
+        `order_numeric_id.eq.${number}`,
+        `order_id.eq.${number}`,
+        `order_numeric_id.ilike.%${number}%`,
+        `order_id.ilike.%${number}%`,
+      ])
+
+      const breakFilters = extractedNumbers.map(
+        (number) => `order_number.ilike.%${number}%`
+      )
+
+      const [ordersResponse, breaksResponse] = await Promise.all([
+        orderFilters.length > 0
+          ? supabase
+              .from('whatnot_orders')
+              .select(`
+                id,
+                break_id,
+                order_id,
+                order_numeric_id,
+                buyer,
+                seller,
+                product_name,
+                processed_date,
+                processed_date_display,
+                order_status,
+                quantity,
+                subtotal,
+                shipping_price,
+                taxes,
+                total,
+                source_file_name
+              `)
+              .eq('user_id', user.id)
+              .or(orderFilters.join(','))
+              .order('processed_date', { ascending: false })
+              .limit(SECTION_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+
+        breakFilters.length > 0
+          ? supabase
+              .from('breaks')
+              .select(`
+                id,
+                break_date,
+                source_name,
+                order_number,
+                product_name,
+                format_type,
+                notes,
+                total_cost,
+                reversed_at
+              `)
+              .eq('user_id', user.id)
+              .or(breakFilters.join(','))
+              .order('break_date', { ascending: false })
+              .limit(SECTION_LIMIT)
+          : Promise.resolve({ data: [], error: null }),
+      ])
 
       matchingOrders = (ordersResponse.data ?? []) as WhatnotOrderRow[]
+      matchingBreaks = (breaksResponse.data ?? []) as BreakRow[]
       ordersError = ordersResponse.error?.message ?? null
+      breaksError = breaksResponse.error?.message ?? null
     } else {
       const orderQuery = `%${q}%`
       const breakQuery = `%${q}%`
@@ -903,12 +1213,7 @@ export default async function GlobalSearchPage({
           `)
           .eq('user_id', user.id)
           .is('reversed_at', null)
-          .or(
-            [
-              `platform.ilike.${salesQuery}`,
-              `notes.ilike.${salesQuery}`,
-            ].join(',')
-          )
+          .or([`platform.ilike.${salesQuery}`, `notes.ilike.${salesQuery}`].join(','))
           .order('sale_date', { ascending: false })
           .limit(SECTION_LIMIT),
       ])
@@ -1070,6 +1375,12 @@ export default async function GlobalSearchPage({
             Delete failed: {deleteError}
           </div>
         ) : null}
+
+        {combineError ? (
+          <div className="app-alert-error">
+            Combine failed: {combineError}
+          </div>
+        ) : null}
       </div>
 
       {qRaw ? (
@@ -1137,7 +1448,7 @@ export default async function GlobalSearchPage({
             <input type="hidden" name="q" value={qRaw} />
           </form>
 
-          <BulkDeleteConfirmControl label="unassigned orders" formId={BULK_ORDERS_FORM_ID} />
+          <BulkOrderActionsControl formId={BULK_ORDERS_FORM_ID} />
 
           <div className="app-table-wrap">
             <div className="app-table-scroll">
@@ -1167,9 +1478,10 @@ export default async function GlobalSearchPage({
                     const description = cleanText(order.product_name || 'Untitled order')
                     const isLinked = Boolean(order.break_id)
                     const statusLabel = isLinked ? 'Linked' : 'Staging'
+                    const orderHref = buildFocusHref(order)
 
                     return (
-                      <tr key={order.id} className="app-tr align-top">
+                      <tr key={order.id} className="app-tr align-top cursor-pointer">
                         <td className="app-td">
                           {!isLinked ? (
                             <input
@@ -1184,19 +1496,29 @@ export default async function GlobalSearchPage({
                             <span className="text-xs text-zinc-600">—</span>
                           )}
                         </td>
-                        <td className="app-td whitespace-nowrap">{orderNumber || '—'}</td>
                         <td className="app-td whitespace-nowrap">
-                          {formatDate(order.processed_date_display || order.processed_date)}
+                          <Link href={orderHref} className="block hover:underline">
+                            {orderNumber || '—'}
+                          </Link>
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <Link href={orderHref} className="block hover:underline">
+                            {formatDate(order.processed_date_display || order.processed_date)}
+                          </Link>
                         </td>
                         <td className="app-td">
-                          <div className="max-w-40 truncate" title={seller}>
-                            {seller || '—'}
-                          </div>
+                          <Link href={orderHref} className="block hover:underline">
+                            <div className="max-w-40 truncate" title={seller}>
+                              {seller || '—'}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td">
-                          <div className="max-w-80 truncate" title={description}>
-                            {description}
-                          </div>
+                          <Link href={orderHref} className="block hover:underline">
+                            <div className="max-w-80 truncate" title={description}>
+                              {description}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
@@ -1232,7 +1554,7 @@ export default async function GlobalSearchPage({
         </ResultSection>
       ) : null}
 
-      {!isMultiOrderSearch && matchingBreaks.length > 0 ? (
+      {matchingBreaks.length > 0 ? (
         <ResultSection
           title="Matching Breaks"
           subtitle="Search hits from order number, source, product, format, and notes."
@@ -1271,9 +1593,10 @@ export default async function GlobalSearchPage({
                     const sourceLabel = cleanText(breakRow.source_name || '—')
                     const orderLabel = cleanText(breakRow.order_number || '—')
                     const statusLabel = breakRow.reversed_at ? 'Reversed' : 'Active'
+                    const breakHref = `/app/breaks/${breakRow.id}`
 
                     return (
-                      <tr key={breakRow.id} className="app-tr align-top">
+                      <tr key={breakRow.id} className="app-tr align-top cursor-pointer">
                         <td className="app-td whitespace-nowrap">
                           <input
                             form={BULK_BREAKS_FORM_ID}
@@ -1284,21 +1607,31 @@ export default async function GlobalSearchPage({
                             className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                           />
                         </td>
-                        <td className="app-td whitespace-nowrap">{formatDate(breakRow.break_date)}</td>
-                        <td className="app-td">
-                          <div className="max-w-80 truncate" title={breakLabel}>
-                            {breakLabel}
-                          </div>
+                        <td className="app-td whitespace-nowrap">
+                          <Link href={breakHref} className="block hover:underline">
+                            {formatDate(breakRow.break_date)}
+                          </Link>
                         </td>
                         <td className="app-td">
-                          <div className="max-w-40 truncate" title={sourceLabel}>
-                            {sourceLabel}
-                          </div>
+                          <Link href={breakHref} className="block hover:underline">
+                            <div className="max-w-80 truncate" title={breakLabel}>
+                              {breakLabel}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td">
-                          <div className="max-w-52 truncate" title={orderLabel}>
-                            {orderLabel || '—'}
-                          </div>
+                          <Link href={breakHref} className="block hover:underline">
+                            <div className="max-w-40 truncate" title={sourceLabel}>
+                              {sourceLabel}
+                            </div>
+                          </Link>
+                        </td>
+                        <td className="app-td">
+                          <Link href={breakHref} className="block hover:underline">
+                            <div className="max-w-52 truncate" title={orderLabel}>
+                              {orderLabel || '—'}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
@@ -1371,9 +1704,10 @@ export default async function GlobalSearchPage({
                   {matchingInventory.map((item) => {
                     const display = buildInventoryDisplay(item) || item.title || 'Untitled inventory item'
                     const statusLabel = cleanText(item.status || '—')
+                    const inventoryHref = `/app/inventory/${item.id}`
 
                     return (
-                      <tr key={item.id} className="app-tr align-top">
+                      <tr key={item.id} className="app-tr align-top cursor-pointer">
                         <td className="app-td whitespace-nowrap">
                           <input
                             form={BULK_INVENTORY_FORM_ID}
@@ -1385,9 +1719,11 @@ export default async function GlobalSearchPage({
                           />
                         </td>
                         <td className="app-td">
-                          <div className="max-w-96 truncate" title={display}>
-                            {display}
-                          </div>
+                          <Link href={inventoryHref} className="block hover:underline">
+                            <div className="max-w-96 truncate" title={display}>
+                              {display}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel || '—'}</span>
@@ -1454,14 +1790,21 @@ export default async function GlobalSearchPage({
                   {matchingSales.map((sale) => {
                     const display = buildSoldItemDisplay(sale)
                     const platform = cleanText(sale.platform || '—')
+                    const saleHref = sale.inventory_item_id
+                      ? `/app/inventory/${sale.inventory_item_id}`
+                      : sale.inventory_items?.source_break_id
+                        ? `/app/breaks/${sale.inventory_items.source_break_id}`
+                        : '/app/search'
 
                     return (
-                      <tr key={sale.id} className="app-tr">
+                      <tr key={sale.id} className="app-tr cursor-pointer">
                         <td className="app-td whitespace-nowrap">{formatDate(sale.sale_date)}</td>
                         <td className="app-td">
-                          <div className="max-w-96 truncate" title={display}>
-                            {display}
-                          </div>
+                          <Link href={saleHref} className="block hover:underline">
+                            <div className="max-w-96 truncate" title={display}>
+                              {display}
+                            </div>
+                          </Link>
                         </td>
                         <td className="app-td whitespace-nowrap">{platform || '—'}</td>
                         <td className="app-td whitespace-nowrap">{sale.quantity_sold ?? '—'}</td>

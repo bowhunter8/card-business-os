@@ -16,6 +16,37 @@ function roundMoney(value: number) {
   return Number(value.toFixed(2))
 }
 
+function getSafeUnitCost(item: {
+  cost_basis_unit?: number | null
+  cost_basis_total?: number | null
+  quantity?: number | null
+}) {
+  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const totalCost = Number(item.cost_basis_total ?? 0)
+  const quantity = Number(item.quantity ?? 0)
+
+  if (unitCost > 0) {
+    return unitCost
+  }
+
+  if (totalCost > 0 && quantity > 0) {
+    return totalCost / quantity
+  }
+
+  return 0
+}
+
+function buildCostBasisErrorRedirect(inventoryItemId: string, fallbackPath = '/app/inventory') {
+  const message =
+    'Missing cost basis. Cannot safely calculate COGS for tax reporting until this item has a valid unit cost or total cost.'
+
+  if (!inventoryItemId) {
+    return `${fallbackPath}?error=${encodeURIComponent(message)}`
+  }
+
+  return `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(message)}`
+}
+
 async function requireUser() {
   const supabase = await createClient()
 
@@ -161,6 +192,7 @@ async function insertSaleAndUpdateInventory({
   shippingCharged,
   shippingCost,
   suppliesCost,
+  unitCost,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>
   userId: string
@@ -181,6 +213,7 @@ async function insertSaleAndUpdateInventory({
   shippingCharged: number
   shippingCost: number
   suppliesCost: number
+  unitCost: number
 }) {
   const saleInsert = await supabase
     .from('sales')
@@ -237,7 +270,7 @@ async function insertSaleAndUpdateInventory({
     event_date: saleDate,
     notes:
       notes ||
-      `Recorded sale. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}.`,
+      `Recorded sale. Unit cost ${unitCost.toFixed(2)}, quantity ${quantitySold}, COGS ${cogs.toFixed(2)}. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}. Do not also enter sale-level supplies as a separate manual expense.`,
   })
 
   return {
@@ -303,7 +336,11 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const unitCost = getSafeUnitCost(item)
+
+  if (unitCost <= 0) {
+    redirect(buildCostBasisErrorRedirect(inventoryItemId))
+  }
 
   const {
     grossSale,
@@ -345,6 +382,7 @@ export async function createSaleAction(formData: FormData) {
     shippingCharged,
     shippingCost,
     suppliesCost,
+    unitCost,
   })
 
   if (!result.ok) {
@@ -398,7 +436,11 @@ export async function quickSellAction(formData: FormData) {
       ? availableQty
       : Math.min(Math.max(safeNumber(formData.get('quantity_sold')) || 1, 1), availableQty)
 
-  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const unitCost = getSafeUnitCost(item)
+
+  if (unitCost <= 0) {
+    redirect(buildCostBasisErrorRedirect(inventoryItemId))
+  }
 
   const {
     grossSale,
@@ -440,6 +482,7 @@ export async function quickSellAction(formData: FormData) {
     shippingCharged,
     shippingCost,
     suppliesCost,
+    unitCost,
   })
 
   if (!result.ok) {
@@ -506,6 +549,7 @@ export async function updateSaleAction(formData: FormData) {
         available_quantity,
         quantity,
         cost_basis_unit,
+        cost_basis_total,
         status
       `)
       .eq('id', inventoryItemId)
@@ -536,7 +580,12 @@ export async function updateSaleAction(formData: FormData) {
     redirect(`/app/sales/${saleId}/edit?error=Quantity sold exceeds editable max quantity`)
   }
 
-  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const unitCost = getSafeUnitCost(item)
+
+  if (unitCost <= 0) {
+    redirect(buildCostBasisErrorRedirect(inventoryItemId, `/app/sales/${saleId}/edit`))
+  }
+
   const netProceeds = roundMoney(grossSale - platformFees - shippingCost - otherCosts)
   const cogs = roundMoney(unitCost * quantitySold)
   const profit = roundMoney(netProceeds - cogs)
@@ -591,7 +640,9 @@ export async function updateSaleAction(formData: FormData) {
     linked_entity_id: saleId,
     amount: grossSale,
     event_date: saleDate,
-    notes: notes || `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}.`,
+    notes:
+      notes ||
+      `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}. Unit cost ${unitCost.toFixed(2)}, COGS ${cogs.toFixed(2)}.`,
   })
 
   redirect(`/app/inventory/${inventoryItemId}?updatedSale=1`)

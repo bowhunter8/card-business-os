@@ -4,7 +4,7 @@
 [data-theme="dark-pro"] {
   --background: #0a0a0a;
   --foreground: #ededed;
-  --app-surface: #18181b;
+  --app-surface: #000000;
   --app-surface-2: #09090b;
   --app-border: #27272a;
   --app-border-strong: #71717a;
@@ -22,6 +22,29 @@
   --app-chip-idle-text: #d4d4d8;
   --app-table-head-bg: #09090b;
   --app-accent: #38bdf8;
+}
+
+[data-theme="hits"] {
+  --background: #050505;
+  --foreground: #ededed;
+  --app-surface: #000000;
+  --app-surface-2: #080b10;
+  --app-border: #123b68;
+  --app-border-strong: #facc15;
+  --app-text: #ededed;
+  --app-text-muted: #a1a1aa;
+  --app-button-bg: #050505;
+  --app-button-text: #e4e4e7;
+  --app-button-border: #123b68;
+  --app-button-hover: #082f5f;
+  --app-primary-bg: #facc15;
+  --app-primary-text: #07111f;
+  --app-primary-hover: #fde047;
+  --app-chip-active-bg: #facc15;
+  --app-chip-active-text: #07111f;
+  --app-chip-idle-text: #d4d4d8;
+  --app-table-head-bg: #000000;
+  --app-accent: #facc15;
 }
 
 [data-theme="light"] {
@@ -373,3 +396,86 @@ body[data-theme="retro-terminal"] {
 [data-theme="retro-terminal"] .app-empty {
   box-shadow: inset 0 0 0 1px rgba(57, 255, 20, 0.03);
 }
+
+[data-theme="hits"] .app-section,
+[data-theme="hits"] .app-card,
+[data-theme="hits"] .app-metric-card,
+[data-theme="hits"] .app-search-panel,
+[data-theme="hits"] .app-table-wrap {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08), 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="hits"] .app-card-tight,
+[data-theme="hits"] .app-section-tight,
+[data-theme="hits"] .app-empty {
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.06);
+}
+
+[data-theme="hits"] .app-button:hover,
+[data-theme="hits"] .app-chip:hover {
+  border-color: #3b82f6;
+  color: #facc15;
+}
+
+[data-theme="hits"] .app-button-primary {
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.2);
+}
+
+[data-theme="hits"] .app-input:focus,
+[data-theme="hits"] .app-select:focus,
+[data-theme="hits"] .app-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.25);
+}
+
+/* Light theme shell overrides */
+[data-theme="light"] aside.app-section {
+  background: #ffffff !important;
+  border-color: #d4d4d8 !important;
+}
+
+[data-theme="light"] .app-section.border-b {
+  background: #ffffff !important;
+  border-color: #d4d4d8 !important;
+}
+
+[data-theme="light"] .app-button {
+  background: #ffffff;
+  color: #111827;
+  border-color: #d4d4d8;
+}
+
+[data-theme="light"] .app-button:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+[data-theme="light"] .app-input,
+[data-theme="light"] .app-select,
+[data-theme="light"] .app-textarea {
+  background: #ffffff;
+  border-color: #d4d4d8;
+  color: #111827;
+}
+
+[data-theme="light"] .app-input:focus,
+[data-theme="light"] .app-select:focus,
+[data-theme="light"] .app-textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+
+/* Fix hard-coded black app shell areas in light theme */
+[data-theme="light"] .bg-black,
+[data-theme="light"] .bg-black\/70,
+[data-theme="light"] .bg-black\/80,
+[data-theme="light"] .bg-black\/90 {
+  background: #ffffff !important;
+  color: #111827 !important;
+}
+
+[data-theme="light"] .border-black,
+[data-theme="light"] .border-black\/50 {
+  border-color: #d4d4d8 !important;
+}
+

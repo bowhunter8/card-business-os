@@ -91,27 +91,31 @@ export default async function AppLayout({
   return (
     <div className="min-h-screen">
       <div className="grid min-h-screen grid-cols-1 md:grid-cols-[220px_1fr]">
-        
+
         {/* Sidebar */}
-        <aside className="app-section border-r md:sticky md:top-0 md:h-screen md:self-start md:overflow-y-auto">
+        <aside className="app-section border-r border-zinc-900 bg-black md:sticky md:top-0 md:h-screen md:self-start md:overflow-y-auto">
           <div className="mb-6">
-            <div className="text-xs uppercase tracking-wide app-subtitle">
-              Standalone App
+            <img
+              src="/hits-logo.png"
+              alt="HITS Inventory & Profit Tax Tracking"
+              className="h-auto w-full max-w-[225px] object-contain"
+            />
+            <div className="mt-2 text-xs app-subtitle leading-tight">
+              Inventory & Profit Tax Tracking
             </div>
-            <div className="text-3xl font-semibold">Card Business OS</div>
           </div>
 
           <nav className="space-y-2">
-            <Link href="/app" className="app-button w-full justify-start">Dashboard</Link>
-            <Link href="/app/inventory" className="app-button w-full justify-start">Inventory Items</Link>
-            <Link href="/app/breaks" className="app-button w-full justify-start">Orders</Link>
-            <Link href="/app/settings" className="app-button w-full justify-start">Settings</Link>
-            <Link href="/app/utilities" className="app-button w-full justify-start">Utilities</Link>
+            <Link href="/app" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Dashboard</Link>
+            <Link href="/app/inventory" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Inventory Items</Link>
+            <Link href="/app/breaks" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Orders</Link>
+            <Link href="/app/settings" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Settings</Link>
+            <Link href="/app/utilities" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Utilities</Link>
 
             {isAdmin && (
               <Link
                 href="/app/admin/users"
-                className="app-button-warning w-full justify-start"
+                className="app-button-warning w-full justify-start hover:border-cyan-500/40"
               >
                 Admin
               </Link>
@@ -129,16 +133,16 @@ export default async function AppLayout({
             </div>
 
             <form action={signOutAction} className="mt-4">
-              <button className="app-button w-full">Sign out</button>
+              <button className="app-button w-full hover:border-cyan-500/40 hover:text-cyan-300">Sign out</button>
             </form>
           </div>
         </aside>
 
         {/* Main */}
         <main className="min-w-0">
-          
+
           {/* Top Bar */}
-          <div className="app-section border-b sticky top-0 z-10">
+          <div className="app-section border-b border-zinc-900 bg-black sticky top-0 z-10">
             <AppGlobalSearch />
           </div>
 

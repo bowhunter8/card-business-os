@@ -22,6 +22,8 @@ type Props = {
   forceFresh?: boolean
 }
 
+type AutoCompleteField = 'year' | 'set_name' | 'player_name' | 'card_number' | 'notes'
+
 const STORAGE_PREFIX = 'break_add_cards_draft_'
 const AUTOSAVE_DELAY_MS = 500
 
@@ -80,6 +82,65 @@ function rowHasMeaningfulData(row: EntryRow) {
   )
 }
 
+function uniqueValues(values: string[]) {
+  const seen = new Set<string>()
+  const output: string[] = []
+
+  for (const value of values) {
+    const cleaned = String(value ?? '').trim()
+    const key = cleaned.toLowerCase()
+
+    if (!cleaned || seen.has(key)) continue
+
+    seen.add(key)
+    output.push(cleaned)
+  }
+
+  return output
+}
+
+function findUniqueExcelLikeCompletion(
+  rows: EntryRow[],
+  currentRowIndex: number,
+  field: AutoCompleteField,
+  typedValue: string
+) {
+  const typed = String(typedValue ?? '')
+  const normalizedTyped = typed.trim().toLowerCase()
+
+  if (!normalizedTyped) return null
+
+  const previousValues = uniqueValues(
+    rows
+      .slice(0, currentRowIndex)
+      .map((row) => String(row[field] ?? '').trim())
+      .filter(Boolean)
+  )
+
+  const matches = previousValues.filter((value) =>
+    value.toLowerCase().startsWith(normalizedTyped)
+  )
+
+  if (matches.length !== 1) return null
+
+  const match = matches[0]
+  if (match.toLowerCase() === normalizedTyped) return null
+
+  return match
+}
+
+function shouldTryCompletion(e: React.ChangeEvent<HTMLInputElement>) {
+  const nativeEvent = e.nativeEvent as InputEvent
+
+  if (!nativeEvent?.inputType) return true
+
+  return (
+    nativeEvent.inputType === 'insertText' ||
+    nativeEvent.inputType === 'insertCompositionText' ||
+    nativeEvent.inputType === 'insertFromPaste'
+  )
+}
+
 export default function BreakCardEntryGrid({
   breakId,
   rowCount,
@@ -89,6 +150,13 @@ export default function BreakCardEntryGrid({
   forceFresh = false,
 }: Props) {
   const playerRefs = useRef<Array<HTMLInputElement | null>>([])
+  const fieldRefs = useRef<Record<AutoCompleteField, Array<HTMLInputElement | null>>>({
+    year: [],
+    set_name: [],
+    player_name: [],
+    card_number: [],
+    notes: [],
+  })
   const saveTimerRef = useRef<number | null>(null)
 
   const fallbackRows = useMemo(
@@ -179,6 +247,15 @@ export default function BreakCardEntryGrid({
 
   function setPlayerRef(index: number, el: HTMLInputElement | null) {
     playerRefs.current[index] = el
+    fieldRefs.current.player_name[index] = el
+  }
+
+  function setFieldRef(
+    field: AutoCompleteField,
+    index: number,
+    el: HTMLInputElement | null
+  ) {
+    fieldRefs.current[field][index] = el
   }
 
   function moveToNextPlayer(currentRow: number) {
@@ -200,6 +277,31 @@ export default function BreakCardEntryGrid({
           : row
       )
     )
+  }
+
+  function updateAutoCompleteField(
+    index: number,
+    field: AutoCompleteField,
+    value: string,
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const shouldComplete = shouldTryCompletion(event)
+    const completion = shouldComplete
+      ? findUniqueExcelLikeCompletion(rows, index, field, value)
+      : null
+
+    const finalValue = completion ?? value
+
+    updateRow(index, { [field]: finalValue } as Partial<EntryRow>)
+
+    if (completion) {
+      window.requestAnimationFrame(() => {
+        const input = fieldRefs.current[field][index]
+        if (!input) return
+
+        input.setSelectionRange(value.length, completion.length)
+      })
+    }
   }
 
   function clearDraft() {
@@ -257,126 +359,142 @@ export default function BreakCardEntryGrid({
         <button
           type="button"
           onClick={clearDraft}
-          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-800"
+          className="app-button"
         >
           Clear Autosaved Draft
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-zinc-800">
-        <table className="min-w-full text-sm">
-          <thead className="bg-zinc-950 text-zinc-400">
-            <tr>
-              <th className="px-3 py-3 text-left font-medium">Year</th>
-              <th className="px-3 py-3 text-left font-medium">Set</th>
-              <th className="px-3 py-3 text-left font-medium">Item / Player / Lot Name</th>
-              <th className="px-3 py-3 text-left font-medium">Item #</th>
-              <th className="px-3 py-3 text-left font-medium">Type</th>
-              <th className="px-3 py-3 text-left font-medium">Qty</th>
-              <th className="px-3 py-3 text-left font-medium">Status</th>
-              <th className="px-3 py-3 text-left font-medium">Notes</th>
-            </tr>
-          </thead>
+      <div className="app-table-wrap">
+        <div className="app-table-scroll">
+          <table className="app-table">
+            <thead className="app-thead">
+              <tr>
+                <th className="app-th">Year</th>
+                <th className="app-th">Set</th>
+                <th className="app-th">Item / Player / Lot Name</th>
+                <th className="app-th">Item #</th>
+                <th className="app-th">Type</th>
+                <th className="app-th">Qty</th>
+                <th className="app-th">Status</th>
+                <th className="app-th">Notes</th>
+              </tr>
+            </thead>
 
-          <tbody>
-            {rows.map((row, index) => {
-              return (
-                <tr key={index} className="border-t border-zinc-800">
-                  <td className="px-3 py-2">
-                    <input
-                      name={`year_${index}`}
-                      type="number"
-                      value={row.year}
-                      onChange={(e) => updateRow(index, { year: e.target.value })}
-                      placeholder="2025"
-                      className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
+            <tbody>
+              {rows.map((row, index) => {
+                return (
+                  <tr key={index} className="app-tr">
+                    <td className="app-td">
+                      <input
+                        name={`year_${index}`}
+                        type="number"
+                        ref={(el) => setFieldRef('year', index, el)}
+                        value={row.year}
+                        onChange={(e) =>
+                          updateAutoCompleteField(index, 'year', e.target.value, e)
+                        }
+                        placeholder="2025"
+                        className="app-input w-24"
+                      />
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <input
-                      name={`set_name_${index}`}
-                      value={row.set_name}
-                      onChange={(e) => updateRow(index, { set_name: e.target.value })}
-                      placeholder="Bowman Chrome"
-                      className="w-56 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
+                    <td className="app-td">
+                      <input
+                        name={`set_name_${index}`}
+                        ref={(el) => setFieldRef('set_name', index, el)}
+                        value={row.set_name}
+                        onChange={(e) =>
+                          updateAutoCompleteField(index, 'set_name', e.target.value, e)
+                        }
+                        placeholder="Bowman Chrome"
+                        className="app-input w-56"
+                      />
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <input
-                      name={`player_name_${index}`}
-                      ref={(el) => setPlayerRef(index, el)}
-                      onKeyDown={(e) => handlePlayerKeyDown(e, index)}
-                      value={row.player_name}
-                      onChange={(e) => updateRow(index, { player_name: e.target.value })}
-                      placeholder="Item, player, or lot name"
-                      className="w-52 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
+                    <td className="app-td">
+                      <input
+                        name={`player_name_${index}`}
+                        ref={(el) => setPlayerRef(index, el)}
+                        onKeyDown={(e) => handlePlayerKeyDown(e, index)}
+                        value={row.player_name}
+                        onChange={(e) =>
+                          updateAutoCompleteField(index, 'player_name', e.target.value, e)
+                        }
+                        placeholder="Item, player, or lot name"
+                        className="app-input w-52"
+                      />
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <input
-                      name={`card_number_${index}`}
-                      onKeyDown={(e) => handleCardNumberKeyDown(e, index)}
-                      value={row.card_number}
-                      onChange={(e) => updateRow(index, { card_number: e.target.value })}
-                      placeholder="24"
-                      className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
+                    <td className="app-td">
+                      <input
+                        name={`card_number_${index}`}
+                        ref={(el) => setFieldRef('card_number', index, el)}
+                        onKeyDown={(e) => handleCardNumberKeyDown(e, index)}
+                        value={row.card_number}
+                        onChange={(e) =>
+                          updateAutoCompleteField(index, 'card_number', e.target.value, e)
+                        }
+                        placeholder="24"
+                        className="app-input w-24"
+                      />
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <select
-                      name={`item_type_${index}`}
-                      value={row.item_type}
-                      onChange={(e) => updateRow(index, { item_type: e.target.value })}
-                      className="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    >
-                      <option value="single_card">Single Item</option>
-                      <option value="lot">Lot</option>
-                    </select>
-                  </td>
+                    <td className="app-td">
+                      <select
+                        name={`item_type_${index}`}
+                        value={row.item_type}
+                        onChange={(e) => updateRow(index, { item_type: e.target.value })}
+                        className="app-select w-36"
+                      >
+                        <option value="single_card">Single Item</option>
+                        <option value="lot">Lot</option>
+                      </select>
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <input
-                      name={`quantity_${index}`}
-                      type="number"
-                      min={1}
-                      value={row.quantity}
-                      onChange={(e) => updateRow(index, { quantity: e.target.value })}
-                      className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
+                    <td className="app-td">
+                      <input
+                        name={`quantity_${index}`}
+                        type="number"
+                        min={1}
+                        value={row.quantity}
+                        onChange={(e) => updateRow(index, { quantity: e.target.value })}
+                        className="app-input w-20"
+                      />
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <select
-                      name={`status_${index}`}
-                      value={row.status}
-                      onChange={(e) => updateRow(index, { status: e.target.value })}
-                      className="w-44 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    >
-                      <option value="available">For Sale</option>
-                      <option value="personal">Personal Collection</option>
-                      <option value="junk">Junk</option>
-                    </select>
-                  </td>
+                    <td className="app-td">
+                      <select
+                        name={`status_${index}`}
+                        value={row.status}
+                        onChange={(e) => updateRow(index, { status: e.target.value })}
+                        className="app-select w-44"
+                      >
+                        <option value="available">For Sale</option>
+                        <option value="personal">Personal Collection</option>
+                        <option value="junk">Junk</option>
+                      </select>
+                    </td>
 
-                  <td className="px-3 py-2">
-                    <input
-                      name={`notes_${index}`}
-                      onKeyDown={(e) => handleNotesKeyDown(e, index)}
-                      value={row.notes}
-                      onChange={(e) => updateRow(index, { notes: e.target.value })}
-                      placeholder="RC / Auto / /50 / Refractor / team lot / remarks"
-                      className="w-72 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-zinc-100"
-                    />
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                    <td className="app-td">
+                      <input
+                        name={`notes_${index}`}
+                        ref={(el) => setFieldRef('notes', index, el)}
+                        onKeyDown={(e) => handleNotesKeyDown(e, index)}
+                        value={row.notes}
+                        onChange={(e) =>
+                          updateAutoCompleteField(index, 'notes', e.target.value, e)
+                        }
+                        placeholder="RC / Auto / /50 / Refractor / team lot / remarks"
+                        className="app-input w-72"
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )

@@ -320,7 +320,7 @@ export async function createBreakAction(formData: FormData) {
     }
   }
 
-  redirect(`/app/breaks/${data.id}`)
+  redirect(`/app/breaks/${data.id}/add-cards`)
 }
 
 export async function updateBreakAction(formData: FormData) {
@@ -366,7 +366,7 @@ export async function updateBreakAction(formData: FormData) {
 
   const { data: existingBreak, error: existingBreakError } = await supabase
     .from('breaks')
-    .select('id, user_id')
+    .select('id, user_id, cards_received')
     .eq('id', breakId)
     .eq('user_id', user.id)
     .single()
@@ -378,6 +378,29 @@ export async function updateBreakAction(formData: FormData) {
       )}`
     )
   }
+
+  const previousCardsReceived = Number(existingBreak.cards_received ?? 0)
+
+  const { count: existingInventoryCount, error: existingInventoryCountError } =
+    await supabase
+      .from('inventory_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('source_type', 'break')
+      .eq('source_break_id', breakId)
+
+  if (existingInventoryCountError) {
+    redirect(
+      `/app/breaks/${breakId}/edit?error=${encodeURIComponent(
+        existingInventoryCountError.message || 'Could not check existing break inventory'
+      )}`
+    )
+  }
+
+  const shouldRedirectToAddCards =
+    cardsReceived > 0 &&
+    Number(existingInventoryCount ?? 0) === 0 &&
+    previousCardsReceived !== cardsReceived
 
   const teams = teamsRaw
     ? teamsRaw
@@ -417,6 +440,10 @@ export async function updateBreakAction(formData: FormData) {
         updateError.message || 'Could not update break'
       )}`
     )
+  }
+
+  if (shouldRedirectToAddCards) {
+    redirect(`/app/breaks/${breakId}/add-cards`)
   }
 
   redirect(`/app/breaks/${breakId}?success=${encodeURIComponent('Break updated')}`)
@@ -736,7 +763,15 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
-  redirect(`/app/breaks/${breakId}`)
+  const successMessage =
+    enteredUnitCount === cardsReceived
+      ? `Success! All ${enteredUnitCount} item(s) added to inventory.`
+      : `Success! ${enteredUnitCount} item(s) added to inventory. ${Math.max(
+          0,
+          cardsReceived - enteredUnitCount
+        )} item(s) remaining.`
+
+  redirect(`/app/breaks/${breakId}?success=${encodeURIComponent(successMessage)}`)
 }
 
 export async function deleteInventoryItemAction(formData: FormData) {
