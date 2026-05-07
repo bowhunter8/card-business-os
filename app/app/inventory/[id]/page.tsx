@@ -54,6 +54,14 @@ type SaleRow = {
   reversal_reason?: string | null
 }
 
+type FinalizedDisposalRow = {
+  id: string
+  created_at: string | null
+  disposal_reason: string | null
+  disposal_notes: string | null
+  notes: string | null
+}
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -282,7 +290,7 @@ export default async function InventoryDetailPage({
 
   if (!user) return null
 
-  const [itemResponse, salesResponse] = await Promise.all([
+  const [itemResponse, salesResponse, finalizedDisposalResponse] = await Promise.all([
     supabase
       .from('inventory_items')
       .select(`
@@ -338,6 +346,22 @@ export default async function InventoryDetailPage({
       .eq('user_id', user.id)
       .eq('inventory_item_id', id)
       .order('sale_date', { ascending: false }),
+
+    supabase
+      .from('inventory_transactions')
+      .select(`
+        id,
+        created_at,
+        disposal_reason,
+        disposal_notes,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .eq('inventory_item_id', id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .order('created_at', { ascending: false })
+      .limit(1),
   ])
 
   if (itemResponse.error || !itemResponse.data) {
@@ -346,6 +370,10 @@ export default async function InventoryDetailPage({
 
   const item = itemResponse.data as InventoryItem
   const sales: SaleRow[] = (salesResponse.data ?? []) as SaleRow[]
+  const finalizedDisposal =
+    ((finalizedDisposalResponse.data ?? [])[0] as FinalizedDisposalRow | undefined) ?? null
+
+  const isFinalizedDisposal = Boolean(finalizedDisposal)
 
   const activeSales = sales.filter((sale) => !sale.reversed_at)
 
@@ -391,7 +419,11 @@ export default async function InventoryDetailPage({
             Edit Page
           </Link>
 
-          {hasAvailableToSell ? (
+          {isFinalizedDisposal ? (
+            <div className="rounded-full border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-200">
+              Locked For Tax Review
+            </div>
+          ) : hasAvailableToSell ? (
             <>
               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
                 Sell Item
@@ -419,7 +451,7 @@ export default async function InventoryDetailPage({
             </form>
           ) : null}
 
-          {canDelete ? (
+          {canDelete && !isFinalizedDisposal ? (
             <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
           ) : null}
         </div>
@@ -450,6 +482,49 @@ export default async function InventoryDetailPage({
       {item.status === 'giveaway' ? (
         <div className="app-alert-info">
           This item has been marked as a Giveaway and recorded as a marketing expense.
+        </div>
+      ) : null}
+
+      {isFinalizedDisposal ? (
+        <div className="app-alert-warning">
+          <div className="font-semibold">
+            This disposal has been finalized for tax write-off review and is now locked.
+          </div>
+
+          <div className="mt-1 text-sm">
+            Selling, giveaway conversion, deletion, and sale reversal actions are disabled to preserve audit-safe records.
+          </div>
+
+          <div className="mt-2 grid gap-2 md:grid-cols-3">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-400">
+                Finalized
+              </div>
+              <div className="mt-1 text-sm">
+                {formatDateTime(finalizedDisposal?.created_at)}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-400">
+                Disposal Reason
+              </div>
+              <div className="mt-1 text-sm">
+                {finalizedDisposal?.disposal_reason || '—'}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-400">
+                Disposal Notes
+              </div>
+              <div className="mt-1 whitespace-pre-wrap text-sm">
+                {finalizedDisposal?.disposal_notes ||
+                  finalizedDisposal?.notes ||
+                  '—'}
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -781,6 +856,10 @@ export default async function InventoryDetailPage({
                         {reversed ? (
                           <div className="text-xs text-zinc-500">
                             {sale.reversal_reason || 'Already reversed'}
+                          </div>
+                        ) : isFinalizedDisposal ? (
+                          <div className="text-xs text-amber-300">
+                            Locked after finalized disposal review
                           </div>
                         ) : (
                           <form action={reverseSaleAction} className="space-y-1.5">

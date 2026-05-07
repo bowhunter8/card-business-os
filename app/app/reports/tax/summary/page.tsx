@@ -46,6 +46,11 @@ type SaleSummaryRow = {
   profit: number | null
 }
 
+type ExpenseRow = {
+  category: string | null
+  amount: number | null
+}
+
 type InventoryRow = {
   id: string
   title: string | null
@@ -68,8 +73,34 @@ type InventorySummaryRow = {
   estimated_value_total: number | null
 }
 
+type DisposalTransactionRow = {
+  id: string
+  inventory_item_id: string | null
+  transaction_type: string | null
+  quantity_change: number | null
+  notes: string | null
+  disposal_reason: string | null
+  disposal_notes: string | null
+  finalized_for_tax: boolean | null
+  created_at: string | null
+}
+
+type DisposalInventoryRow = {
+  id: string
+  title: string | null
+  player_name: string | null
+  year: number | null
+  set_name: string | null
+  card_number: string | null
+  notes: string | null
+  cost_basis_total: number | null
+  cost_basis_unit: number | null
+}
+
 type TaxYearSettingsRow = {
   beginning_inventory: number | null
+  ending_inventory_snapshot: number | null
+  ending_inventory_locked_at: string | null
   business_use_of_home: number | null
   vehicle_expense: number | null
   depreciation_expense: number | null
@@ -95,7 +126,7 @@ function parseMoneyInput(value: FormDataEntryValue | null) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function buildItemName(item: InventoryRow) {
+function buildItemName(item: InventoryRow | DisposalInventoryRow) {
   const parts = [
     item.year,
     item.set_name,
@@ -104,6 +135,20 @@ function buildItemName(item: InventoryRow) {
     item.notes,
   ]
   return parts.filter(Boolean).join(' • ') || item.title || 'Untitled item'
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString()
+}
+
+function formatDisposalReason(value: string | null | undefined) {
+  if (!value) return 'Not specified'
+  return value
+    .replaceAll('_', ' ')
+    .replace(/\w/g, (letter) => letter.toUpperCase())
 }
 
 function clampYear(raw?: string) {
@@ -253,6 +298,8 @@ export default async function TaxReportPage({
     salesDetailRes,
     inventorySummaryRes,
     inventoryDetailRes,
+    expensesRes,
+    disposalTransactionsRes,
     taxSettingsRes,
   ] = await Promise.all([
     supabase
@@ -341,9 +388,42 @@ export default async function TaxReportPage({
       .limit(DETAIL_LIMIT),
 
     supabase
+      .from('expenses')
+      .select(`
+        category,
+        amount
+      `)
+      .eq('user_id', user.id)
+      .gte('expense_date', startDate)
+      .lte('expense_date', endDate),
+
+    supabase
+      .from('inventory_transactions')
+      .select(`
+        id,
+        inventory_item_id,
+        transaction_type,
+        quantity_change,
+        notes,
+        disposal_reason,
+        disposal_notes,
+        finalized_for_tax,
+        created_at
+      `)
+      .eq('user_id', user.id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .gte('created_at', `${startDate}T00:00:00.000Z`)
+      .lte('created_at', `${endDate}T23:59:59.999Z`)
+      .order('created_at', { ascending: false })
+      .limit(DETAIL_LIMIT),
+
+    supabase
       .from('tax_year_settings')
       .select(`
         beginning_inventory,
+        ending_inventory_snapshot,
+        ending_inventory_locked_at,
         business_use_of_home,
         vehicle_expense,
         depreciation_expense,
@@ -368,7 +448,41 @@ export default async function TaxReportPage({
   const inventorySummaryRows = (inventorySummaryRes.data ?? []) as InventorySummaryRow[]
   const endingInventory = (inventoryDetailRes.data ?? []) as InventoryRow[]
 
+  const expenses = (expensesRes.data ?? []) as ExpenseRow[]
+
   const taxSettings = (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null
+  const disposalTransactions = (disposalTransactionsRes.data ?? []) as DisposalTransactionRow[]
+  const disposalItemIds = Array.from(
+    new Set(
+      disposalTransactions
+        .map((row) => row.inventory_item_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  )
+
+  let disposalItemRows: DisposalInventoryRow[] = []
+
+  if (disposalItemIds.length > 0) {
+    const disposalItemsRes = await supabase
+      .from('inventory_items')
+      .select(`
+        id,
+        title,
+        player_name,
+        year,
+        set_name,
+        card_number,
+        notes,
+        cost_basis_total,
+        cost_basis_unit
+      `)
+      .eq('user_id', user.id)
+      .in('id', disposalItemIds)
+
+    disposalItemRows = (disposalItemsRes.data ?? []) as DisposalInventoryRow[]
+  }
+
+  const disposalItemsById = new Map(disposalItemRows.map((item) => [item.id, item]))
 
   const totalBreakPurchases = breakSummaryRows.reduce(
     (sum, row) => sum + Number(row.total_cost ?? 0),
@@ -421,6 +535,15 @@ export default async function TaxReportPage({
     0
   )
 
+  const totalDisposalReviewCost = disposalTransactions.reduce((sum, row) => {
+    const item = row.inventory_item_id ? disposalItemsById.get(row.inventory_item_id) : null
+    return sum + Number(item?.cost_basis_total ?? 0)
+  }, 0)
+
+  const totalDisposalReviewQuantity = disposalTransactions.reduce((sum, row) => {
+    return sum + Math.abs(Number(row.quantity_change ?? 0))
+  }, 0)
+
   const nextYear = selectedYear + 1
 
   const nextTaxSettingsRes = await supabase
@@ -469,6 +592,48 @@ export default async function TaxReportPage({
   const utilities = Number(taxSettings?.utilities ?? 0)
   const taxesLicenses = Number(taxSettings?.taxes_licenses ?? 0)
   const repairsMaintenance = Number(taxSettings?.repairs_maintenance ?? 0)
+  const endingInventoryIsLocked = taxSettings?.ending_inventory_snapshot != null
+  const manualExpenseCount = expenses.length
+  const uncategorizedExpenseCount = expenses.filter((expense) => {
+    const category = String(expense.category ?? '').trim().toLowerCase()
+    return !category || category === 'uncategorized' || category.includes('uncategorized') || category === 'other' || category.includes('other')
+  }).length
+  const disposalRowsMissingReason = disposalTransactions.filter((row) => !String(row.disposal_reason ?? '').trim()).length
+  const disposalRowsMissingNotes = disposalTransactions.filter((row) => !String(row.disposal_notes ?? '').trim()).length
+
+  const taxReadinessWarnings: string[] = []
+
+  if (!taxSettings) {
+    taxReadinessWarnings.push('No yearly tax settings record exists yet. Beginning inventory and extra Schedule C lines are using zero defaults.')
+  }
+
+  if (beginningInventory === 0 && (totalCOGS > 0 || endingInventoryCost > 0)) {
+    taxReadinessWarnings.push('Beginning inventory is zero. Confirm this is correct before filing.')
+  }
+
+  if (!endingInventoryIsLocked) {
+    taxReadinessWarnings.push('Ending inventory is not locked. Report values may change if inventory changes. Lock the tax-year snapshot before filing or sending final numbers to a CPA.')
+  }
+
+  if (uncategorizedExpenseCount > 0) {
+    taxReadinessWarnings.push(`${uncategorizedExpenseCount} other / uncategorized expense record${uncategorizedExpenseCount === 1 ? '' : 's'} should be reviewed before filing.`)
+  }
+
+  if (manualExpenseCount === 0 && salesSummaryRows.length > 0) {
+    taxReadinessWarnings.push('No manual expenses were recorded for the year. Confirm supplies, software, subscriptions, equipment, and other costs were not missed.')
+  }
+
+  if (disposalTransactions.length > 0) {
+    taxReadinessWarnings.push('Finalized disposal / write-off review items exist. Review them so they are not double counted as expenses, giveaways, donations, or separate inventory losses.')
+  }
+
+  if (disposalRowsMissingReason > 0) {
+    taxReadinessWarnings.push(`${disposalRowsMissingReason} finalized disposal item${disposalRowsMissingReason === 1 ? '' : 's'} missing a disposal reason.`)
+  }
+
+  if (disposalRowsMissingNotes > 0) {
+    taxReadinessWarnings.push(`${disposalRowsMissingNotes} finalized disposal item${disposalRowsMissingNotes === 1 ? '' : 's'} missing detailed notes.`)
+  }
 
   return (
     <div className="app-page-wide space-y-4">
@@ -485,9 +650,9 @@ export default async function TaxReportPage({
             Back to Dashboard
           </Link>
 
-          <TaxExportButton year={selectedYear} />
+          <TaxExportButton year={selectedYear} readinessWarnings={taxReadinessWarnings} />
 
-          <TaxPdfExportButton year={selectedYear} />
+          <TaxPdfExportButton year={selectedYear} readinessWarnings={taxReadinessWarnings} />
         </div>
       </div>
 
@@ -516,7 +681,7 @@ export default async function TaxReportPage({
               Load Year
             </button>
 
-            <TaxPdfExportButton year={selectedYear} />
+            <TaxPdfExportButton year={selectedYear} readinessWarnings={taxReadinessWarnings} />
           </div>
         </form>
       </div>
@@ -540,6 +705,64 @@ export default async function TaxReportPage({
         <StatCard label="Home Office" value={money(businessUseOfHome)} />
         <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
         <StatCard label="Legal / Professional" value={money(legalProfessional)} />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard label="Disposal Review Items" value={String(disposalTransactions.length)} />
+        <StatCard label="Disposal Review Qty" value={String(totalDisposalReviewQuantity)} />
+        <StatCard label="Disposal Review Cost" value={money(totalDisposalReviewCost)} />
+        <StatCard label="Write-Off Status" value="Review" />
+      </div>
+
+      <div className="app-section p-5">
+        <div className="mb-4">
+          <h2 className="text-xl font-semibold">Disposal / Write-Off Review</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Finalized disposal records are shown here for accountant and year-end review. These are not treated as a second manual expense; they document inventory that physically left the business.
+          </p>
+        </div>
+
+        <div className="app-table-wrap">
+          <div className="app-table-scroll">
+            <table className="app-table">
+              <thead className="app-thead">
+                <tr>
+                  <th className="app-th">Date</th>
+                  <th className="app-th">Item</th>
+                  <th className="app-th">Reason</th>
+                  <th className="app-th text-right">Cost Basis</th>
+                  <th className="app-th">Notes / Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {disposalTransactions.map((row) => {
+                  const item = row.inventory_item_id ? disposalItemsById.get(row.inventory_item_id) : null
+
+                  return (
+                    <tr key={row.id} className="app-tr align-top">
+                      <td className="app-td whitespace-nowrap">{formatDate(row.created_at)}</td>
+                      <td className="app-td min-w-[260px]">{item ? buildItemName(item) : 'Inventory item not found'}</td>
+                      <td className="app-td whitespace-nowrap">{formatDisposalReason(row.disposal_reason)}</td>
+                      <td className="app-td text-right whitespace-nowrap">{money(item?.cost_basis_total)}</td>
+                      <td className="app-td min-w-[320px]">
+                        <div className="text-sm text-zinc-200">{row.disposal_notes || 'No additional remarks entered.'}</div>
+                        <div className="mt-1 text-xs text-zinc-500">{row.notes || '—'}</div>
+                      </td>
+                    </tr>
+                  )
+                })}
+
+                {disposalTransactions.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-400">
+                      No finalized disposal write-off review records found for {selectedYear}.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {endingInventoryCost > 0 && (
@@ -708,7 +931,7 @@ export default async function TaxReportPage({
               Save Schedule C Settings
             </button>
 
-            <TaxPdfExportButton year={selectedYear} />
+            <TaxPdfExportButton year={selectedYear} readinessWarnings={taxReadinessWarnings} />
           </div>
         </form>
 

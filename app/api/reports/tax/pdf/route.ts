@@ -23,6 +23,29 @@ type ExpenseRow = {
   amount: number | null
 }
 
+type DisposalInventoryItemRow = {
+  title: string | null
+  player_name: string | null
+  year: number | null
+  set_name: string | null
+  card_number: string | null
+  cost_basis_total: number | null
+  cost_basis_unit: number | null
+  quantity: number | null
+  available_quantity: number | null
+}
+
+type DisposalReviewRow = {
+  id: string
+  inventory_item_id: string | null
+  quantity_change: number | null
+  disposal_reason: string | null
+  disposal_notes: string | null
+  notes: string | null
+  created_at: string | null
+  inventory_items?: DisposalInventoryItemRow | DisposalInventoryItemRow[] | null
+}
+
 type TaxYearSettingsRow = {
   beginning_inventory: number | null
   ending_inventory_snapshot: number | null
@@ -65,6 +88,7 @@ type ExpenseCategorySummaryRow = {
 type PdfLine = {
   label: string
   amount?: number | null
+  valueType?: 'currency' | 'count'
   type?: 'title' | 'section' | 'main' | 'sub' | 'note' | 'spacer'
 }
 
@@ -91,6 +115,14 @@ function money(value: number | null | undefined) {
 function pdfEscape(value: unknown) {
   return String(value ?? '')
     .replace(/\\/g, '\\\\')
+    .replace(/™/g, '\\231')
+    .replace(/•/g, '\\225')
+    .replace(/–/g, '\\226')
+    .replace(/—/g, '\\227')
+    .replace(/‘/g, '\\221')
+    .replace(/’/g, '\\222')
+    .replace(/“/g, '\\223')
+    .replace(/”/g, '\\224')
     .replace(/\(/g, '\\(')
     .replace(/\)/g, '\\)')
     .replace(/\r?\n/g, ' ')
@@ -188,6 +220,75 @@ function mapExpenseCategoryToScheduleCArea(category: string) {
   return 'Other expenses'
 }
 
+function formatDisposalReason(value: string | null | undefined) {
+  const normalized = String(value ?? '').trim()
+  if (!normalized) return 'Missing reason'
+  return normalized.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function getDisposalInventoryItem(row: DisposalReviewRow) {
+  const relation = row.inventory_items
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null
+  }
+  return relation ?? null
+}
+
+function getDisposalItemName(row: DisposalReviewRow) {
+  const item = getDisposalInventoryItem(row)
+  if (!item) return `Inventory item ${row.inventory_item_id ?? ''}`.trim()
+  return (
+    item.title ||
+    [item.year, item.set_name, item.player_name, item.card_number ? `#${item.card_number}` : null]
+      .filter(Boolean)
+      .join(' • ') ||
+    `Inventory item ${row.inventory_item_id ?? ''}`.trim()
+  )
+}
+
+function getDisposalCostBasis(row: DisposalReviewRow) {
+  return Number(getDisposalInventoryItem(row)?.cost_basis_total ?? 0)
+}
+
+function getDisposalQuantity(row: DisposalReviewRow) {
+  const item = getDisposalInventoryItem(row)
+  const quantity = Number(item?.quantity ?? 0)
+  const availableQuantity = Number(item?.available_quantity ?? 0)
+  if (quantity > 0) return quantity
+  if (availableQuantity > 0) return availableQuantity
+  return Math.abs(Number(row.quantity_change ?? 0))
+}
+
+function formatShortDate(value: string | null | undefined) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toISOString().slice(0, 10)
+}
+
+
+function formatPdfAmount(value: number | null | undefined, valueType: PdfLine['valueType']) {
+  if (valueType === 'count') {
+    return new Intl.NumberFormat('en-US', {
+      maximumFractionDigits: 0,
+    }).format(Number(value ?? 0))
+  }
+
+  return money(value)
+}
+
+function buildDisposalDetailLabel(row: DisposalReviewRow) {
+  const notes = String(row.disposal_notes || row.notes || 'No notes entered').trim()
+
+  return [
+    `Date: ${formatShortDate(row.created_at)}`,
+    `Item: ${getDisposalItemName(row)}`,
+    `Qty: ${getDisposalQuantity(row)}`,
+    `Reason: ${formatDisposalReason(row.disposal_reason)}`,
+    `Notes: ${notes || 'No notes entered'}`,
+  ].join('\n')
+}
+
 function buildPdf(lines: PdfLine[]) {
   const pageWidth = 612
   const pageHeight = 792
@@ -195,6 +296,7 @@ function buildPdf(lines: PdfLine[]) {
   const amountX = 460
   const startY = 730
   const bottomY = 60
+  const rightX = pageWidth - marginX
 
   const pages: string[] = []
   let current = ''
@@ -203,17 +305,6 @@ function buildPdf(lines: PdfLine[]) {
 
   function addRaw(value: string) {
     current += value
-  }
-
-  function newPage() {
-    if (current) {
-      addText(`Page ${pageNumber}`, marginX, 34, 8, false)
-      pages.push(current)
-      pageNumber += 1
-    }
-
-    current = ''
-    y = startY
   }
 
   function addText(text: string, x: number, textY: number, size = 10, bold = false) {
@@ -228,52 +319,130 @@ function buildPdf(lines: PdfLine[]) {
     addRaw(`0.93 0.95 0.98 rg ${marginX - 8} ${sectionY - 5} ${pageWidth - marginX * 2 + 16} 22 re f\n`)
   }
 
+  function newPage() {
+    if (current) {
+      addText(`Page ${pageNumber}`, marginX, 34, 8, false)
+      pages.push(current)
+      pageNumber += 1
+    }
+
+    current = ''
+    y = startY
+  }
+
+  function ensureSpace(heightNeeded: number) {
+    if (y - heightNeeded < bottomY) {
+      newPage()
+    }
+  }
+
+  function getApproxTextWidth(text: string, size: number) {
+    return text.length * size * 0.5
+  }
+
+  function wrapText(text: string, maxWidth: number, size: number) {
+    const rawParts = String(text || '').split(/\r?\n/)
+    const wrapped: string[] = []
+
+    for (const rawPart of rawParts) {
+      const words = rawPart.trim().split(/\s+/).filter(Boolean)
+
+      if (words.length === 0) {
+        wrapped.push('')
+        continue
+      }
+
+      let line = ''
+
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word
+
+        if (line && getApproxTextWidth(candidate, size) > maxWidth) {
+          wrapped.push(line)
+          line = word
+        } else {
+          line = candidate
+        }
+      }
+
+      if (line) {
+        wrapped.push(line)
+      }
+    }
+
+    return wrapped
+  }
+
+  function addWrappedText(text: string, x: number, textY: number, maxWidth: number, size = 10, bold = false, lineHeight = 12) {
+    const wrappedLines = wrapText(text, maxWidth, size)
+
+    wrappedLines.forEach((wrappedLine, index) => {
+      addText(wrappedLine, x, textY - index * lineHeight, size, bold)
+    })
+
+    return wrappedLines.length
+  }
+
   newPage()
 
   for (const line of lines) {
     const type = line.type ?? 'main'
 
-    if (y < bottomY) {
-      newPage()
-    }
-
     if (type === 'spacer') {
+      ensureSpace(10)
       y -= 10
       continue
     }
 
     if (type === 'title') {
-      addText(line.label, marginX, y, 20, true)
-      y -= 16
+      const lineHeight = 22
+      const maxWidth = rightX - marginX
+      const wrappedLineCount = wrapText(line.label, maxWidth, 20).length
+      ensureSpace(wrappedLineCount * lineHeight + 40)
+      addWrappedText(line.label, marginX, y, maxWidth, 20, true, lineHeight)
+      y -= wrappedLineCount * lineHeight
       addRule(y)
       y -= 24
       continue
     }
 
     if (type === 'section') {
+      ensureSpace(36)
       y -= 6
       addSectionBackground(y)
-      addText(line.label, marginX, y, 12, true)
+      addWrappedText(line.label, marginX, y, rightX - marginX, 12, true, 14)
       y -= 24
       continue
     }
 
     if (type === 'note') {
-      addText(line.label, marginX, y, 8, false)
-      y -= 14
+      const maxWidth = rightX - marginX
+      const lineHeight = 11
+      const wrappedLineCount = wrapText(line.label, maxWidth, 8).length
+      ensureSpace(wrappedLineCount * lineHeight + 4)
+      addWrappedText(line.label, marginX, y, maxWidth, 8, false, lineHeight)
+      y -= wrappedLineCount * lineHeight + 3
       continue
     }
 
     const isMain = type === 'main'
     const labelX = type === 'sub' ? marginX + 22 : marginX
     const size = isMain ? 10 : 9
+    const lineHeight = isMain ? 13 : 12
+    const hasAmount = line.amount !== undefined && line.amount !== null
+    const amountText = hasAmount ? formatPdfAmount(line.amount, line.valueType) : ''
+    const labelMaxWidth = hasAmount ? amountX - labelX - 18 : rightX - labelX
+    const wrappedLineCount = wrapText(line.label, labelMaxWidth, size).length
+    const blockHeight = Math.max(1, wrappedLineCount) * lineHeight + (isMain ? 5 : 4)
 
-    addText(line.label, labelX, y, size, isMain)
-    if (line.amount !== undefined && line.amount !== null) {
-      addText(money(line.amount), amountX, y, size, isMain)
+    ensureSpace(blockHeight)
+    addWrappedText(line.label, labelX, y, labelMaxWidth, size, isMain, lineHeight)
+
+    if (hasAmount) {
+      addText(amountText, amountX, y, size, isMain)
     }
 
-    y -= isMain ? 18 : 15
+    y -= blockHeight
   }
 
   if (current) {
@@ -295,7 +464,7 @@ function buildPdf(lines: PdfLine[]) {
     const contentObjectNumber = pageObjectNumber + 1
 
     objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> >> >> /Contents ${contentObjectNumber} 0 R >>`
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >> >> >> /Contents ${contentObjectNumber} 0 R >>`
     )
 
     objects.push(`<< /Length ${Buffer.byteLength(content, 'utf8')} >>\nstream\n${content}endstream`)
@@ -339,7 +508,7 @@ export async function GET(request: NextRequest) {
 
   const userEmail = String(user.email ?? '').trim().toLowerCase()
 
-  const [salesRes, inventoryRes, expensesRes, taxSettingsRes, profileRes] = await Promise.all([
+  const [salesRes, inventoryRes, expensesRes, disposalReviewRes, taxSettingsRes, profileRes] = await Promise.all([
     supabase
       .from('sales')
       .select(`
@@ -376,6 +545,35 @@ export async function GET(request: NextRequest) {
       .eq('user_id', user.id)
       .gte('expense_date', startDate)
       .lte('expense_date', endDate),
+
+    supabase
+      .from('inventory_transactions')
+      .select(`
+        id,
+        inventory_item_id,
+        quantity_change,
+        disposal_reason,
+        disposal_notes,
+        notes,
+        created_at,
+        inventory_items (
+          title,
+          player_name,
+          year,
+          set_name,
+          card_number,
+          cost_basis_total,
+          cost_basis_unit,
+          quantity,
+          available_quantity
+        )
+      `)
+      .eq('user_id', user.id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .gte('created_at', `${startDate}T00:00:00.000Z`)
+      .lte('created_at', `${endDate}T23:59:59.999Z`)
+      .order('created_at', { ascending: false }),
 
     supabase
       .from('tax_year_settings')
@@ -422,6 +620,7 @@ export async function GET(request: NextRequest) {
   const sales: SaleRow[] = (salesRes.data ?? []) as SaleRow[]
   const endingInventory: InventoryRow[] = (inventoryRes.data ?? []) as InventoryRow[]
   const expenses: ExpenseRow[] = (expensesRes.data ?? []) as ExpenseRow[]
+  const disposalReviewRows: DisposalReviewRow[] = ((disposalReviewRes.data ?? []) as unknown) as DisposalReviewRow[]
   const taxSettings = (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null
   const profile = (profileRes.data ?? null) as UserProfileRow | null
 
@@ -666,6 +865,27 @@ export async function GET(request: NextRequest) {
   const educationCount = countForScheduleArea('Other expenses / Education')
   const uncategorizedCount = countForScheduleArea('Other expenses')
 
+  const disposalReviewCount = disposalReviewRows.length
+  const totalDisposalReviewCost = roundMoney(
+    disposalReviewRows.reduce((sum, row) => sum + getDisposalCostBasis(row), 0)
+  )
+  const disposalReasonSummaryRows = Array.from(
+    disposalReviewRows.reduce((map, row) => {
+      const reason = formatDisposalReason(row.disposal_reason)
+      const current = map.get(reason) ?? { count: 0, cost: 0 }
+      map.set(reason, {
+        count: current.count + 1,
+        cost: roundMoney(current.cost + getDisposalCostBasis(row)),
+      })
+      return map
+    }, new Map<string, { count: number; cost: number }>())
+  )
+    .map(([reason, values]) => ({ reason, ...values }))
+    .sort((a, b) => b.cost - a.cost)
+
+  const disposalRowsMissingReason = disposalReviewRows.filter((row) => !String(row.disposal_reason ?? '').trim()).length
+  const disposalRowsMissingNotes = disposalReviewRows.filter((row) => !String(row.disposal_notes ?? '').trim()).length
+
   const warnings: string[] = []
 
   if (!taxSettings) {
@@ -708,6 +928,18 @@ export async function GET(request: NextRequest) {
     warnings.push('Sale-level shipping_cost currently combines postage and shipping supplies. Use the workbook details if you need transaction support.')
   }
 
+  if (disposalReviewCount > 0) {
+    warnings.push('Finalized disposal / write-off review items exist. Review the disposal section so these items are not double counted as expenses, giveaways, donations, or separate inventory losses.')
+  }
+
+  if (disposalRowsMissingReason > 0) {
+    warnings.push(`${disposalRowsMissingReason} finalized disposal item(s) are missing a disposal reason.`)
+  }
+
+  if (disposalRowsMissingNotes > 0) {
+    warnings.push(`${disposalRowsMissingNotes} finalized disposal item(s) are missing detailed notes.`)
+  }
+
   if (warnings.length === 0) {
     warnings.push('No major tax-readiness warnings were detected from tracked data.')
   }
@@ -727,8 +959,8 @@ export async function GET(request: NextRequest) {
     {
       label:
         endingInventoryIsLocked
-          ? 'Amounts are based on tracked sales, expenses, locked ending inventory, beginning inventory settings, and COGS records in Card Business OS.'
-          : 'Amounts are based on tracked sales, expenses, live inventory, beginning inventory settings, and COGS records in Card Business OS. Lock ending inventory before filing.',
+          ? 'Amounts are based on tracked sales, expenses, locked ending inventory, beginning inventory settings, and COGS records in HITS™.'
+          : 'Amounts are based on tracked sales, expenses, live inventory, beginning inventory settings, and COGS records in HITS™. Lock ending inventory before filing.',
       type: 'note',
     },
     { label: '', type: 'spacer' },
@@ -1031,20 +1263,80 @@ export async function GET(request: NextRequest) {
       type: 'main',
     },
 
+    { label: 'DISPOSAL / WRITE-OFF REVIEW', type: 'section' },
+    {
+      label: 'Finalized disposal records reviewed',
+      amount: disposalReviewCount,
+      valueType: 'count',
+      type: 'main',
+    },
+    {
+      label: 'Total cost basis flagged for disposal / write-off review',
+      amount: totalDisposalReviewCost,
+      type: 'main',
+    },
+    {
+      label:
+        'These records are review support only. Confirm final tax treatment with your CPA/preparer and do not also deduct these items as expenses, giveaways, donations, or separate losses.',
+      type: 'note',
+    },
+    ...(disposalReasonSummaryRows.length > 0
+      ? disposalReasonSummaryRows.map((row) => ({
+          label: `${row.reason} (${row.count} finalized item${row.count === 1 ? '' : 's'})`,
+          amount: row.cost,
+          type: 'sub' as const,
+        }))
+      : [
+          {
+            label: 'No finalized disposal / write-off review records found for this tax year.',
+            type: 'note' as const,
+          },
+        ]),
+    ...(disposalReviewRows.length > 0
+      ? [
+          {
+            label: 'Disposal detail',
+            type: 'main' as const,
+          },
+          ...disposalReviewRows.slice(0, 20).map((row) => ({
+            label: buildDisposalDetailLabel(row),
+            amount: getDisposalCostBasis(row),
+            type: 'sub' as const,
+          })),
+          ...(disposalReviewRows.length > 20
+            ? [
+                {
+                  label: `${disposalReviewRows.length - 20} additional finalized disposal record(s) not shown. Use workbook/export details for the full list.`,
+                  type: 'note' as const,
+                },
+              ]
+            : []),
+        ]
+      : []),
+
     { label: 'AUDIT SUPPORT / RECORD COUNTS', type: 'section' },
     {
       label: 'Sales reviewed for this tax year',
       amount: saleCount,
+      valueType: 'count',
       type: 'main',
     },
     {
       label: 'Manual expense records reviewed',
       amount: manualExpenseCount,
+      valueType: 'count',
       type: 'main',
     },
     {
       label: 'Ending inventory items reviewed',
       amount: inventoryCount,
+      valueType: 'count',
+      type: 'main',
+    },
+    {
+      label: 'Finalized disposal / write-off review records',
+      amount: disposalReviewCount,
+      valueType: 'count',
       type: 'main',
     },
     {
@@ -1065,41 +1357,49 @@ export async function GET(request: NextRequest) {
     {
       label: 'Advertising entries',
       amount: advertisingCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Manual commissions / fees entries',
       amount: commissionsAndFeesCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Supplies entries',
       amount: suppliesCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Postage / shipping entries',
       amount: postageShippingCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Software / subscriptions entries',
       amount: softwareCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Grading / authentication entries',
       amount: gradingCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Equipment review entries',
       amount: equipmentReviewCount,
+      valueType: 'count',
       type: 'sub',
     },
     {
       label: 'Uncategorized / other entries',
       amount: uncategorizedCount,
+      valueType: 'count',
       type: 'sub',
     },
 
@@ -1135,6 +1435,11 @@ export async function GET(request: NextRequest) {
       type: 'sub',
     },
     {
+      label: 'Finalized disposal / write-off review cost basis',
+      amount: totalDisposalReviewCost,
+      type: 'sub',
+    },
+    {
       label: 'Total Schedule C expenses excluding COGS and home office',
       amount: totalBusinessExpenses,
       type: 'main',
@@ -1165,6 +1470,11 @@ export async function GET(request: NextRequest) {
     {
       label:
         'Equipment review note: larger equipment may need depreciation or Section 179 treatment instead of immediate expense treatment.',
+      type: 'note',
+    },
+    {
+      label:
+        'Disposal / write-off note: finalized disposal records are CPA/tax review support and should not be double counted as manual expenses, giveaways, donations, or additional inventory losses.',
       type: 'note',
     },
     {

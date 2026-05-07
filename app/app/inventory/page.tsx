@@ -36,7 +36,7 @@ type InventoryStatusSummary = {
   value: number
 }
 
-type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'sold' | 'personal' | 'giveaway'
+type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'disposed' | 'sold' | 'personal' | 'giveaway'
 
 type SaleRow = {
   id: string
@@ -44,6 +44,14 @@ type SaleRow = {
   sale_date: string | null
   quantity_sold: number | null
   reversed_at: string | null
+}
+
+type FinalizedDisposalTransactionRow = {
+  inventory_item_id: string | null
+  created_at: string | null
+  disposal_reason: string | null
+  disposal_notes: string | null
+  notes: string | null
 }
 
 type SortKey =
@@ -58,10 +66,11 @@ type SortKey =
   | 'storage_location'
 
 type SortDir = 'asc' | 'desc'
-type BulkStatus = 'available' | 'listed' | 'personal' | 'junk'
+type BulkStatus = 'available' | 'listed' | 'personal' | 'junk' | 'disposed'
 
-const DEFAULT_LIMIT = 10
-const LIMIT_OPTIONS = [10, 25, 100] as const
+const DEFAULT_LIMIT = 5
+const LIMIT_OPTIONS = [5, 10, 50, 100] as const
+const ROW_LIMIT_OPTIONS = [10, 50, 100] as const
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
 const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
 const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
@@ -71,6 +80,7 @@ const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
   listed: 'Listed',
   junk: 'Junk',
+  disposed: 'Disposed',
   sold: 'Sold',
   personal: 'Personal',
   giveaway: 'Giveaway',
@@ -80,6 +90,7 @@ const STATUS_FILTERS: InventoryStatusFilter[] = [
   'available',
   'listed',
   'junk',
+  'disposed',
   'sold',
   'personal',
   'giveaway',
@@ -179,6 +190,10 @@ function renderStatusPill(status: string | null) {
     return <span className="app-badge app-badge-neutral">Junk</span>
   }
 
+  if (status === 'disposed') {
+    return <span className="app-badge app-badge-danger">Disposed</span>
+  }
+
   if (status === 'listed') {
     return <span className="app-badge app-badge-info">Listed</span>
   }
@@ -225,7 +240,11 @@ function inventoryTaxSafetyNote(status: InventoryStatusFilter | null) {
   }
 
   if (status === 'junk') {
-    return 'Junk keeps the item visible for recordkeeping. Do not deduct it as a loss, donation, or disposal until a final documented disposition exists.'
+    return 'Junk keeps the item visible for recordkeeping. Do not deduct it as a loss, donation, or disposal until a final documented disposition exists. Use Disposed only when the item actually leaves the business.'
+  }
+
+  if (status === 'disposed') {
+    return 'Disposed means the item physically left business inventory with no sale proceeds. Keep notes and date records so the disposal is documented and the same item is not also deducted somewhere else.'
   }
 
   return null
@@ -237,6 +256,7 @@ function bulkStatusLabel(status: BulkStatus) {
   if (status === 'listed') return 'Listed'
   if (status === 'personal') return 'Personal'
   if (status === 'junk') return 'Junk'
+  if (status === 'disposed') return 'Disposed'
   return status
 }
 
@@ -358,6 +378,8 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
   'use server'
 
   const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const disposalReason = String(formData.get('disposal_reason') ?? '').trim()
+  const disposalNotes = String(formData.get('disposal_notes') ?? '').trim()
   const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
 
   if (itemIds.length === 0) {
@@ -494,7 +516,7 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
   const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
   const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
 
-  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
+  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk', 'disposed']
 
   if (!allowedStatuses.includes(requestedStatus)) {
     redirect(
@@ -582,7 +604,9 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
             ? `Bulk personal withdrawal: ${itemTitle} changed from ${previousStatus} to Personal. Cost basis preserved as inventory withdrawn for personal collection; do not also deduct this item as an expense.`
             : requestedStatus === 'junk'
               ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review; no automatic deduction was taken.`
-              : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
+              : requestedStatus === 'disposed'
+                ? `Bulk disposal: ${itemTitle} changed from ${previousStatus} to Disposed. Item was removed from business inventory with no sale proceeds. Cost basis preserved in the transaction record for tax review; do not also deduct this item as another expense.`
+                : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
         created_at: new Date().toISOString(),
       }
     })
@@ -605,6 +629,195 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
       limit: safeLimit,
       statusKey: 'status_updated',
       statusValue: `${itemIds.length} item(s) marked ${bulkStatusLabel(requestedStatus)}`,
+      scrollY,
+    })
+  )
+}
+
+async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const disposalReason = String(formData.get('disposal_reason') ?? '').trim()
+  const disposalNotes = String(formData.get('disposal_notes') ?? '').trim()
+  const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Select at least one disposed inventory item to finalize.',
+        scrollY,
+      })
+    )
+  }
+
+  if (!disposalReason) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Choose a disposal reason before finalizing disposal write-off review.',
+        scrollY,
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data: existingItems, error: existingItemsError } = await supabase
+    .from('inventory_items')
+    .select('id, title, status, quantity, available_quantity, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
+  if (existingItemsError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: existingItemsError.message,
+        scrollY,
+      })
+    )
+  }
+
+  const items = existingItems ?? []
+  const nonDisposedCount = items.filter((item) => item.status !== 'disposed').length
+
+  if (items.length > 0) {
+    const { data: alreadyFinalizedRows, error: alreadyFinalizedError } = await supabase
+      .from('inventory_transactions')
+      .select('inventory_item_id')
+      .eq('user_id', user.id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .in('inventory_item_id', itemIds)
+
+    if (alreadyFinalizedError) {
+      redirect(
+        buildInventoryStatusHref({
+          q,
+          sort: safeSort,
+          dir: safeDir,
+          page: safePage,
+          limit: safeLimit,
+          statusKey: 'status_error',
+          statusValue: alreadyFinalizedError.message,
+          scrollY,
+        })
+      )
+    }
+
+    if ((alreadyFinalizedRows ?? []).length > 0) {
+      redirect(
+        buildInventoryStatusHref({
+          q,
+          sort: safeSort,
+          dir: safeDir,
+          page: safePage,
+          limit: safeLimit,
+          statusKey: 'status_error',
+          statusValue: 'One or more selected disposed items are already finalized for write-off review.',
+          scrollY,
+        })
+      )
+    }
+  }
+
+  if (items.length === 0 || nonDisposedCount > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Only items already marked Disposed can be finalized for disposal write-off review.',
+        scrollY,
+      })
+    )
+  }
+
+  const finalizedAt = new Date().toISOString()
+
+  const inventoryTransactionRows = items.map((item) => {
+    const itemTitle = item.title || 'Inventory item'
+    const quantityForNotes = Number(item.available_quantity ?? item.quantity ?? 0)
+    const costBasis = Number(item.cost_basis_total ?? 0)
+
+    const trimmedNotes = disposalNotes || 'No extra notes entered.'
+
+    return {
+      user_id: user.id,
+      inventory_item_id: item.id,
+      transaction_type: 'disposal_writeoff_review',
+      quantity_change: 0,
+      disposal_reason: disposalReason,
+      disposal_notes: disposalNotes || null,
+      finalized_for_tax: true,
+      notes: `Finalized disposal write-off review: ${itemTitle} was already marked Disposed and is now flagged for year-end/accountant review. Disposal reason: ${disposalReason}. User notes: ${trimmedNotes}. Quantity at finalization: ${quantityForNotes}. Recorded cost basis at finalization: ${money(costBasis)}. Do not also deduct this item as an expense, giveaway, donation, or separate loss without accountant review.`,
+      created_at: finalizedAt,
+    }
+  })
+
+  if (inventoryTransactionRows.length > 0) {
+    const { error: transactionError } = await supabase
+      .from('inventory_transactions')
+      .insert(inventoryTransactionRows)
+
+    if (transactionError) {
+      redirect(
+        buildInventoryStatusHref({
+          q,
+          sort: safeSort,
+          dir: safeDir,
+          page: safePage,
+          limit: safeLimit,
+          statusKey: 'status_error',
+          statusValue: transactionError.message,
+          scrollY,
+        })
+      )
+    }
+  }
+
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/reports/tax')
+
+  redirect(
+    buildInventoryStatusHref({
+      q,
+      sort: safeSort,
+      dir: safeDir,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'status_updated',
+      statusValue: `${items.length} disposed item(s) finalized for write-off review`,
       scrollY,
     })
   )
@@ -729,6 +942,8 @@ function StatusSummaryCard({
         ? 'hover:border-sky-800/70 hover:bg-sky-950/20'
         : status === 'junk'
           ? 'hover:border-zinc-600 hover:bg-zinc-800/70'
+          : status === 'disposed'
+            ? 'hover:border-red-800/70 hover:bg-red-950/20'
           : status === 'sold'
             ? 'hover:border-amber-800/70 hover:bg-amber-950/20'
             : status === 'giveaway'
@@ -742,6 +957,8 @@ function StatusSummaryCard({
         ? 'border-sky-800 bg-sky-950/20'
         : status === 'junk'
           ? 'border-zinc-600 bg-zinc-800/60'
+          : status === 'disposed'
+            ? 'border-red-800 bg-red-950/20'
           : status === 'sold'
             ? 'border-amber-800 bg-amber-950/20'
             : status === 'giveaway'
@@ -849,15 +1066,147 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   )
 }
 
-function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemCount: number }) {
+function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
+  return (
+    <details className="group">
+      <summary
+        className="app-button cursor-pointer list-none whitespace-nowrap border-amber-800/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
+      >
+        Finalize Disposal Write-Off
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-amber-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-80">
+        <div className="text-sm font-semibold text-amber-200">Finalize disposal write-off review?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          Use this only after items are already marked Disposed and physically removed from business inventory. This creates an audit note for year-end/accountant review without double-counting the item as a separate expense.
+        </div>
+
+        <div className="mt-3 grid gap-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Disposal reason required</span>
+            <select
+              form={formId}
+              name="disposal_reason"
+              required
+              defaultValue=""
+              className="app-select w-full"
+            >
+              <option value="" disabled>
+                Choose reason...
+              </option>
+              <option value="trash">Trash / discarded worthless inventory</option>
+              <option value="recycled">Recycled bulk paper/base cards</option>
+              <option value="damaged">Damaged inventory discarded</option>
+              <option value="donation">Donation review</option>
+              <option value="inventory_cleanup">Inventory cleanup / no resale value</option>
+              <option value="lost">Lost / missing inventory review</option>
+              <option value="other">Other documented disposal</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Notes / remarks</span>
+            <textarea
+              form={formId}
+              name="disposal_notes"
+              className="app-input min-h-20"
+              placeholder="Example: Thrown away worthless base cards after sorting 2025 Bowman break."
+            />
+          </label>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            formAction={bulkFinalizeDisposalWriteOffAction}
+            data-bulk-finalize-submit="true"
+            className="app-button whitespace-nowrap border-amber-800/80 bg-amber-950/50 text-amber-100 hover:bg-amber-900/60"
+          >
+            Yes, Finalize Review
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+
+function BulkActionsPanel({
+  formId,
+  pageItemCount,
+  q,
+  sortKey,
+  sortDir,
+  limit,
+}: {
+  formId: string
+  pageItemCount: number
+  q: string
+  sortKey: SortKey
+  sortDir: SortDir
+  limit: number
+}) {
   return (
     <div className="sticky top-[4.75rem] z-40 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
       <div className="flex flex-col gap-2">
-        <div>
-          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
-          <div className="mt-0.5 text-xs text-zinc-500">
-            Check inventory rows, then update their status or delete the selected rows.
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+            <div className="mt-0.5 text-xs text-zinc-500">
+              Check inventory rows, then update their status or delete the selected rows. Finalized disposal rows are locked for tax review.
+            </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={getFilterHref('', sortKey, sortDir, limit)}
+              className={`app-chip ${q === '' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              All
+            </Link>
+            <Link
+              href={getFilterHref('available', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'available' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Available
+            </Link>
+            <Link
+              href={getFilterHref('listed', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'listed' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Listed
+            </Link>
+            <Link
+              href={getFilterHref('sold', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'sold' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Sold
+            </Link>
+            <Link
+              href={getFilterHref('personal', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'personal' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Personal
+            </Link>
+            <Link
+              href={getFilterHref('junk', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'junk' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Junk
+            </Link>
+            <Link
+              href={getFilterHref('disposed', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'disposed' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Disposed
+            </Link>
+          </div>
+        </div>
+
+        <div>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <div
               id={BULK_SELECTION_COUNT_ID}
@@ -892,32 +1241,58 @@ function BulkActionsPanel({ formId, pageItemCount }: { formId: string; pageItemC
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <BulkStatusConfirmControl
-            formId={formId}
-            status="available"
-            label="Mark For Sale"
-            helpText="This will mark the selected inventory items as For Sale / Available."
-          />
-          <BulkStatusConfirmControl
-            formId={formId}
-            status="listed"
-            label="Mark Listed"
-            helpText="This will mark the selected inventory items as Listed."
-          />
-          <BulkStatusConfirmControl
-            formId={formId}
-            status="personal"
-            label="Move to Personal"
-            helpText="This will move the selected inventory items to Personal Collection status. Cost basis is preserved as a personal withdrawal record; do not also deduct these items as expenses."
-          />
-          <BulkStatusConfirmControl
-            formId={formId}
-            status="junk"
-            label="Mark Junk"
-            helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
-          />
-          <BulkDeleteConfirmControl formId={formId} />
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <BulkStatusConfirmControl
+              formId={formId}
+              status="available"
+              label="Mark For Sale"
+              helpText="This will mark the selected inventory items as For Sale / Available."
+            />
+            <BulkStatusConfirmControl
+              formId={formId}
+              status="listed"
+              label="Mark Listed"
+              helpText="This will mark the selected inventory items as Listed."
+            />
+            <BulkStatusConfirmControl
+              formId={formId}
+              status="personal"
+              label="Move to Personal"
+              helpText="This will move the selected inventory items to Personal Collection status. Cost basis is preserved as a personal withdrawal record; do not also deduct these items as expenses."
+            />
+            <BulkStatusConfirmControl
+              formId={formId}
+              status="junk"
+              label="Mark Junk"
+              helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
+            />
+            <BulkStatusConfirmControl
+              formId={formId}
+              status="disposed"
+              label="Dispose Selected"
+              helpText="This will mark the selected inventory items as Disposed because they physically left the business with no sale proceeds. Cost basis is preserved in the transaction log for tax review."
+            />
+            <BulkFinalizeDisposalConfirmControl formId={formId} />
+            <BulkDeleteConfirmControl formId={formId} />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {ROW_LIMIT_OPTIONS.map((option) => (
+              <Link
+                key={option}
+                href={buildLimitHref({
+                  q,
+                  sort: sortKey,
+                  dir: sortDir,
+                  limit: option,
+                })}
+                className={`app-chip whitespace-nowrap ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+              >
+                {option} rows
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -963,7 +1338,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.has('deleted_count') || urlParams.has('status_updated')) {
+      if (urlParams.has('deleted_count') || urlParams.has('status_updated') || urlParams.has('status_error')) {
         try {
           window.sessionStorage.removeItem(storageKey);
         } catch (_error) {}
@@ -988,6 +1363,19 @@ function BulkSelectionScript({ formId }: { formId: string }) {
 
       function selectedIds() {
         return Array.from(selectedIdsSet);
+      }
+
+      function visibleCheckedIds() {
+        return rowCheckboxes()
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => String(checkbox.value || '').trim())
+          .filter(Boolean);
+      }
+
+      function replaceSelectionWithVisibleCheckedRows() {
+        selectedIdsSet = new Set(visibleCheckedIds());
+        saveStoredSelection(selectedIdsSet);
+        syncStoredInputs();
       }
 
       function syncStoredInputs() {
@@ -1085,12 +1473,14 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         if (status === 'listed') return 'Listed';
         if (status === 'personal') return 'Personal';
         if (status === 'junk') return 'Junk';
+        if (status === 'disposed') return 'Disposed';
         return 'Updated';
       }
 
       function statusPillClasses(status) {
         if (status === 'personal') return 'app-badge app-badge-info';
-        if (status === 'junk') return 'app-badge app-badge-danger';
+        if (status === 'junk') return 'app-badge app-badge-neutral';
+        if (status === 'disposed') return 'app-badge app-badge-danger';
         if (status === 'listed') return 'app-badge app-badge-warning';
         return 'app-badge app-badge-success';
       }
@@ -1149,10 +1539,17 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         const status = button.getAttribute('data-bulk-status') || '';
         const isDelete = button.getAttribute('data-bulk-delete') === 'true';
         const label = button.getAttribute('data-bulk-label') || (isDelete ? 'Delete Selected' : 'Update Selected');
+        const isFinalize = label === 'Finalize Disposal Write-Off';
 
         button.setAttribute('data-original-label', button.textContent || label);
-        button.textContent = isDelete ? 'Deleting…' : 'Updating…';
-        showPendingMessage(isDelete ? 'Deleting ' + count + ' selected item(s)…' : 'Updating ' + count + ' selected item(s)…');
+        button.textContent = isDelete ? 'Deleting…' : isFinalize ? 'Finalizing…' : 'Updating…';
+        showPendingMessage(
+          isDelete
+            ? 'Deleting ' + count + ' selected item(s)…'
+            : isFinalize
+              ? 'Finalizing disposal review for ' + count + ' selected item(s)…'
+              : 'Updating ' + count + ' selected item(s)…'
+        );
         closeOpenConfirmations();
         applyInstantRowState({ ids, status, isDelete });
 
@@ -1216,6 +1613,22 @@ function BulkSelectionScript({ formId }: { formId: string }) {
           });
           syncStoredInputs();
           updateBulkState();
+          return;
+        }
+
+        const finalizeButton = event.target && event.target.closest ? event.target.closest('[data-bulk-finalize-submit="true"]') : null;
+        if (finalizeButton) {
+          replaceSelectionWithVisibleCheckedRows();
+
+          if (selectedCount() === 0) {
+            event.preventDefault();
+            updateBulkState();
+            return;
+          }
+
+          rememberScrollPosition();
+          finalizeButton.textContent = 'Finalizing…';
+          showPendingMessage('Finalizing disposal review for ' + selectedCount() + ' selected item(s)…');
           return;
         }
 
@@ -1364,6 +1777,8 @@ export default async function InventoryPage({
     query = query.eq('status', 'listed')
   } else if (qNormalized === 'junk') {
     query = query.eq('status', 'junk')
+  } else if (qNormalized === 'disposed') {
+    query = query.eq('status', 'disposed')
   } else if (qNormalized === 'sold') {
     query = query.eq('status', 'sold')
   } else if (qNormalized === 'personal') {
@@ -1437,6 +1852,34 @@ export default async function InventoryPage({
     }
   }
 
+  const visibleItemIds = items.map((item) => item.id)
+  const finalizedDisposalByItemId = new Map<string, FinalizedDisposalTransactionRow>()
+
+  if (visibleItemIds.length > 0) {
+    const finalizedDisposalResponse = await supabase
+      .from('inventory_transactions')
+      .select(`
+        inventory_item_id,
+        created_at,
+        disposal_reason,
+        disposal_notes,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .in('inventory_item_id', visibleItemIds)
+      .order('created_at', { ascending: false })
+
+    const finalizedRows = (finalizedDisposalResponse.data ?? []) as FinalizedDisposalTransactionRow[]
+
+    for (const row of finalizedRows) {
+      if (!row.inventory_item_id) continue
+      if (finalizedDisposalByItemId.has(row.inventory_item_id)) continue
+      finalizedDisposalByItemId.set(row.inventory_item_id, row)
+    }
+  }
+
   const activeStatusFilter = STATUS_FILTERS.includes(qNormalized as InventoryStatusFilter)
     ? (qNormalized as InventoryStatusFilter)
     : null
@@ -1448,6 +1891,8 @@ export default async function InventoryPage({
         ? 'Showing listed inventory items.'
         : qNormalized === 'junk'
           ? 'Showing junk items you are not planning to sell.'
+        : qNormalized === 'disposed'
+          ? 'Showing disposed inventory items that physically left the business.'
           : qNormalized === 'sold'
             ? 'Showing sold inventory items.'
             : qNormalized === 'personal'
@@ -1480,7 +1925,7 @@ export default async function InventoryPage({
   const hasNextPage = items.length === limit
 
   return (
-    <div className="app-page-wide space-y-3">
+    <div className="app-page-wide flex h-[calc(100vh-6.5rem)] flex-col gap-3 overflow-hidden">
       <div className="app-page-header gap-3">
         <div className="min-w-0">
           <h1 className="app-title">Inventory</h1>
@@ -1524,7 +1969,7 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
         {STATUS_FILTERS.map((status) => (
           <StatusSummaryCard
             key={status}
@@ -1537,15 +1982,6 @@ export default async function InventoryPage({
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={getFilterHref('', sortKey, sortDir, limit)}
-          className={`app-chip ${q === '' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          All
-        </Link>
-      </div>
-
       {activeStatusFilter && inventoryTaxSafetyNote(activeStatusFilter) ? (
         <div className="app-alert-info">
           {inventoryTaxSafetyNote(activeStatusFilter)}
@@ -1555,7 +1991,7 @@ export default async function InventoryPage({
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 
-      <div className="app-section">
+      <div className="app-section flex min-h-0 flex-1 flex-col">
         <div className="flex justify-end">
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
@@ -1573,13 +2009,16 @@ export default async function InventoryPage({
         <BulkSelectionScript formId={BULK_INVENTORY_FORM_ID} />
         <ScrollRestoreScript scrollY={scrollY} />
 
-        {items.length > 0 ? (
-          <>
-            <BulkActionsPanel formId={BULK_INVENTORY_FORM_ID} pageItemCount={items.length} />
-          </>
-        ) : null}
+        <BulkActionsPanel
+          formId={BULK_INVENTORY_FORM_ID}
+          pageItemCount={items.length}
+          q={q}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          limit={limit}
+        />
 
-        <div className="mt-2 app-table-wrap pb-4">
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto app-table-wrap pb-4">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
@@ -1664,6 +2103,8 @@ export default async function InventoryPage({
                   const hasAvailable = available > 0
                   const isLotLike = quantity > 1 || available > 1
                   const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
+                  const finalizedDisposal = finalizedDisposalByItemId.get(item.id) ?? null
+                  const isFinalizedDisposal = Boolean(finalizedDisposal)
                   const itemName = `${getPrimaryTitle(item)}${itemLine ? ` • ${itemLine}` : ''}`
 
                   return (
@@ -1702,6 +2143,11 @@ export default async function InventoryPage({
                           >
                             {itemLine || 'Open details'}
                           </Link>
+                          {isFinalizedDisposal ? (
+                            <div className="mt-1 inline-flex rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+                              Finalized for write-off review
+                            </div>
+                          ) : null}
                         </div>
                       </td>
 
@@ -1724,7 +2170,14 @@ export default async function InventoryPage({
 
                       <td className="app-td">
                         <div className="flex flex-wrap items-center gap-1">
-                          {hasAvailable ? (
+                          {isFinalizedDisposal ? (
+                            <span
+                              className="rounded-full border border-amber-900/60 bg-amber-950/30 px-2.5 py-1 text-xs font-medium text-amber-200"
+                              title={finalizedDisposal?.notes || 'Finalized disposal is locked for tax review.'}
+                            >
+                              Locked
+                            </span>
+                          ) : hasAvailable ? (
                             <>
                               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
                                 Sell
@@ -1750,7 +2203,9 @@ export default async function InventoryPage({
                             </form>
                           ) : null}
 
-                          <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
+                          {!isFinalizedDisposal ? (
+                            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
+                          ) : null}
                         </div>
                       </td>
                     </tr>

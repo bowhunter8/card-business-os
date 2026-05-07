@@ -77,7 +77,7 @@ export default async function AppLayout({
   const access = appUserAccess as AppUserAccessRow
 
   if (!access.is_active) redirect('/login')
-  if (!hasSubscriptionAccess(access)) redirect('/app/no-access')
+  if (!hasSubscriptionAccess(access)) redirect('/not-authorized')
 
   const isAdmin = access.role === 'admin'
   const displayName = access.display_name || user.email
@@ -142,8 +142,10 @@ export default async function AppLayout({
         <main className="min-w-0">
 
           {/* Top Bar */}
-          <div className="app-section border-b border-zinc-900 bg-black sticky top-0 z-10">
-            <AppGlobalSearch />
+          <div className="sticky top-0 z-50 bg-black px-4 py-3 md:px-6">
+            <div className="mx-auto max-w-[1800px]">
+              <AppGlobalSearch />
+            </div>
           </div>
 
           {showTrialWarning && (
@@ -157,7 +159,7 @@ export default async function AppLayout({
             </div>
           )}
 
-          <div className="p-4 md:p-6">{children}</div>
+          <div className="px-4 pb-4 pt-2 md:px-6 md:pb-6 md:pt-3">{children}</div>
         </main>
       </div>
     </div>

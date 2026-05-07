@@ -62,10 +62,18 @@ type SortKey =
   | 'total_cost'
 
 type SortDir = 'asc' | 'desc'
-type PageLimit = 10 | 25 | 100
+type ImportedOrdersSortKey =
+  | 'order_number'
+  | 'created_at'
+  | 'processed_date'
+  | 'seller'
+  | 'product_name'
+  | 'order_status'
+  | 'total'
+type PageLimit = 5 | 10 | 25 | 100
 
-const DEFAULT_LIMIT: PageLimit = 10
-const LIMIT_OPTIONS: PageLimit[] = [10, 25, 100]
+const DEFAULT_LIMIT: PageLimit = 5
+const LIMIT_OPTIONS: PageLimit[] = [5, 10, 25, 100]
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-page-form'
 const BULK_SELECTION_COUNT_ID = 'breaks-bulk-selection-count'
 const BULK_PENDING_STATE_ID = 'breaks-bulk-pending-state'
@@ -189,18 +197,71 @@ function getSortIndicator(currentKey: SortKey, currentDir: SortDir, key: SortKey
   return currentDir === 'asc' ? '↑' : '↓'
 }
 
+
+function getImportedSortValue(item: ImportedOrderRow, key: ImportedOrdersSortKey) {
+  switch (key) {
+    case 'order_number':
+      return getImportedOrderNumber(item)
+    case 'created_at':
+      return item.created_at || ''
+    case 'processed_date':
+      return item.processed_date_display || item.processed_date || ''
+    case 'seller':
+      return item.seller || ''
+    case 'product_name':
+      return getImportedOrderDescription(item)
+    case 'order_status':
+      return item.order_status || ''
+    case 'total':
+      return Number(item.total ?? 0)
+    default:
+      return ''
+  }
+}
+
+function getNextImportedSortDir(
+  currentKey: ImportedOrdersSortKey,
+  currentDir: SortDir,
+  nextKey: ImportedOrdersSortKey
+): SortDir {
+  if (currentKey !== nextKey) return nextKey === 'created_at' ? 'desc' : 'asc'
+  return currentDir === 'asc' ? 'desc' : 'asc'
+}
+
+function getImportedSortIndicator(
+  currentKey: ImportedOrdersSortKey,
+  currentDir: SortDir,
+  key: ImportedOrdersSortKey
+) {
+  if (currentKey !== key) return '↕'
+  return currentDir === 'asc' ? '↑' : '↓'
+}
+
+function sortImportedOrders(
+  rows: ImportedOrderRow[],
+  sortKey: ImportedOrdersSortKey,
+  sortDir: SortDir
+) {
+  return [...rows].sort((left, right) => {
+    const result = compareValues(getImportedSortValue(left, sortKey), getImportedSortValue(right, sortKey))
+    return sortDir === 'asc' ? result : -result
+  })
+}
+
 function buildBreaksHref({
   q,
   sort,
   dir,
   page,
   limit,
+  ordersLimit,
 }: {
   q?: string
   sort: SortKey
   dir: SortDir
   page: number
   limit: number
+  ordersLimit: number
 }) {
   const params = new URLSearchParams()
 
@@ -209,6 +270,7 @@ function buildBreaksHref({
   params.set('dir', dir)
   params.set('page', String(page))
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
 
   return `/app/breaks?${params.toString()}`
 }
@@ -219,6 +281,7 @@ function buildBreaksStatusHref({
   dir,
   page,
   limit,
+  ordersLimit,
   statusKey,
   statusValue,
 }: {
@@ -227,6 +290,7 @@ function buildBreaksStatusHref({
   dir: SortDir
   page: number
   limit: number
+  ordersLimit: number
   statusKey: string
   statusValue: string
 }) {
@@ -237,6 +301,7 @@ function buildBreaksStatusHref({
   params.set('dir', dir)
   params.set('page', String(page))
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
   params.set(statusKey, statusValue)
 
   return `/app/breaks?${params.toString()}#breaks-status`
@@ -248,6 +313,7 @@ function buildImportedOrdersStatusHref({
   dir,
   page,
   limit,
+  ordersLimit,
   statusKey,
   statusValue,
 }: {
@@ -256,6 +322,7 @@ function buildImportedOrdersStatusHref({
   dir: SortDir
   page: number
   limit: number
+  ordersLimit: number
   statusKey: string
   statusValue: string
 }) {
@@ -266,21 +333,24 @@ function buildImportedOrdersStatusHref({
   params.set('dir', dir)
   params.set('page', String(page))
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
   params.set(statusKey, statusValue)
 
   return `/app/breaks?${params.toString()}#imported-orders-status`
 }
 
-function buildLimitHref({
+function buildReceivedLimitHref({
   q,
   sort,
   dir,
   limit,
+  ordersLimit,
 }: {
   q?: string
   sort: SortKey
   dir: SortDir
   limit: number
+  ordersLimit: number
 }) {
   const params = new URLSearchParams()
 
@@ -289,15 +359,78 @@ function buildLimitHref({
   params.set('dir', dir)
   params.set('page', '1')
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
 
   return `/app/breaks?${params.toString()}`
+}
+
+function buildOrdersLimitHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+  ordersLimit,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+  ordersLimit: number
+}) {
+  const params = new URLSearchParams()
+
+  if (q) params.set('q', q)
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
+
+  return `/app/breaks?${params.toString()}#imported-orders-status`
+}
+
+
+function buildImportedOrdersSortHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+  ordersLimit,
+  ordersSort,
+  ordersDir,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+  ordersLimit: number
+  ordersSort: ImportedOrdersSortKey
+  ordersDir: SortDir
+}) {
+  const params = new URLSearchParams()
+
+  if (q) params.set('q', q)
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
+  params.set('orders_sort', ordersSort)
+  params.set('orders_dir', ordersDir)
+
+  return `/app/breaks?${params.toString()}#imported-orders-status`
 }
 
 function getFilterHref(
   filter: '' | 'active' | 'open',
   sortKey: SortKey,
   sortDir: SortDir,
-  limit: number
+  limit: number,
+  ordersLimit: number
 ) {
   const params = new URLSearchParams()
 
@@ -306,6 +439,7 @@ function getFilterHref(
   params.set('dir', sortDir)
   params.set('page', '1')
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
 
   const query = params.toString()
   return query ? `/app/breaks?${query}` : '/app/breaks'
@@ -324,6 +458,7 @@ function readBreakListFormState(formData: FormData) {
   const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
   const page = Number(String(formData.get('page') ?? '1'))
   const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+  const ordersLimit = Number(String(formData.get('orders_limit') ?? String(DEFAULT_LIMIT)))
 
   const safeSort: SortKey = [
     'break_date',
@@ -344,6 +479,9 @@ function readBreakListFormState(formData: FormData) {
   const safeLimit: PageLimit = LIMIT_OPTIONS.includes(limit as PageLimit)
     ? (limit as PageLimit)
     : DEFAULT_LIMIT
+  const safeOrdersLimit: PageLimit = LIMIT_OPTIONS.includes(ordersLimit as PageLimit)
+    ? (ordersLimit as PageLimit)
+    : DEFAULT_LIMIT
 
   return {
     q,
@@ -351,6 +489,7 @@ function readBreakListFormState(formData: FormData) {
     safeDir,
     safePage,
     safeLimit,
+    safeOrdersLimit,
   }
 }
 
@@ -360,6 +499,7 @@ function readImportedOrdersFormState(formData: FormData) {
   const dir = String(formData.get('dir') ?? 'desc').trim() as SortDir
   const page = Number(String(formData.get('page') ?? '1'))
   const limit = Number(String(formData.get('limit') ?? String(DEFAULT_LIMIT)))
+  const ordersLimit = Number(String(formData.get('orders_limit') ?? String(DEFAULT_LIMIT)))
 
   const safeSort: SortKey = [
     'break_date',
@@ -380,6 +520,9 @@ function readImportedOrdersFormState(formData: FormData) {
   const safeLimit: PageLimit = LIMIT_OPTIONS.includes(limit as PageLimit)
     ? (limit as PageLimit)
     : DEFAULT_LIMIT
+  const safeOrdersLimit: PageLimit = LIMIT_OPTIONS.includes(ordersLimit as PageLimit)
+    ? (ordersLimit as PageLimit)
+    : DEFAULT_LIMIT
 
   return {
     q,
@@ -387,6 +530,7 @@ function readImportedOrdersFormState(formData: FormData) {
     safeDir,
     safePage,
     safeLimit,
+    safeOrdersLimit,
   }
 }
 
@@ -411,7 +555,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
   const purchaseDate = readDateInput(formData.get('purchase_date'))
   const cardsReceived = readPositiveInteger(formData.get('cards_received'), orderIds.length)
   const notesRaw = cleanText(String(formData.get('purchase_notes') ?? ''))
-  const { q, safeSort, safeDir, safePage, safeLimit } = readImportedOrdersFormState(formData)
+  const { q, safeSort, safeDir, safePage, safeLimit, safeOrdersLimit } = readImportedOrdersFormState(formData)
 
   if (orderIds.length === 0) {
     redirect(
@@ -421,6 +565,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'import_error',
         statusValue: 'Select at least one imported order to combine.',
       })
@@ -466,6 +611,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'import_error',
         statusValue: selectedOrdersError.message,
       })
@@ -482,6 +628,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'import_error',
         statusValue: 'One or more selected imported orders were already linked, deleted, or could not be found.',
       })
@@ -536,6 +683,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'import_error',
         statusValue: createError?.message ?? 'Purchase could not be created.',
       })
@@ -557,6 +705,7 @@ async function createPurchaseFromImportedOrdersAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'import_error',
         statusValue: `Purchase was created, but imported orders could not be linked: ${linkError.message}`,
       })
@@ -575,7 +724,7 @@ async function deleteBreakAction(formData: FormData) {
   'use server'
 
   const breakId = String(formData.get('break_id') ?? '').trim()
-  const { q, safeSort, safeDir, safePage, safeLimit } = readBreakListFormState(formData)
+  const { q, safeSort, safeDir, safePage, safeLimit, safeOrdersLimit } = readBreakListFormState(formData)
 
   if (!breakId) {
     redirect(
@@ -585,6 +734,7 @@ async function deleteBreakAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'delete_error',
         statusValue: 'Missing break ID.',
       })
@@ -615,6 +765,7 @@ async function deleteBreakAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'delete_error',
         statusValue: error.message,
       })
@@ -633,6 +784,7 @@ async function deleteBreakAction(formData: FormData) {
       dir: safeDir,
       page: safePage,
       limit: safeLimit,
+      ordersLimit: safeOrdersLimit,
       statusKey: 'deleted_count',
       statusValue: '1 break',
     })
@@ -643,7 +795,7 @@ async function bulkDeleteBreaksAction(formData: FormData) {
   'use server'
 
   const breakIds = readFormIds(formData, 'selected_break_ids')
-  const { q, safeSort, safeDir, safePage, safeLimit } = readBreakListFormState(formData)
+  const { q, safeSort, safeDir, safePage, safeLimit, safeOrdersLimit } = readBreakListFormState(formData)
 
   if (breakIds.length === 0) {
     redirect(
@@ -653,6 +805,7 @@ async function bulkDeleteBreaksAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'delete_error',
         statusValue: 'Select at least one break to delete.',
       })
@@ -683,6 +836,7 @@ async function bulkDeleteBreaksAction(formData: FormData) {
         dir: safeDir,
         page: safePage,
         limit: safeLimit,
+        ordersLimit: safeOrdersLimit,
         statusKey: 'delete_error',
         statusValue: error.message,
       })
@@ -701,9 +855,53 @@ async function bulkDeleteBreaksAction(formData: FormData) {
       dir: safeDir,
       page: safePage,
       limit: safeLimit,
+      ordersLimit: safeOrdersLimit,
       statusKey: 'deleted_count',
       statusValue: `${breakIds.length} break(s)`,
     })
+  )
+}
+
+function ImportedSortHeader({
+  label,
+  sortKey,
+  currentSortKey,
+  currentSortDir,
+  qRaw,
+  receivedSortKey,
+  receivedSortDir,
+  page,
+  limit,
+  ordersLimit,
+}: {
+  label: string
+  sortKey: ImportedOrdersSortKey
+  currentSortKey: ImportedOrdersSortKey
+  currentSortDir: SortDir
+  qRaw: string
+  receivedSortKey: SortKey
+  receivedSortDir: SortDir
+  page: number
+  limit: number
+  ordersLimit: number
+}) {
+  return (
+    <Link
+      href={buildImportedOrdersSortHref({
+        q: qRaw,
+        sort: receivedSortKey,
+        dir: receivedSortDir,
+        page,
+        limit,
+        ordersLimit,
+        ordersSort: sortKey,
+        ordersDir: getNextImportedSortDir(currentSortKey, currentSortDir, sortKey),
+      })}
+      className="inline-flex items-center gap-1 hover:text-zinc-100"
+    >
+      <span>{label}</span>
+      <span className="text-[10px]">{getImportedSortIndicator(currentSortKey, currentSortDir, sortKey)}</span>
+    </Link>
   )
 }
 
@@ -714,6 +912,7 @@ function SortHeader({
   currentSortDir,
   qRaw,
   limit,
+  ordersLimit,
 }: {
   label: string
   sortKey: SortKey
@@ -721,6 +920,7 @@ function SortHeader({
   currentSortDir: SortDir
   qRaw: string
   limit: number
+  ordersLimit: number
 }) {
   const params = new URLSearchParams()
 
@@ -729,6 +929,7 @@ function SortHeader({
   params.set('dir', getNextSortDir(currentSortKey, currentSortDir, sortKey))
   params.set('page', '1')
   params.set('limit', String(limit))
+  params.set('orders_limit', String(ordersLimit))
 
   return (
     <Link
@@ -744,15 +945,24 @@ function SortHeader({
 function SummaryCard({
   label,
   value,
+  href,
+  active = false,
 }: {
   label: string
   value: string | number
+  href: string
+  active?: boolean
 }) {
   return (
-    <div className="app-card-tight p-2.5">
+    <Link
+      href={href}
+      className={`app-card-tight block p-2.5 transition hover:border-sky-700 hover:bg-sky-950/20 ${
+        active ? 'border-sky-700 bg-sky-950/20' : ''
+      }`}
+    >
       <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
-    </div>
+    </Link>
   )
 }
 
@@ -766,132 +976,123 @@ function BulkImportedOrdersControl({
   defaultPurchaseDate: string
 }) {
   return (
-    <div className="sticky top-[4.75rem] z-40 mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-zinc-200">Imported order actions</div>
-            <div className="mt-0.5 text-xs text-zinc-500">
-              Select imported orders, review the inline purchase details, then save them as one purchase.
+    <div className="flex flex-wrap items-center gap-2">
+      <div
+        id={IMPORTED_SELECTION_COUNT_ID}
+        data-imported-selected-count="true"
+        data-imported-page-count={importedOrderCount}
+        className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+      >
+        0 of {importedOrderCount} selected
+      </div>
+
+      <button
+        type="button"
+        data-imported-select-page="true"
+        className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+      >
+        Select all on page
+      </button>
+
+      <button
+        type="button"
+        data-imported-clear-selection="true"
+        className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+      >
+        Clear selection
+      </button>
+
+      <div
+        id={IMPORTED_PENDING_STATE_ID}
+        data-imported-pending-state="true"
+        className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
+        aria-live="polite"
+      >
+        Creating purchase…
+      </div>
+
+      <details className="group relative">
+        <summary
+          data-imported-action-toggle="true"
+          className="app-button-primary cursor-pointer list-none whitespace-nowrap px-2.5 py-1 text-xs"
+        >
+          Combine Selected
+        </summary>
+
+        <div className="absolute right-0 z-50 mt-2 w-[min(34rem,calc(100vw-2rem))] rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl">
+          <div className="flex flex-col gap-1">
+            <div className="text-sm font-semibold text-zinc-100">Create purchase from selected imports</div>
+            <div className="text-xs leading-relaxed text-zinc-400">
+              This creates the normal purchase record first, then links the selected imported orders to it. Cost basis stays on the purchase record before item entry.
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <div
-                id={IMPORTED_SELECTION_COUNT_ID}
-                data-imported-selected-count="true"
-                data-imported-page-count={importedOrderCount}
-                className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
-              >
-                0 of {importedOrderCount} selected
-              </div>
-              <button
-                type="button"
-                data-imported-select-page="true"
-                className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
-              >
-                Select all on page
-              </button>
-              <button
-                type="button"
-                data-imported-clear-selection="true"
-                className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
-              >
-                Clear selection
-              </button>
-              <div
-                id={IMPORTED_PENDING_STATE_ID}
-                data-imported-pending-state="true"
-                className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
-                aria-live="polite"
-              >
-                Creating purchase…
-              </div>
+            <div
+              data-imported-panel-summary="true"
+              className="mt-1 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300"
+            >
+              Select imported orders to preview the combined total.
             </div>
           </div>
 
-          <details className="group min-w-0 lg:min-w-[420px]">
-            <summary
-              data-imported-action-toggle="true"
-              className="app-button-primary cursor-pointer list-none whitespace-nowrap"
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="block text-xs font-medium text-zinc-400">
+              Purchase name
+              <input
+                form={formId}
+                name="purchase_name"
+                placeholder="Example: Seller name combined order"
+                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              />
+            </label>
+
+            <label className="block text-xs font-medium text-zinc-400">
+              Purchase date
+              <input
+                form={formId}
+                type="date"
+                name="purchase_date"
+                defaultValue={defaultPurchaseDate}
+                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              />
+            </label>
+
+            <label className="block text-xs font-medium text-zinc-400">
+              Items/cards expected
+              <input
+                form={formId}
+                type="number"
+                min="0"
+                step="1"
+                name="cards_received"
+                placeholder="How many items will you enter?"
+                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              />
+            </label>
+
+            <label className="block text-xs font-medium text-zinc-400 md:col-span-2">
+              Notes
+              <textarea
+                form={formId}
+                name="purchase_notes"
+                rows={2}
+                placeholder="Optional note, such as stream name, shipment, or grouping reason."
+                className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              form={formId}
+              data-imported-submit="true"
+              className="app-button-primary whitespace-nowrap"
             >
-              Combine Selected
-            </summary>
-
-            <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl">
-              <div className="flex flex-col gap-1">
-                <div className="text-sm font-semibold text-zinc-100">Create purchase from selected imports</div>
-                <div className="text-xs leading-relaxed text-zinc-400">
-                  This creates the normal purchase record first, then links the selected imported orders to it. Cost basis stays on the purchase record before item entry.
-                </div>
-                <div
-                  data-imported-panel-summary="true"
-                  className="mt-1 rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300"
-                >
-                  Select imported orders to preview the combined total.
-                </div>
-              </div>
-
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <label className="block text-xs font-medium text-zinc-400">
-                  Purchase name
-                  <input
-                    form={formId}
-                    name="purchase_name"
-                    placeholder="Example: Seller name combined order"
-                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
-
-                <label className="block text-xs font-medium text-zinc-400">
-                  Purchase date
-                  <input
-                    form={formId}
-                    type="date"
-                    name="purchase_date"
-                    defaultValue={defaultPurchaseDate}
-                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
-
-                <label className="block text-xs font-medium text-zinc-400">
-                  Items/cards expected
-                  <input
-                    form={formId}
-                    type="number"
-                    min="0"
-                    step="1"
-                    name="cards_received"
-                    placeholder="How many items will you enter?"
-                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
-
-                <label className="block text-xs font-medium text-zinc-400 md:col-span-2">
-                  Notes
-                  <textarea
-                    form={formId}
-                    name="purchase_notes"
-                    rows={2}
-                    placeholder="Optional note, such as stream name, shipment, or grouping reason."
-                    className="mt-1 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-                  />
-                </label>
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button
-                  type="submit"
-                  form={formId}
-                  data-imported-submit="true"
-                  className="app-button-primary whitespace-nowrap"
-                >
-                  Save Purchase + Enter Items
-                </button>
-                <CancelDetailsButton />
-              </div>
-            </div>
-          </details>
+              Save Purchase + Enter Items
+            </button>
+            <CancelDetailsButton />
+          </div>
         </div>
-      </div>
+      </details>
     </div>
   )
 }
@@ -1125,80 +1326,71 @@ function ImportedOrderSelectionScript({ formId }: { formId: string }) {
 
 function BulkDeleteConfirmControl({ formId, pageBreakCount }: { formId: string; pageBreakCount: number }) {
   return (
-    <div className="sticky top-[4.75rem] z-40 mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
-      <div className="flex flex-col gap-2">
-        <div>
-          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
-          <div className="mt-0.5 text-xs text-zinc-500">
-            Check break rows, then delete the selected breaks.
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <div
-              id={BULK_SELECTION_COUNT_ID}
-              data-bulk-selected-count="true"
-              data-bulk-page-count={pageBreakCount}
-              className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
-            >
-              0 of {pageBreakCount} selected
-            </div>
-            <button
-              type="button"
-              data-bulk-select-page="true"
-              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
-            >
-              Select all on page
-            </button>
-            <button
-              type="button"
-              data-bulk-clear-selection="true"
-              className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
-            >
-              Clear selection
-            </button>
-            <div
-              id={BULK_PENDING_STATE_ID}
-              data-bulk-pending-state="true"
-              className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
-              aria-live="polite"
-            >
-              Deleting selected breaks…
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <details className="group">
-            <summary
-              data-bulk-action-toggle="true"
-              className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40"
-            >
-              Delete Selected
-            </summary>
-
-            <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
-              <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
-              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-                This will delete the selected breaks. This cannot be undone from this screen.
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  form={formId}
-                  data-bulk-submit="true"
-                  data-bulk-delete="true"
-                  data-bulk-label="Delete Selected"
-                  className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
-                >
-                  Yes, Delete Selected
-                </button>
-
-                <CancelDetailsButton />
-              </div>
-            </div>
-          </details>
-        </div>
+    <div className="flex flex-wrap items-center gap-2">
+      <div
+        id={BULK_SELECTION_COUNT_ID}
+        data-bulk-selected-count="true"
+        data-bulk-page-count={pageBreakCount}
+        className="inline-flex w-fit rounded-full border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs font-medium text-zinc-400"
+      >
+        0 of {pageBreakCount} selected
       </div>
+
+      <button
+        type="button"
+        data-bulk-select-page="true"
+        className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+      >
+        Select all on page
+      </button>
+
+      <button
+        type="button"
+        data-bulk-clear-selection="true"
+        className="app-button whitespace-nowrap px-2.5 py-1 text-xs"
+      >
+        Clear selection
+      </button>
+
+      <div
+        id={BULK_PENDING_STATE_ID}
+        data-bulk-pending-state="true"
+        className="hidden w-fit rounded-full border border-sky-900/60 bg-sky-950/30 px-2.5 py-1 text-xs font-medium text-sky-200"
+        aria-live="polite"
+      >
+        Deleting selected breaks…
+      </div>
+
+      <details className="group relative">
+        <summary
+          data-bulk-action-toggle="true"
+          className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 px-2.5 py-1 text-xs text-red-200 hover:bg-red-900/40"
+        >
+          Delete Selected
+        </summary>
+
+        <div className="absolute right-0 z-50 mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+          <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+          <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+            This will delete the selected breaks. This cannot be undone from this screen.
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="submit"
+              form={formId}
+              data-bulk-submit="true"
+              data-bulk-delete="true"
+              data-bulk-label="Delete Selected"
+              className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+            >
+              Yes, Delete Selected
+            </button>
+
+            <CancelDetailsButton />
+          </div>
+        </div>
+      </details>
     </div>
   )
 }
@@ -1454,6 +1646,7 @@ function DeleteBreakConfirmControl({
   sortDir,
   page,
   limit,
+  ordersLimit,
 }: {
   breakId: string
   breakLabel: string
@@ -1462,6 +1655,7 @@ function DeleteBreakConfirmControl({
   sortDir: SortDir
   page: number
   limit: PageLimit
+  ordersLimit: PageLimit
 }) {
   return (
     <details className="group relative">
@@ -1482,6 +1676,7 @@ function DeleteBreakConfirmControl({
           <input type="hidden" name="dir" value={sortDir} />
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="orders_limit" value={ordersLimit} />
 
           <button
             type="submit"
@@ -1522,6 +1717,9 @@ export default async function BreaksPage({
     dir?: string
     page?: string
     limit?: string
+    orders_limit?: string
+    orders_sort?: string
+    orders_dir?: string
     deleted_count?: string
     delete_error?: string
     import_error?: string
@@ -1540,6 +1738,26 @@ export default async function BreaksPage({
   const limit: PageLimit = LIMIT_OPTIONS.includes(requestedLimit as PageLimit)
     ? (requestedLimit as PageLimit)
     : DEFAULT_LIMIT
+
+  const requestedOrdersLimit = Number(String(params?.orders_limit ?? String(DEFAULT_LIMIT)))
+  const ordersLimit: PageLimit = LIMIT_OPTIONS.includes(requestedOrdersLimit as PageLimit)
+    ? (requestedOrdersLimit as PageLimit)
+    : DEFAULT_LIMIT
+
+  const requestedOrdersSort = String(params?.orders_sort ?? 'created_at').trim() as ImportedOrdersSortKey
+  const ordersSortKey: ImportedOrdersSortKey = [
+    'order_number',
+    'created_at',
+    'processed_date',
+    'seller',
+    'product_name',
+    'order_status',
+    'total',
+  ].includes(requestedOrdersSort)
+    ? requestedOrdersSort
+    : 'created_at'
+  const requestedOrdersDir = String(params?.orders_dir ?? 'desc').trim() as SortDir
+  const ordersSortDir: SortDir = requestedOrdersDir === 'asc' ? 'asc' : 'desc'
 
   const requestedSort = String(params?.sort ?? 'break_date').trim() as SortKey
   const requestedDir = String(params?.dir ?? 'desc').trim() as SortDir
@@ -1664,11 +1882,15 @@ export default async function BreaksPage({
       .eq('user_id', user.id)
       .is('break_id', null)
       .order('created_at', { ascending: false, nullsFirst: false })
-      .limit(5),
+      .limit(ordersLimit),
   ])
 
   const pageBreakRows = (breaksResponse.data ?? []) as BreakRow[]
-  const importedOrders = (importedOrdersResponse.data ?? []) as ImportedOrderRow[]
+  const importedOrders = sortImportedOrders(
+    (importedOrdersResponse.data ?? []) as ImportedOrderRow[],
+    ordersSortKey,
+    ordersSortDir
+  )
   const error =
     breaksResponse.error ||
     allOrdersCountResponse.error ||
@@ -1749,53 +1971,24 @@ export default async function BreaksPage({
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard label="All Orders" value={allOrdersCount} />
-        <SummaryCard label="Active" value={activeCount} />
-        <SummaryCard label="Open" value={openCount} />
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={getFilterHref('', sortKey, sortDir, limit)}
-          className={`app-chip ${qRaw === '' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          All
-        </Link>
-        <Link
-          href={getFilterHref('active', sortKey, sortDir, limit)}
-          className={`app-chip ${qRaw === 'active' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          Active
-        </Link>
-        <Link
-          href={getFilterHref('open', sortKey, sortDir, limit)}
-          className={`app-chip ${qRaw === 'open' ? 'app-chip-active' : 'app-chip-idle'}`}
-        >
-          Open
-        </Link>
-      </div>
-
-      <div className="app-section p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="text-xs text-zinc-500">Page {page}</div>
-
-          <div className="flex flex-wrap gap-2">
-            {LIMIT_OPTIONS.map((option) => (
-              <Link
-                key={option}
-                href={buildLimitHref({
-                  q: qRaw,
-                  sort: sortKey,
-                  dir: sortDir,
-                  limit: option,
-                })}
-                className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
-              >
-                {option} rows
-              </Link>
-            ))}
-          </div>
-        </div>
+        <SummaryCard
+          label="All Orders"
+          value={allOrdersCount}
+          href={getFilterHref('', sortKey, sortDir, limit, ordersLimit)}
+          active={qRaw === ''}
+        />
+        <SummaryCard
+          label="Active"
+          value={activeCount}
+          href={getFilterHref('active', sortKey, sortDir, limit, ordersLimit)}
+          active={qRaw === 'active'}
+        />
+        <SummaryCard
+          label="Open"
+          value={openCount}
+          href={getFilterHref('open', sortKey, sortDir, limit, ordersLimit)}
+          active={qRaw === 'open'}
+        />
       </div>
 
       {error ? (
@@ -1812,30 +2005,48 @@ export default async function BreaksPage({
         ) : null}
       </div>
 
-      <details open className="app-section group">
-        <summary className="flex cursor-pointer list-none flex-col gap-2 rounded-2xl outline-none md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Orders</h2>
-            <p className="mt-0.5 text-sm text-zinc-400">
-              Orders Paid For But Not Entered Into Inventory
-            </p>
-          </div>
+      <div className="grid items-start gap-4 xl:grid-cols-2">
+        <details open className="app-section group">
+        <summary className="cursor-pointer list-none rounded-2xl outline-none">
+          <div className="grid min-h-[3.25rem] grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold leading-tight">Orders</h2>
+              <p className="mt-0.5 truncate whitespace-nowrap text-sm text-zinc-400">
+                Paid For Not Entered
+              </p>
+            </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="app-chip app-chip-idle whitespace-nowrap">
-              {importedOrders.length} recent imported
-            </span>
-            <span className="app-button whitespace-nowrap">
-              Collapse / Expand
-            </span>
+            <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+              <Link href="/app/imports/whatnot" className="app-button shrink-0 whitespace-nowrap">
+                Import More
+              </Link>
+              <span className="app-chip app-chip-idle shrink-0 whitespace-nowrap">
+                {importedOrders.length} imported shown
+              </span>
+              <div className="flex shrink-0 flex-nowrap items-center gap-1">
+                {LIMIT_OPTIONS.map((option) => (
+                  <Link
+                    key={option}
+                    href={buildOrdersLimitHref({
+                      q: qRaw,
+                      sort: sortKey,
+                      dir: sortDir,
+                      page,
+                      limit,
+                      ordersLimit: option,
+                    })}
+                    className={`app-chip ${ordersLimit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+                  >
+                    {option}
+                  </Link>
+                ))}
+              </div>
+              <span className="app-button shrink-0 whitespace-nowrap">
+                Collapse / Expand
+              </span>
+            </div>
           </div>
         </summary>
-
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          <Link href="/app/imports/whatnot" className="app-button whitespace-nowrap">
-            Import More
-          </Link>
-        </div>
 
         {importedOrdersError ? (
           <div className="app-alert-error mt-3">
@@ -1849,11 +2060,12 @@ export default async function BreaksPage({
           <input type="hidden" name="dir" value={sortDir} />
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="orders_limit" value={ordersLimit} />
         </form>
         <ImportedOrderSelectionScript formId={IMPORTED_ORDERS_FORM_ID} />
 
         {importedOrders.length > 0 ? (
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
             <BulkImportedOrdersControl
               formId={IMPORTED_ORDERS_FORM_ID}
               importedOrderCount={importedOrders.length}
@@ -1867,12 +2079,12 @@ export default async function BreaksPage({
             No imported orders need review.
           </div>
         ) : (
-          <div className="mt-3 app-table-wrap">
+          <div className="mt-3 app-table-wrap xl:max-h-[calc(100vh-28rem)] xl:overflow-y-auto">
             <div className="app-table-scroll">
               <table className="app-table">
                 <thead className="app-thead">
                   <tr>
-                    <th className="app-th w-16">
+                    <th className="app-th w-12">
                       <input
                         form={IMPORTED_ORDERS_FORM_ID}
                         type="checkbox"
@@ -1881,22 +2093,86 @@ export default async function BreaksPage({
                         className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                       />
                     </th>
-                    <th className="app-th">Order #</th>
-                    <th className="app-th">Date Added</th>
-                    <th className="app-th">Order Date</th>
-                    <th className="app-th">Purchased From</th>
-                    <th className="app-th min-w-[260px]">Purchase</th>
-                    <th className="app-th text-right">Total</th>
-                    <th className="app-th min-w-[140px]">Quick</th>
+                    <th className="app-th whitespace-nowrap">
+                      <ImportedSortHeader
+                        label="Date"
+                        sortKey="created_at"
+                        currentSortKey={ordersSortKey}
+                        currentSortDir={ordersSortDir}
+                        qRaw={qRaw}
+                        receivedSortKey={sortKey}
+                        receivedSortDir={sortDir}
+                        page={page}
+                        limit={limit}
+                        ordersLimit={ordersLimit}
+                      />
+                    </th>
+                    <th className="app-th whitespace-nowrap">
+                      <ImportedSortHeader
+                        label="Order #"
+                        sortKey="order_number"
+                        currentSortKey={ordersSortKey}
+                        currentSortDir={ordersSortDir}
+                        qRaw={qRaw}
+                        receivedSortKey={sortKey}
+                        receivedSortDir={sortDir}
+                        page={page}
+                        limit={limit}
+                        ordersLimit={ordersLimit}
+                      />
+                    </th>
+                    <th className="app-th whitespace-nowrap">
+                      <ImportedSortHeader
+                        label="Source"
+                        sortKey="seller"
+                        currentSortKey={ordersSortKey}
+                        currentSortDir={ordersSortDir}
+                        qRaw={qRaw}
+                        receivedSortKey={sortKey}
+                        receivedSortDir={sortDir}
+                        page={page}
+                        limit={limit}
+                        ordersLimit={ordersLimit}
+                      />
+                    </th>
+                    <th className="app-th min-w-[180px]">
+                      <ImportedSortHeader
+                        label="Purchase"
+                        sortKey="product_name"
+                        currentSortKey={ordersSortKey}
+                        currentSortDir={ordersSortDir}
+                        qRaw={qRaw}
+                        receivedSortKey={sortKey}
+                        receivedSortDir={sortDir}
+                        page={page}
+                        limit={limit}
+                        ordersLimit={ordersLimit}
+                      />
+                    </th>
+                    <th className="app-th whitespace-nowrap">
+                      <ImportedSortHeader
+                        label="Status"
+                        sortKey="order_status"
+                        currentSortKey={ordersSortKey}
+                        currentSortDir={ordersSortDir}
+                        qRaw={qRaw}
+                        receivedSortKey={sortKey}
+                        receivedSortDir={sortDir}
+                        page={page}
+                        limit={limit}
+                        ordersLimit={ordersLimit}
+                      />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {importedOrders.map((order) => {
                     const orderNumber = getImportedOrderNumber(order)
                     const importedDate = formatDate(order.created_at)
-                    const orderDate = formatDate(order.processed_date_display || order.processed_date)
                     const seller = cleanText(order.seller || 'Unknown Seller')
                     const description = getImportedOrderDescription(order)
+                    const orderStatus = cleanText(order.order_status || 'Open')
+                    const orderHref = buildImportedOrderFocusHref(order)
 
                     return (
                       <tr key={order.id} data-imported-order-row-id={order.id} className="app-tr align-top">
@@ -1913,33 +2189,32 @@ export default async function BreaksPage({
                           />
                         </td>
                         <td className="app-td whitespace-nowrap">
-                          <Link
-                            href={buildImportedOrderFocusHref(order)}
-                            className="font-medium text-zinc-100 hover:text-white hover:underline"
-                          >
+                          <Link href={orderHref} className="block text-zinc-100 hover:text-white hover:underline">
+                            {importedDate}
+                          </Link>
+                        </td>
+                        <td className="app-td whitespace-nowrap">
+                          <Link href={orderHref} className="block font-medium text-zinc-100 hover:text-white hover:underline">
                             {orderNumber}
                           </Link>
                         </td>
-                        <td className="app-td whitespace-nowrap">{importedDate}</td>
-                        <td className="app-td whitespace-nowrap">{orderDate}</td>
                         <td className="app-td">
-                          <div className="max-w-40 break-words" title={seller}>
+                          <Link href={orderHref} className="block max-w-32 break-words text-zinc-100 hover:text-white hover:underline" title={seller}>
                             {seller}
-                          </div>
+                          </Link>
                         </td>
                         <td className="app-td">
                           <Link
-                            href={buildImportedOrderFocusHref(order)}
-                            className="block min-w-[240px] max-w-[560px] break-words text-zinc-100 hover:text-white hover:underline"
+                            href={orderHref}
+                            className="block max-w-[340px] break-words text-zinc-100 hover:text-white hover:underline"
                             title={description}
                           >
                             {description}
                           </Link>
                         </td>
-                        <td className="app-td whitespace-nowrap text-right">{money(order.total)}</td>
                         <td className="app-td whitespace-nowrap">
-                          <Link href={buildImportedOrderFocusHref(order)} className="app-button whitespace-nowrap">
-                            Open
+                          <Link href={orderHref} className="block">
+                            <span className="app-badge app-badge-warning">{orderStatus}</span>
                           </Link>
                         </td>
                       </tr>
@@ -1953,16 +2228,41 @@ export default async function BreaksPage({
       </details>
 
       <div className="app-section">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Orders Received</h2>
-            <p className="mt-0.5 text-sm text-zinc-400">
-              Orders Received And Entered Into Inventory
+        <div className="grid min-h-[3.25rem] grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold leading-tight">Orders Received</h2>
+            <p className="mt-0.5 truncate whitespace-nowrap text-sm text-zinc-400">
+              Received And Entered Into Inventory
             </p>
           </div>
 
-          <div className="text-xs text-zinc-500">{breaks.length} shown</div>
+          <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 overflow-x-auto">
+            <div className="shrink-0 whitespace-nowrap text-xs text-zinc-500">Page {page} • {breaks.length} shown</div>
+            <div className="flex shrink-0 flex-nowrap items-center gap-1">
+              {LIMIT_OPTIONS.map((option) => (
+                <Link
+                  key={option}
+                  href={buildReceivedLimitHref({
+                    q: qRaw,
+                    sort: sortKey,
+                    dir: sortDir,
+                    limit: option,
+                    ordersLimit,
+                  })}
+                  className={`app-chip ${limit === option ? 'app-chip-active' : 'app-chip-idle'}`}
+                >
+                  {option}
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {breaks.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            <BulkDeleteConfirmControl formId={BULK_BREAKS_FORM_ID} pageBreakCount={breaks.length} />
+          </div>
+        ) : null}
 
         <form id={BULK_BREAKS_FORM_ID} action={bulkDeleteBreaksAction} className="hidden">
           <input type="hidden" name="q" value={qRaw} />
@@ -1970,21 +2270,16 @@ export default async function BreaksPage({
           <input type="hidden" name="dir" value={sortDir} />
           <input type="hidden" name="page" value={page} />
           <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="orders_limit" value={ordersLimit} />
         </form>
         <BulkSelectionScript formId={BULK_BREAKS_FORM_ID} />
 
-        {breaks.length > 0 ? (
-          <div className="mt-3">
-            <BulkDeleteConfirmControl formId={BULK_BREAKS_FORM_ID} pageBreakCount={breaks.length} />
-          </div>
-        ) : null}
-
-        <div className="mt-3 app-table-wrap">
+        <div className="mt-3 app-table-wrap xl:max-h-[calc(100vh-28rem)] xl:overflow-y-auto">
           <div className="app-table-scroll">
             <table className="app-table">
               <thead className="app-thead">
                 <tr>
-                  <th className="app-th w-16">
+                  <th className="app-th w-12">
                     <input
                       form={BULK_BREAKS_FORM_ID}
                       type="checkbox"
@@ -1993,7 +2288,7 @@ export default async function BreaksPage({
                       className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                     />
                   </th>
-                  <th className="app-th">
+                  <th className="app-th whitespace-nowrap">
                     <SortHeader
                       label="Date"
                       sortKey="break_date"
@@ -2001,6 +2296,29 @@ export default async function BreaksPage({
                       currentSortDir={sortDir}
                       qRaw={qRaw}
                       limit={limit}
+                      ordersLimit={ordersLimit}
+                    />
+                  </th>
+                  <th className="app-th whitespace-nowrap">
+                    <SortHeader
+                      label="Order #"
+                      sortKey="order_number"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      qRaw={qRaw}
+                      limit={limit}
+                      ordersLimit={ordersLimit}
+                    />
+                  </th>
+                  <th className="app-th whitespace-nowrap">
+                    <SortHeader
+                      label="Source"
+                      sortKey="source_name"
+                      currentSortKey={sortKey}
+                      currentSortDir={sortDir}
+                      qRaw={qRaw}
+                      limit={limit}
+                      ordersLimit={ordersLimit}
                     />
                   </th>
                   <th className="app-th min-w-[220px]">
@@ -2011,29 +2329,10 @@ export default async function BreaksPage({
                       currentSortDir={sortDir}
                       qRaw={qRaw}
                       limit={limit}
+                      ordersLimit={ordersLimit}
                     />
                   </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Source"
-                      sortKey="source_name"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Order #"
-                      sortKey="order_number"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
+                  <th className="app-th whitespace-nowrap">
                     <SortHeader
                       label="Status"
                       sortKey="completionStatus"
@@ -2041,49 +2340,9 @@ export default async function BreaksPage({
                       currentSortDir={sortDir}
                       qRaw={qRaw}
                       limit={limit}
+                      ordersLimit={ordersLimit}
                     />
                   </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Entered"
-                      sortKey="entered"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Received"
-                      sortKey="received"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Remaining"
-                      sortKey="remaining"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th">
-                    <SortHeader
-                      label="Total Cost"
-                      sortKey="total_cost"
-                      currentSortKey={sortKey}
-                      currentSortDir={sortDir}
-                      qRaw={qRaw}
-                      limit={limit}
-                    />
-                  </th>
-                  <th className="app-th min-w-[150px]">Quick</th>
                 </tr>
               </thead>
               <tbody>
@@ -2091,6 +2350,7 @@ export default async function BreaksPage({
                   const breakLabel = cleanText(item.product_name || 'Untitled break')
                   const sourceLabel = cleanText(item.source_name || '—')
                   const orderLabel = cleanText(item.order_number || '—')
+                  const breakHref = `/app/breaks/${item.id}`
 
                   return (
                     <tr key={item.id} data-break-row-id={item.id} className="app-tr align-top">
@@ -2106,58 +2366,39 @@ export default async function BreaksPage({
                         />
                       </td>
 
-                      <td className="app-td whitespace-nowrap">{formatDate(item.break_date)}</td>
+                      <td className="app-td whitespace-nowrap">
+                        <Link href={breakHref} className="block text-zinc-100 hover:text-white hover:underline">
+                          {formatDate(item.break_date)}
+                        </Link>
+                      </td>
+
+                      <td className="app-td">
+                        <Link href={breakHref} className="block max-w-36 break-words text-zinc-100 hover:text-white hover:underline" title={orderLabel}>
+                          {orderLabel}
+                        </Link>
+                      </td>
+
+                      <td className="app-td">
+                        <Link href={breakHref} className="block max-w-32 break-words text-zinc-100 hover:text-white hover:underline" title={sourceLabel}>
+                          {sourceLabel}
+                        </Link>
+                      </td>
 
                       <td className="app-td">
                         <Link
-                          href={`/app/breaks/${item.id}`}
+                          href={breakHref}
                           data-break-primary-title="true"
-                          className="block min-w-[200px] max-w-[420px] break-words font-medium text-zinc-100 hover:text-white hover:underline"
+                          className="block max-w-[360px] break-words font-medium text-zinc-100 hover:text-white hover:underline"
                           title={breakLabel}
                         >
                           {breakLabel}
                         </Link>
                       </td>
 
-                      <td className="app-td">
-                        <div className="max-w-32 break-words" title={sourceLabel}>
-                          {sourceLabel}
-                        </div>
-                      </td>
-
-                      <td className="app-td">
-                        <div className="max-w-40 break-words" title={orderLabel}>
-                          {orderLabel}
-                        </div>
-                      </td>
-
                       <td className="app-td whitespace-nowrap">
-                        {renderStatusPill(item.completionStatus)}
-                      </td>
-
-                      <td className="app-td whitespace-nowrap">{item.entered}</td>
-                      <td className="app-td whitespace-nowrap">{item.received}</td>
-                      <td className="app-td whitespace-nowrap">{item.remaining}</td>
-                      <td className="app-td whitespace-nowrap">{money(item.total_cost)}</td>
-
-                      <td className="app-td whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          {!item.reversed_at && item.remaining > 0 ? (
-                            <Link href={`/app/breaks/${item.id}/add-cards`} className="app-button">
-                              Add
-                            </Link>
-                          ) : null}
-
-                          <DeleteBreakConfirmControl
-                            breakId={item.id}
-                            breakLabel={breakLabel}
-                            qRaw={qRaw}
-                            sortKey={sortKey}
-                            sortDir={sortDir}
-                            page={page}
-                            limit={limit}
-                          />
-                        </div>
+                        <Link href={breakHref} className="block">
+                          {renderStatusPill(item.completionStatus)}
+                        </Link>
                       </td>
                     </tr>
                   )
@@ -2165,7 +2406,7 @@ export default async function BreaksPage({
 
                 {breaks.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-zinc-400">
+                    <td colSpan={6} className="px-4 py-8 text-center text-zinc-400">
                       No orders found for this view.
                     </td>
                   </tr>
@@ -2176,10 +2417,12 @@ export default async function BreaksPage({
         </div>
       </div>
 
+      </div>
+
       <div className="app-section p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-zinc-300">
-            Showing page {page} with up to {limit} orders.
+            Showing page {page} with up to {limit} received orders. Orders column shows up to {ordersLimit} unentered orders.
           </div>
 
           <div className="flex gap-2">
@@ -2191,6 +2434,7 @@ export default async function BreaksPage({
                   dir: sortDir,
                   page: page - 1,
                   limit,
+                  ordersLimit,
                 })}
                 className="app-button"
               >
@@ -2208,6 +2452,7 @@ export default async function BreaksPage({
                   dir: sortDir,
                   page: page + 1,
                   limit,
+                  ordersLimit,
                 })}
                 className="app-button-primary"
               >
