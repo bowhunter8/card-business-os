@@ -51,7 +51,7 @@ export default function BackupExportButton() {
 
       localStorage.setItem('last_backup_date', new Date().toISOString())
 
-      setSuccess('Full backup exported successfully.')
+      setSuccess('Backup created successfully. Keep the downloaded file somewhere safe.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Backup export failed')
     } finally {
@@ -65,10 +65,24 @@ export default function BackupExportButton() {
         type="button"
         onClick={handleExport}
         disabled={isExporting}
-        className="app-button-primary disabled:opacity-50"
+        className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {isExporting ? 'Exporting Backup...' : 'Export Full Backup'}
+        {isExporting ? 'Creating Backup...' : 'Backup Now'}
       </button>
+
+      {isExporting ? (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-4 text-sm text-amber-100">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 h-4 w-4 animate-spin rounded-full border-2 border-amber-300 border-t-transparent" />
+            <div>
+              <div className="font-semibold">Creating backup...</div>
+              <p className="mt-1 text-amber-100/80">
+                Please wait and do not close this page.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {error ? <div className="app-alert-error">{error}</div> : null}
       {success ? <div className="app-alert-success">{success}</div> : null}

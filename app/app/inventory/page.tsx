@@ -72,6 +72,9 @@ const DEFAULT_LIMIT = 5
 const LIMIT_OPTIONS = [5, 10, 50, 100] as const
 const ROW_LIMIT_OPTIONS = [10, 50, 100] as const
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-page-form'
+const BULK_DELETE_FORM_ID = 'bulk-delete-inventory-direct-form'
+const BULK_STATUS_FORM_ID = 'bulk-status-inventory-direct-form'
+const BULK_FINALIZE_FORM_ID = 'bulk-finalize-inventory-direct-form'
 const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
 const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
 const BULK_PENDING_STATE_ID = 'bulk-inventory-pending-state'
@@ -448,19 +451,51 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
 
   const deletedAt = new Date().toISOString()
 
-  const { data: itemsBeforeDelete } = await supabase
+  const { data: itemsBeforeDelete, error: itemsBeforeDeleteError } = await supabase
     .from('inventory_items')
     .select('id, title, quantity, available_quantity, cost_basis_total')
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .in('id', itemIds)
 
+  if (itemsBeforeDeleteError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: itemsBeforeDeleteError.message,
+        scrollY,
+      })
+    )
+  }
+
+  const deleteTargetIds = (itemsBeforeDelete ?? []).map((item) => item.id)
+
+  if (deleteTargetIds.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: 'No matching active inventory items were found to delete. Refresh the page and select the rows again.',
+        scrollY,
+      })
+    )
+  }
+
   const { error } = await supabase
     .from('inventory_items')
     .update({ deleted_at: deletedAt })
     .eq('user_id', user.id)
     .is('deleted_at', null)
-    .in('id', itemIds)
+    .in('id', deleteTargetIds)
 
   if (error) {
     redirect(
@@ -503,7 +538,7 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
       page: safePage,
       limit: safeLimit,
       statusKey: 'deleted_count',
-      statusValue: `${itemIds.length} inventory item(s)`,
+      statusValue: `${deleteTargetIds.length} inventory item(s)`,
       scrollY,
     })
   )
@@ -1035,25 +1070,23 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
     <details className="group">
       <summary
         data-bulk-action-toggle="true"
-        className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40"
+        className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
       >
         Delete Selected
       </summary>
 
-      <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+      <div className="mt-2 rounded-xl border border-red-900/70 bg-zinc-950 p-3 shadow-xl md:min-w-80">
         <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
         <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-          This will delete the selected inventory items. This cannot be undone from this screen.
+          This will hide the selected inventory rows from normal inventory. Use this only for correction cleanup, not for sales, personal withdrawals, giveaways, junk, donations, or disposal write-offs.
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="submit"
-            form={formId}
+            form={BULK_DELETE_FORM_ID}
             formAction={bulkDeleteInventoryItemsAction}
-            data-bulk-submit="true"
-            data-bulk-delete="true"
-            data-bulk-label="Delete Selected"
+            data-bulk-native-delete-submit="true"
             className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
           >
             Yes, Delete Selected
@@ -1136,6 +1169,8 @@ function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
 
 function BulkActionsPanel({
   formId,
+  statusFormId,
+  finalizeFormId,
   pageItemCount,
   q,
   sortKey,
@@ -1143,6 +1178,8 @@ function BulkActionsPanel({
   limit,
 }: {
   formId: string
+  statusFormId: string
+  finalizeFormId: string
   pageItemCount: number
   q: string
   sortKey: SortKey
@@ -1244,36 +1281,36 @@ function BulkActionsPanel({
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap items-center gap-2">
             <BulkStatusConfirmControl
-              formId={formId}
+              formId={statusFormId}
               status="available"
               label="Mark For Sale"
               helpText="This will mark the selected inventory items as For Sale / Available."
             />
             <BulkStatusConfirmControl
-              formId={formId}
+              formId={statusFormId}
               status="listed"
               label="Mark Listed"
               helpText="This will mark the selected inventory items as Listed."
             />
             <BulkStatusConfirmControl
-              formId={formId}
+              formId={statusFormId}
               status="personal"
               label="Move to Personal"
               helpText="This will move the selected inventory items to Personal Collection status. Cost basis is preserved as a personal withdrawal record; do not also deduct these items as expenses."
             />
             <BulkStatusConfirmControl
-              formId={formId}
+              formId={statusFormId}
               status="junk"
               label="Mark Junk"
               helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
             />
             <BulkStatusConfirmControl
-              formId={formId}
+              formId={statusFormId}
               status="disposed"
               label="Dispose Selected"
               helpText="This will mark the selected inventory items as Disposed because they physically left the business with no sale proceeds. Cost basis is preserved in the transaction log for tax review."
             />
-            <BulkFinalizeDisposalConfirmControl formId={formId} />
+            <BulkFinalizeDisposalConfirmControl formId={finalizeFormId} />
             <BulkDeleteConfirmControl formId={formId} />
           </div>
 
@@ -1299,15 +1336,31 @@ function BulkActionsPanel({
   )
 }
 
-function BulkSelectionScript({ formId }: { formId: string }) {
+function BulkSelectionScript({
+  formId,
+  deleteFormId,
+  statusFormId,
+  finalizeFormId,
+}: {
+  formId: string
+  deleteFormId: string
+  statusFormId: string
+  finalizeFormId: string
+}) {
   const script = `
     (() => {
       const formId = ${JSON.stringify('${FORM_ID_PLACEHOLDER}')};
+      const deleteFormId = ${JSON.stringify('${DELETE_FORM_ID_PLACEHOLDER}')};
+      const statusFormId = ${JSON.stringify('${STATUS_FORM_ID_PLACEHOLDER}')};
+      const finalizeFormId = ${JSON.stringify('${FINALIZE_FORM_ID_PLACEHOLDER}')};
       const fieldName = 'selected_inventory_ids';
       const storageKey = 'card_business_os_inventory_bulk_selection_v2';
       let isBulkSubmitting = false;
 
       const form = () => document.getElementById(formId);
+      const deleteForm = () => document.getElementById(deleteFormId);
+      const statusForm = () => document.getElementById(statusFormId);
+      const finalizeForm = () => document.getElementById(finalizeFormId);
       const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
       const pendingNodes = () => Array.from(document.querySelectorAll('[data-bulk-pending-state="true"]'));
       const rowCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-inventory-bulk-row-checkbox="true"]'));
@@ -1317,8 +1370,8 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       const submitButtons = () => Array.from(document.querySelectorAll('[data-bulk-submit="true"]'));
       const selectPageButtons = () => Array.from(document.querySelectorAll('[data-bulk-select-page="true"]'));
       const clearButtons = () => Array.from(document.querySelectorAll('[data-bulk-clear-selection="true"]'));
-      const scrollInputs = () => Array.from(document.querySelectorAll('input[name="scroll_y"][form="' + formId + '"], form#' + formId + ' input[name="scroll_y"]'));
-      const statusInputs = () => Array.from(document.querySelectorAll('input[name="bulk_status"][form="' + formId + '"], form#' + formId + ' input[name="bulk_status"]'));
+      const scrollInputs = () => Array.from(document.querySelectorAll('input[name="scroll_y"][form="' + formId + '"], form#' + formId + ' input[name="scroll_y"], form#' + deleteFormId + ' input[name="scroll_y"], form#' + statusFormId + ' input[name="scroll_y"], form#' + finalizeFormId + ' input[name="scroll_y"]'));
+      const statusInputs = () => Array.from(document.querySelectorAll('form#' + statusFormId + ' input[name="bulk_status"]'));
 
       function loadStoredSelection() {
         try {
@@ -1337,14 +1390,11 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         } catch (_error) {}
       }
 
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.has('deleted_count') || urlParams.has('status_updated') || urlParams.has('status_error')) {
-        try {
-          window.sessionStorage.removeItem(storageKey);
-        } catch (_error) {}
-      }
+      try {
+        window.sessionStorage.removeItem(storageKey);
+      } catch (_error) {}
 
-      let selectedIdsSet = loadStoredSelection();
+      let selectedIdsSet = new Set();
 
       function setDisabled(node, disabled) {
         node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
@@ -1358,11 +1408,14 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       function selectedCount() {
-        return selectedIdsSet.size;
+        return rowCheckboxes().filter((checkbox) => checkbox.checked).length;
       }
 
       function selectedIds() {
-        return Array.from(selectedIdsSet);
+        return rowCheckboxes()
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => String(checkbox.value || '').trim())
+          .filter(Boolean);
       }
 
       function visibleCheckedIds() {
@@ -1379,18 +1432,21 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       function syncStoredInputs() {
-        const bulkForm = form();
-        if (!bulkForm) return;
+        const selectedIdsList = selectedIds();
 
-        bulkForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
+        [form(), deleteForm(), statusForm(), finalizeForm()].forEach((targetForm) => {
+          if (!targetForm) return;
 
-        selectedIds().forEach((id) => {
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = fieldName;
-          input.value = id;
-          input.setAttribute('data-bulk-persisted-selection', 'true');
-          bulkForm.appendChild(input);
+          targetForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
+
+          selectedIdsList.forEach((id) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = fieldName;
+            input.value = id;
+            input.setAttribute('data-bulk-persisted-selection', 'true');
+            targetForm.appendChild(input);
+          });
         });
       }
 
@@ -1413,12 +1469,11 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       function updateBulkState() {
-        syncPageCheckboxesFromStoredSelection();
         syncStoredInputs();
 
         const currentPageIds = pageIds();
         const totalOnPage = currentPageIds.length;
-        const selectedOnPage = currentPageIds.filter((id) => selectedIdsSet.has(id)).length;
+        const selectedOnPage = selectedCount();
         const count = selectedCount();
         const hasSelection = count > 0;
         const allPageSelected = totalOnPage > 0 && selectedOnPage === totalOnPage;
@@ -1436,7 +1491,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         rowCheckboxes().forEach((checkbox) => {
           const row = checkbox.closest('[data-inventory-row-id]');
           if (row) {
-            row.classList.toggle('bg-zinc-900/40', selectedIdsSet.has(checkbox.value) && !isBulkSubmitting);
+            row.classList.toggle('bg-zinc-900/40', checkbox.checked && !isBulkSubmitting);
           }
         });
 
@@ -1564,10 +1619,12 @@ function BulkSelectionScript({ formId }: { formId: string }) {
 
         if (target && target.matches && target.matches('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]')) {
           const shouldSelectPage = Boolean(target.checked);
-          pageIds().forEach((id) => {
-            if (shouldSelectPage) selectedIdsSet.add(id);
-            else selectedIdsSet.delete(id);
+
+          rowCheckboxes().forEach((checkbox) => {
+            checkbox.checked = shouldSelectPage;
           });
+
+          selectedIdsSet = new Set(shouldSelectPage ? selectedIds() : []);
           saveStoredSelection(selectedIdsSet);
           syncStoredInputs();
           updateBulkState();
@@ -1594,8 +1651,14 @@ function BulkSelectionScript({ formId }: { formId: string }) {
           event.preventDefault();
           event.stopPropagation();
           if (isBulkSubmitting) return;
-          pageIds().forEach((id) => selectedIdsSet.add(id));
+
+          rowCheckboxes().forEach((checkbox) => {
+            checkbox.checked = true;
+          });
+
+          selectedIdsSet = new Set(selectedIds());
           saveStoredSelection(selectedIdsSet);
+          syncStoredInputs();
           updateBulkState();
           return;
         }
@@ -1627,8 +1690,22 @@ function BulkSelectionScript({ formId }: { formId: string }) {
           }
 
           rememberScrollPosition();
-          finalizeButton.textContent = 'Finalizing…';
-          showPendingMessage('Finalizing disposal review for ' + selectedCount() + ' selected item(s)…');
+
+          // Submit the dedicated final disposal form normally.
+          return;
+        }
+
+        const nativeDeleteSubmitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-native-delete-submit="true"]') : null;
+        if (nativeDeleteSubmitButton) {
+          if (selectedCount() === 0 || isBulkSubmitting) {
+            event.preventDefault();
+            updateBulkState();
+            return;
+          }
+
+          selectedIdsSet = new Set(selectedIds());
+          syncStoredInputs();
+          rememberScrollPosition();
           return;
         }
 
@@ -1639,25 +1716,35 @@ function BulkSelectionScript({ formId }: { formId: string }) {
             updateBulkState();
             return;
           }
+
+          selectedIdsSet = new Set(selectedIds());
           syncStoredInputs();
           setBulkStatus(submitButton.getAttribute('data-bulk-status') || '');
           rememberScrollPosition();
-          setSubmitting(submitButton);
+
+          // Submit the dedicated status form normally, same as the working delete button.
+          return;
         }
       }, true);
 
       document.addEventListener('submit', (event) => {
-        if (event.target && event.target.id === formId) {
+        if (event.target && (event.target.id === formId || event.target.id === deleteFormId || event.target.id === statusFormId || event.target.id === finalizeFormId)) {
           syncStoredInputs();
           rememberScrollPosition();
         }
       });
 
-      syncPageCheckboxesFromStoredSelection();
+      rowCheckboxes().forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+      pageToggleCheckboxes().forEach((checkbox) => {
+        checkbox.checked = false;
+        checkbox.indeterminate = false;
+      });
       syncStoredInputs();
       updateBulkState();
     })();
-  `.replace('${FORM_ID_PLACEHOLDER}', formId)
+  `.replace('${FORM_ID_PLACEHOLDER}', formId).replace('${DELETE_FORM_ID_PLACEHOLDER}', deleteFormId).replace('${STATUS_FORM_ID_PLACEHOLDER}', statusFormId).replace('${FINALIZE_FORM_ID_PLACEHOLDER}', finalizeFormId)
 
   return <Script id="bulk-selection-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
 }
@@ -1996,7 +2083,41 @@ export default async function InventoryPage({
           <div className="text-xs text-zinc-500">{items.length} shown</div>
         </div>
 
-        <form id={BULK_INVENTORY_FORM_ID} className="hidden">
+        <BulkSelectionScript formId={BULK_INVENTORY_FORM_ID} deleteFormId={BULK_DELETE_FORM_ID} statusFormId={BULK_STATUS_FORM_ID} finalizeFormId={BULK_FINALIZE_FORM_ID} />
+        <ScrollRestoreScript scrollY={scrollY} />
+
+        <form id={BULK_INVENTORY_FORM_ID}>
+          <input type="hidden" name="q" value={q} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="scroll_y" value="" />
+          <input type="hidden" name="bulk_status" value="" />
+
+
+          <BulkActionsPanel
+            formId={BULK_INVENTORY_FORM_ID}
+            statusFormId={BULK_STATUS_FORM_ID}
+            finalizeFormId={BULK_FINALIZE_FORM_ID}
+            pageItemCount={items.length}
+            q={q}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            limit={limit}
+          />
+        </form>
+
+        <form id={BULK_DELETE_FORM_ID} className="hidden">
+          <input type="hidden" name="q" value={q} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="scroll_y" value="" />
+        </form>
+
+        <form id={BULK_STATUS_FORM_ID} className="hidden">
           <input type="hidden" name="q" value={q} />
           <input type="hidden" name="sort" value={sortKey} />
           <input type="hidden" name="dir" value={sortDir} />
@@ -2006,17 +2127,14 @@ export default async function InventoryPage({
           <input type="hidden" name="bulk_status" value="" />
         </form>
 
-        <BulkSelectionScript formId={BULK_INVENTORY_FORM_ID} />
-        <ScrollRestoreScript scrollY={scrollY} />
-
-        <BulkActionsPanel
-          formId={BULK_INVENTORY_FORM_ID}
-          pageItemCount={items.length}
-          q={q}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          limit={limit}
-        />
+        <form id={BULK_FINALIZE_FORM_ID} className="hidden">
+          <input type="hidden" name="q" value={q} />
+          <input type="hidden" name="sort" value={sortKey} />
+          <input type="hidden" name="dir" value={sortDir} />
+          <input type="hidden" name="page" value={page} />
+          <input type="hidden" name="limit" value={limit} />
+          <input type="hidden" name="scroll_y" value="" />
+        </form>
 
         <div className="mt-2 min-h-0 flex-1 overflow-y-auto app-table-wrap pb-4">
           <div className="app-table-scroll">
