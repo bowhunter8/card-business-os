@@ -93,12 +93,6 @@ export default function UtilitiesPage() {
 
         <div className="grid gap-3 md:grid-cols-2">
           <UtilityCard
-            href="/app/settings/shipping"
-            title="Shipping Profiles"
-            description="Manage default shipping charges and supplies costs used in your sales flow."
-          />
-
-          <UtilityCard
             href="/app/expenses"
             title="Supplies & Expenses"
             description="Track bulk supplies, postage purchases, software, equipment, and other business expenses."

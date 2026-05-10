@@ -2017,7 +2017,7 @@ export default async function BreaksPage({
             </div>
 
             <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2 overflow-x-auto">
-              <Link href="/app/imports/whatnot" className="app-button shrink-0 whitespace-nowrap">
+              <Link href="/app/imports/whatnot" className="app-button-primary shrink-0 whitespace-nowrap border-yellow-500 bg-yellow-400 text-zinc-950 hover:bg-yellow-300">
                 Import More
               </Link>
               <span className="app-chip app-chip-idle shrink-0 whitespace-nowrap">

@@ -35,27 +35,6 @@ function ImportCard({
   )
 }
 
-function FutureImportCard({
-  title,
-  description,
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <div className="app-section border-zinc-800 bg-zinc-900 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <p className="mt-1.5 text-sm text-zinc-400">{description}</p>
-        </div>
-
-        <span className="app-badge app-badge-neutral">Planned</span>
-      </div>
-    </div>
-  )
-}
-
 export default function ImportsHubPage() {
   return (
     <div className="app-page-wide space-y-5">
@@ -63,8 +42,8 @@ export default function ImportsHubPage() {
         <div>
           <h1 className="app-title">Imports</h1>
           <p className="app-subtitle">
-            Import orders, sales, and future record types from different platforms without
-            boxing the app into one marketplace.
+            Import orders and sales from different platforms without boxing the app into
+            one marketplace.
           </p>
         </div>
 
@@ -76,13 +55,6 @@ export default function ImportsHubPage() {
       </div>
 
       <section className="space-y-3">
-        <div>
-          <h2 className="text-base font-semibold">Active Import Flows</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            These are the importers already connected to working backend logic.
-          </p>
-        </div>
-
         <div className="grid gap-3 md:grid-cols-2">
           <ImportCard
             href="/app/imports/whatnot"
@@ -99,46 +71,6 @@ export default function ImportsHubPage() {
           />
         </div>
       </section>
-
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-base font-semibold">Planned Expansion</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            These are the next logical import modes for making the app more platform-agnostic.
-          </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <FutureImportCard
-            title="Import Inventory"
-            description="Bring in existing inventory from spreadsheets or legacy tracking systems."
-          />
-
-          <FutureImportCard
-            title="Import Expenses"
-            description="Import postage, supplies, software, equipment, and other expense records."
-          />
-
-          <FutureImportCard
-            title="Custom CSV Mapping"
-            description="Map unknown CSV columns into orders, sales, inventory, or expenses without relying on one source."
-          />
-
-          <FutureImportCard
-            title="Invoice / Receipt Intake"
-            description="Future option for OCR or pasted invoice text that can identify order or invoice numbers from different sources."
-          />
-        </div>
-      </section>
-
-      <div className="app-section p-4">
-        <div className="text-sm font-medium text-zinc-200">Recommended structure</div>
-        <div className="mt-2 space-y-1 text-sm text-zinc-400">
-          <p>1. Keep source-specific parsers behind the scenes where needed.</p>
-          <p>2. Present a generic import hub at the UI level.</p>
-          <p>3. Add custom mapping later when you are ready for true universal CSV support.</p>
-        </div>
-      </div>
     </div>
   )
 }

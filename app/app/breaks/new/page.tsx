@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { createBreakAction } from '@/app/actions/breaks'
+import TeamBagTally from './TeamBagTally'
 
 type WhatnotOrderRow = {
   id: string
@@ -226,6 +227,7 @@ export default async function NewBreakPage({
               <p className="mt-2 text-xs text-zinc-400">
                 Enter the total number of items from this order. This auto-sets the row count on the Add Items screen.
               </p>
+              <TeamBagTally />
             </div>
 
             <button

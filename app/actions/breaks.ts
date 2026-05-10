@@ -659,8 +659,15 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
+  const existingBreakItemsSafe = (existingBreakItems ?? []) as DuplicateCheckRow[]
+
+  const existingUnitCount = existingBreakItemsSafe.reduce(
+    (sum, item) => sum + Number(item.quantity ?? 0),
+    0
+  )
+
   const existingKeySet = new Set(
-    ((existingBreakItems ?? []) as DuplicateCheckRow[]).map((item) =>
+    existingBreakItemsSafe.map((item) =>
       buildDuplicateKey({
         itemType: item.item_type,
         status: item.status,
@@ -763,13 +770,13 @@ export async function addBreakCardsAction(formData: FormData) {
     })
   }
 
+  const totalEnteredAfterSave = existingUnitCount + enteredUnitCount
+  const remainingAfterSave = Math.max(0, cardsReceived - totalEnteredAfterSave)
+
   const successMessage =
-    enteredUnitCount === cardsReceived
-      ? `Success! All ${enteredUnitCount} item(s) added to inventory.`
-      : `Success! ${enteredUnitCount} item(s) added to inventory. ${Math.max(
-          0,
-          cardsReceived - enteredUnitCount
-        )} item(s) remaining.`
+    remainingAfterSave === 0
+      ? `Success! ${enteredUnitCount} item(s) added to inventory. All ${totalEnteredAfterSave} item(s) are now entered.`
+      : `Success! ${enteredUnitCount} item(s) added to inventory. ${remainingAfterSave} item(s) remaining.`
 
   redirect(`/app/breaks/${breakId}?success=${encodeURIComponent(successMessage)}`)
 }

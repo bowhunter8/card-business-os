@@ -297,9 +297,13 @@ export default function BreakCardEntryGrid({
     if (completion) {
       window.requestAnimationFrame(() => {
         const input = fieldRefs.current[field][index]
-        if (!input) return
+        if (!input || !input.isConnected) return
 
-        input.setSelectionRange(value.length, completion.length)
+        try {
+          input.setSelectionRange(value.length, completion.length)
+        } catch {
+          // Ignore selection errors if the input is no longer usable during submit/navigation.
+        }
       })
     }
   }
