@@ -142,9 +142,37 @@ export default async function AppLayout({
         <main className="min-w-0">
 
           {/* Top Bar */}
-          <div className="sticky top-0 z-50 bg-black px-4 py-3 md:px-6">
-            <div className="mx-auto max-w-[1800px]">
-              <AppGlobalSearch />
+          <div className="sticky top-0 z-50 px-3 py-3 backdrop-blur md:px-6 md:py-4">
+            <div className="mx-auto max-w-[1900px]">
+              <div className="relative overflow-hidden rounded-2xl border border-cyan-500/60 bg-gradient-to-r from-blue-950 via-black to-blue-950/80 px-4 py-4 shadow-[0_0_22px_rgba(14,165,233,0.22)] md:px-6">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_left,rgba(37,99,235,0.34),transparent_44%),radial-gradient(circle_at_right,rgba(14,165,233,0.16),transparent_38%)]" />
+                <div className="pointer-events-none absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-yellow-400/80 to-transparent" />
+
+                <div className="relative z-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:gap-8">
+                  <div className="flex shrink-0 items-center gap-5 md:min-w-[520px]">
+                    <img
+                      src="/hits-icon.png"
+                      alt="HITS Hobby Inventory Tracking System"
+                      className="h-28 w-28 shrink-0 object-contain md:h-36 md:w-36"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-start gap-2 leading-none">
+                        <div className="text-5xl font-black tracking-[0.20em] text-white drop-shadow md:text-6xl">
+                          HITS
+                        </div>
+                        <div className="pt-1 text-base font-bold text-white">™</div>
+                      </div>
+                      <div className="mt-3 text-lg font-bold text-yellow-300 md:text-xl">
+                        Hobby Inventory Tracking System
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <AppGlobalSearch />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 

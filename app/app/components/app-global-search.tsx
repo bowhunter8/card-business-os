@@ -28,6 +28,19 @@ function normalizeSearchInput(value: string) {
     .trim()
 }
 
+function getImageFileFromClipboard(event: React.ClipboardEvent<HTMLInputElement>) {
+  const items = Array.from(event.clipboardData?.items ?? [])
+
+  for (const item of items) {
+    if (!item.type.startsWith('image/')) continue
+
+    const file = item.getAsFile()
+    if (file) return file
+  }
+
+  return null
+}
+
 export default function AppGlobalSearch() {
   const router = useRouter()
   const pathname = usePathname()
@@ -80,18 +93,7 @@ export default function AppGlobalSearch() {
     })
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-
-    if (isBusy) return
-
-    submitSearch(query)
-  }
-
-  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-
-    if (!file) return
+  async function processImageFile(file: File) {
     if (isOcrRunningRef.current) return
 
     isOcrRunningRef.current = true
@@ -141,6 +143,36 @@ export default function AppGlobalSearch() {
     }
   }
 
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+
+    if (isBusy) return
+
+    submitSearch(query)
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    if (isBusy) return
+
+    const imageFile = getImageFileFromClipboard(e)
+
+    if (!imageFile) return
+
+    e.preventDefault()
+    setQuery('')
+    lastSubmittedRef.current = ''
+
+    void processImageFile(imageFile)
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+
+    if (!file) return
+
+    await processImageFile(file)
+  }
+
   return (
     <div className="w-full max-w-4xl">
       <form onSubmit={handleSubmit} className="flex flex-col gap-1">
@@ -154,6 +186,7 @@ export default function AppGlobalSearch() {
               if (status === 'Searching...') setStatus('')
               if (lastSubmittedRef.current) lastSubmittedRef.current = ''
             }}
+            onPaste={handlePaste}
             placeholder="Search orders, breaks, players, sets, order IDs... or paste multiple orders"
             className="app-input"
             autoComplete="off"
@@ -167,19 +200,10 @@ export default function AppGlobalSearch() {
           >
             {isPending ? 'Searching...' : 'Search'}
           </button>
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isBusy}
-            className="app-button whitespace-nowrap disabled:opacity-60"
-          >
-            {isOcrRunning ? 'Reading...' : 'Upload'}
-          </button>
         </div>
 
         <div className="text-[11px] text-zinc-500">
-          Paste order numbers, copied email text, player, set, breaker, team, notes, or upload a screenshot.
+          Paste order numbers, copied email text, player, set, breaker, team, notes, etc...
         </div>
 
         {status ? <div className="text-[11px] text-zinc-400">{status}</div> : null}

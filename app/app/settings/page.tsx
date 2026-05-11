@@ -9,11 +9,15 @@ type ThemeOption = {
 }
 
 const THEME_OPTIONS: ThemeOption[] = [
-  { value: 'dark-pro', label: 'HITS Blackout' },
   { value: 'hits', label: 'HITS Blue & Gold' },
   { value: 'light', label: 'HITS Light' },
   { value: 'retro-terminal', label: 'Retro Terminal' },
 ]
+
+function normalizeTheme(theme: string | null) {
+  if (!theme || theme === 'dark-pro') return 'hits'
+  return THEME_OPTIONS.some((option) => option.value === theme) ? theme : 'hits'
+}
 
 function applyTheme(theme: string) {
   document.documentElement.setAttribute('data-theme', theme)
@@ -21,12 +25,13 @@ function applyTheme(theme: string) {
 }
 
 export default function SettingsPage() {
-  const [selectedTheme, setSelectedTheme] = useState('dark-pro')
+  const [selectedTheme, setSelectedTheme] = useState('hits')
 
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem('theme') || 'dark-pro'
+    const savedTheme = normalizeTheme(window.localStorage.getItem('theme'))
     setSelectedTheme(savedTheme)
     document.documentElement.setAttribute('data-theme', savedTheme)
+    window.localStorage.setItem('theme', savedTheme)
   }, [])
 
   function handleThemeChange(theme: string) {
@@ -35,7 +40,7 @@ export default function SettingsPage() {
   }
 
   const selectedThemeLabel =
-    THEME_OPTIONS.find((theme) => theme.value === selectedTheme)?.label || 'HITS Blackout'
+    THEME_OPTIONS.find((theme) => theme.value === selectedTheme)?.label || 'HITS Blue & Gold'
 
   return (
     <div className="app-page-wide">
