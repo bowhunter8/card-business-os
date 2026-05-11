@@ -96,13 +96,11 @@ export default async function AppLayout({
         <aside className="app-section border-r border-zinc-900 bg-black md:sticky md:top-0 md:h-screen md:self-start md:overflow-y-auto">
           <div className="mb-6">
             <img
-              src="/hits-logo.png"
+              src="/hits-icon.png"
               alt="HITS Inventory & Profit Tax Tracking"
               className="h-auto w-full max-w-[225px] object-contain"
             />
-            <div className="mt-2 text-xs app-subtitle leading-tight">
-              Inventory & Profit Tax Tracking
-            </div>
+            
           </div>
 
           <nav className="space-y-2">
