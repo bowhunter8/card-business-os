@@ -14,6 +14,7 @@ import {
 import {
   deleteReportPresetAction,
   saveReportPresetAction,
+  toggleFavoriteReportPresetAction,
 } from '@/app/app/reports/actions'
 import type { UserReportPresetRow } from '@/lib/reports/user-report-presets'
 import {
@@ -25,6 +26,7 @@ import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
 import ReportSummaryCards from '@/app/app/components/reports/ReportSummaryCards'
 import ReportTable from '@/app/app/components/reports/ReportTable'
+import ReportUserPresetList from '@/app/app/components/reports/ReportUserPresetList'
 
 type SearchParams = Promise<{
   year?: string
@@ -772,55 +774,26 @@ export default async function ExpensesReportPage({
           ))}
         </div>
 
-        {userExpensePresets.length > 0 ? (
-          <div className="border-t border-zinc-800 pt-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Saved Presets
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {userExpensePresets.map((preset) => (
-                <div
-                  key={preset.id}
-                  className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950 pr-1"
-                >
-                  <PresetShortcut
-                    href={buildPresetHref('/app/reports/expenses', {
-                      id: preset.id,
-                      reportType: 'expenses',
-                      name: preset.name,
-                      description: preset.description || '',
-                      params: preset.params,
-                    })}
-                    label={preset.name}
-                  />
-
-                  <form action={deleteReportPresetAction}>
-                    <input
-                      type="hidden"
-                      name="presetId"
-                      value={preset.id}
-                    />
-
-                    <input
-                      type="hidden"
-                      name="returnPath"
-                      value="/app/reports/expenses"
-                    />
-
-                    <button
-                      type="submit"
-                      className="rounded-full border border-red-900 bg-red-950/40 px-2 py-0.5 text-xs font-semibold text-red-200 transition hover:bg-red-900/40"
-                      title="Delete preset"
-                    >
-                      ×
-                    </button>
-                  </form>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
+        <ReportUserPresetList
+          presets={userExpensePresets.map((preset) => ({
+            id: preset.id,
+            name: preset.name,
+            description: preset.description,
+            is_favorite: Boolean(
+              (preset as UserReportPresetRow & { is_favorite?: boolean | null }).is_favorite
+            ),
+            href: buildPresetHref('/app/reports/expenses', {
+              id: preset.id,
+              reportType: 'expenses',
+              name: preset.name,
+              description: preset.description || '',
+              params: preset.params,
+            }),
+          }))}
+          returnPath="/app/reports/expenses"
+          onDeleteAction={deleteReportPresetAction}
+          onFavoriteAction={toggleFavoriteReportPresetAction}
+        />
       </section>
 
       <ReportSummaryCards

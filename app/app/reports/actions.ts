@@ -29,7 +29,11 @@ function cleanReturnPath(value: FormDataEntryValue | null) {
   return raw
 }
 
-export async function saveReportPresetAction(formData: FormData) {
+function cleanPresetId(value: FormDataEntryValue | null) {
+  return String(value || '').trim()
+}
+
+async function requireSignedInUser() {
   const supabase = await createClient()
 
   const {
@@ -37,8 +41,14 @@ export async function saveReportPresetAction(formData: FormData) {
   } = await supabase.auth.getUser()
 
   if (!user) {
-    throw new Error('You must be signed in to save a report preset.')
+    throw new Error('You must be signed in to manage report presets.')
   }
+
+  return { supabase, user }
+}
+
+export async function saveReportPresetAction(formData: FormData) {
+  const { supabase, user } = await requireSignedInUser()
 
   const reportTypeRaw = String(formData.get('reportType') || '')
   const name = normalizeUserReportPresetName(String(formData.get('name') || ''))
@@ -56,7 +66,18 @@ export async function saveReportPresetAction(formData: FormData) {
   const params: Record<string, string> = {}
 
   for (const [key, value] of formData.entries()) {
-    if (['reportType', 'name', 'description', 'returnPath'].includes(key)) continue
+    if (
+      [
+        'reportType',
+        'name',
+        'description',
+        'returnPath',
+        'presetId',
+        'isFavorite',
+      ].includes(key)
+    ) {
+      continue
+    }
 
     const clean = String(value ?? '').trim()
     if (clean) params[key] = clean
@@ -68,6 +89,7 @@ export async function saveReportPresetAction(formData: FormData) {
     name,
     description: description || null,
     params,
+    is_favorite: false,
   })
 
   if (error) {
@@ -78,17 +100,9 @@ export async function saveReportPresetAction(formData: FormData) {
 }
 
 export async function deleteReportPresetAction(formData: FormData) {
-  const supabase = await createClient()
+  const { supabase, user } = await requireSignedInUser()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    throw new Error('You must be signed in to delete a report preset.')
-  }
-
-  const presetId = String(formData.get('presetId') || '').trim()
+  const presetId = cleanPresetId(formData.get('presetId'))
   const returnPath = cleanReturnPath(formData.get('returnPath'))
 
   if (!presetId) {
@@ -103,6 +117,66 @@ export async function deleteReportPresetAction(formData: FormData) {
 
   if (error) {
     throw new Error(`Could not delete report preset: ${error.message}`)
+  }
+
+  revalidatePath(returnPath)
+}
+
+export async function updateReportPresetAction(formData: FormData) {
+  const { supabase, user } = await requireSignedInUser()
+
+  const presetId = cleanPresetId(formData.get('presetId'))
+  const name = normalizeUserReportPresetName(String(formData.get('name') || ''))
+  const description = String(formData.get('description') || '').trim()
+  const returnPath = cleanReturnPath(formData.get('returnPath'))
+
+  if (!presetId) {
+    throw new Error('Missing preset id.')
+  }
+
+  if (!isValidUserReportPresetName(name)) {
+    throw new Error('Preset name must be at least 2 characters.')
+  }
+
+  const { error } = await supabase
+    .from('user_report_presets')
+    .update({
+      name,
+      description: description || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', presetId)
+    .eq('user_id', user.id)
+
+  if (error) {
+    throw new Error(`Could not update report preset: ${error.message}`)
+  }
+
+  revalidatePath(returnPath)
+}
+
+export async function toggleFavoriteReportPresetAction(formData: FormData) {
+  const { supabase, user } = await requireSignedInUser()
+
+  const presetId = cleanPresetId(formData.get('presetId'))
+  const returnPath = cleanReturnPath(formData.get('returnPath'))
+  const nextFavorite = String(formData.get('isFavorite') || '') === 'true'
+
+  if (!presetId) {
+    throw new Error('Missing preset id.')
+  }
+
+  const { error } = await supabase
+    .from('user_report_presets')
+    .update({
+      is_favorite: nextFavorite,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', presetId)
+    .eq('user_id', user.id)
+
+  if (error) {
+    throw new Error(`Could not update favorite preset: ${error.message}`)
   }
 
   revalidatePath(returnPath)
