@@ -517,6 +517,17 @@ export default async function SalesReportPage({
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedPlatform ? { platform: selectedPlatform } : {}),
             }).toString()}`}
+            printHref={`/api/reports/sales/print?${new URLSearchParams({
+              year: String(selectedYear),
+              period: selectedPeriod,
+              startDate,
+              endDate,
+              ...(selectedStart ? { start: selectedStart } : {}),
+              ...(selectedEnd ? { end: selectedEnd } : {}),
+              ...(selectedMonth ? { month: String(selectedMonth) } : {}),
+              ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
+              ...(selectedPlatform ? { platform: selectedPlatform } : {}),
+            }).toString()}`}
           />
         </div>
       </div>

@@ -349,6 +349,30 @@ export default async function InventoryReportPage({
         : {}),
     }).toString()
   }`}
+  printHref={`/api/reports/inventory/print?${
+    new URLSearchParams({
+      ...(search ? { q: search } : {}),
+      ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+      ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
+      ...(startDate ? { startDate } : {}),
+      ...(endDate ? { endDate } : {}),
+      ...(resolvedSearchParams.period
+        ? { period: resolvedSearchParams.period }
+        : {}),
+      ...(resolvedSearchParams.date
+        ? { date: resolvedSearchParams.date }
+        : {}),
+      ...(resolvedSearchParams.year
+        ? { year: resolvedSearchParams.year }
+        : {}),
+      ...(resolvedSearchParams.month
+        ? { month: resolvedSearchParams.month }
+        : {}),
+      ...(resolvedSearchParams.quarter
+        ? { quarter: resolvedSearchParams.quarter }
+        : {}),
+    }).toString()
+  }`}
 />
         </div>
       </div>

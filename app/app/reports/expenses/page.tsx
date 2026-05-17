@@ -504,6 +504,15 @@ export default async function ExpensesReportPage({
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedCategory ? { category: selectedCategory } : {}),
             }).toString()}`}
+            printHref={`/api/reports/expenses/print?${new URLSearchParams({
+              year: String(selectedYear),
+              period: selectedPeriod,
+              ...(selectedStart ? { start: selectedStart } : {}),
+              ...(selectedEnd ? { end: selectedEnd } : {}),
+              ...(selectedMonth ? { month: String(selectedMonth) } : {}),
+              ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
+              ...(selectedCategory ? { category: selectedCategory } : {}),
+            }).toString()}`}
           />
         </div>
       </div>
