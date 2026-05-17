@@ -8,6 +8,11 @@ export type ReportPreset = {
   params: Record<string, string>
 }
 
+export type ReportPresetSearchParams = Record<
+  string,
+  string | number | null | undefined
+>
+
 export const BUILT_IN_REPORT_PRESETS: ReportPreset[] = [
   {
     id: 'inventory-available',
@@ -83,6 +88,10 @@ export const BUILT_IN_REPORT_PRESETS: ReportPreset[] = [
   },
 ]
 
+function normalizeParamValue(value: string | number | null | undefined) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
 export function getReportPresets(reportType?: ReportPresetType) {
   if (!reportType) {
     return BUILT_IN_REPORT_PRESETS
@@ -97,4 +106,30 @@ export function buildPresetHref(basePath: string, preset: ReportPreset) {
   const query = searchParams.toString()
 
   return `${basePath}${query ? `?${query}` : ''}`
+}
+
+export function isReportPresetActive(
+  preset: ReportPreset,
+  searchParams: ReportPresetSearchParams
+) {
+  return Object.entries(preset.params).every(([key, presetValue]) => {
+    return normalizeParamValue(searchParams[key]) === normalizeParamValue(presetValue)
+  })
+}
+
+export function getActiveReportPreset(
+  reportType: ReportPresetType,
+  searchParams: ReportPresetSearchParams
+) {
+  return getReportPresets(reportType).find((preset) =>
+    isReportPresetActive(preset, searchParams)
+  )
+}
+
+export function reportPresetShortcutClass(active: boolean) {
+  if (active) {
+    return 'rounded-full border border-emerald-700 bg-emerald-950/60 px-3 py-1 text-xs font-semibold text-emerald-200 shadow-sm shadow-emerald-950/40'
+  }
+
+  return 'rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900'
 }

@@ -7,7 +7,9 @@ import {
 } from '@/lib/reports/report-url-utils'
 import {
   buildPresetHref,
+  getActiveReportPreset,
   getReportPresets,
+  reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
@@ -289,14 +291,16 @@ function buildItemName(item: InventoryRow | undefined) {
 function PresetShortcut({
   href,
   label,
+  active = false,
 }: {
   href: string
   label: string
+  active?: boolean
 }) {
   return (
     <Link
       href={href}
-      className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900"
+      className={reportPresetShortcutClass(active)}
     >
       {label}
     </Link>
@@ -504,6 +508,10 @@ export default async function SalesReportPage({
 
   const salesPresets = getReportPresets('sales')
 
+  const activePreset = getActiveReportPreset('sales', {
+    period: periodToSharedFilterValue(selectedPeriod),
+  })
+
   return (
     <div className="app-page-wide space-y-4">
       <div className="app-page-header">
@@ -646,6 +654,7 @@ export default async function SalesReportPage({
               key={preset.id}
               href={buildPresetHref('/app/reports/sales', preset)}
               label={preset.name}
+              active={activePreset?.id === preset.id}
             />
           ))}
         </div>
