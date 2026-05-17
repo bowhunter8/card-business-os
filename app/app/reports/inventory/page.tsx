@@ -11,7 +11,10 @@ import {
   getReportPresets,
   reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
-import { saveReportPresetAction } from '@/app/app/reports/actions'
+import {
+  deleteReportPresetAction,
+  saveReportPresetAction,
+} from '@/app/app/reports/actions'
 import type { UserReportPresetRow } from '@/lib/reports/user-report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
@@ -606,17 +609,43 @@ export default async function InventoryReportPage({
 
             <div className="flex flex-wrap gap-2">
               {userInventoryPresets.map((preset) => (
-                <PresetShortcut
+                <div
                   key={preset.id}
-                  href={buildPresetHref('/app/reports/inventory', {
-                    id: preset.id,
-                    reportType: 'inventory',
-                    name: preset.name,
-                    description: preset.description || '',
-                    params: preset.params,
-                  })}
-                  label={preset.name}
-                />
+                  className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950 pr-1"
+                >
+                  <PresetShortcut
+                    href={buildPresetHref('/app/reports/inventory', {
+                      id: preset.id,
+                      reportType: 'inventory',
+                      name: preset.name,
+                      description: preset.description || '',
+                      params: preset.params,
+                    })}
+                    label={preset.name}
+                  />
+
+                  <form action={deleteReportPresetAction}>
+                    <input
+                      type="hidden"
+                      name="presetId"
+                      value={preset.id}
+                    />
+
+                    <input
+                      type="hidden"
+                      name="returnPath"
+                      value="/app/reports/inventory"
+                    />
+
+                    <button
+                      type="submit"
+                      className="rounded-full border border-red-900 bg-red-950/40 px-2 py-0.5 text-xs font-semibold text-red-200 transition hover:bg-red-900/40"
+                      title="Delete preset"
+                    >
+                      ×
+                    </button>
+                  </form>
+                </div>
               ))}
             </div>
           </div>
