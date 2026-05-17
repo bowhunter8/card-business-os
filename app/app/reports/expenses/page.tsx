@@ -12,6 +12,7 @@ import {
   reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
 import { saveReportPresetAction } from '@/app/app/reports/actions'
+import type { UserReportPresetRow } from '@/lib/reports/user-report-presets'
 import {
   getExpenseCategoryOptions,
   getExpenseScheduleCArea,
@@ -408,13 +409,19 @@ export default async function ExpensesReportPage({
     expensesQuery = expensesQuery.eq('category', selectedCategory)
   }
 
-  const [expensesRes, categoriesRes] = await Promise.all([
+  const [expensesRes, categoriesRes, userPresetsRes] = await Promise.all([
     expensesQuery,
     supabase
       .from('expenses')
       .select('category')
       .eq('user_id', user.id)
       .order('category', { ascending: true }),
+    supabase
+      .from('user_report_presets')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('report_type', 'expenses')
+      .order('created_at', { ascending: false }),
   ])
 
   const expenses: ExpenseRow[] = (expensesRes.data ?? []) as ExpenseRow[]
@@ -496,6 +503,9 @@ export default async function ExpensesReportPage({
   })
 
   const expensePresets = getReportPresets('expenses')
+
+  const userExpensePresets =
+    (userPresetsRes.data ?? []) as UserReportPresetRow[]
 
   const activePreset = getActiveReportPreset('expenses', {
     period: periodToSharedFilterValue(selectedPeriod),
@@ -758,6 +768,30 @@ export default async function ExpensesReportPage({
             />
           ))}
         </div>
+
+        {userExpensePresets.length > 0 ? (
+          <div className="border-t border-zinc-800 pt-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Saved Presets
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {userExpensePresets.map((preset) => (
+                <PresetShortcut
+                  key={preset.id}
+                  href={buildPresetHref('/app/reports/expenses', {
+                    id: preset.id,
+                    reportType: 'expenses',
+                    name: preset.name,
+                    description: preset.description || '',
+                    params: preset.params,
+                  })}
+                  label={preset.name}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <ReportSummaryCards

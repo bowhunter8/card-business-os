@@ -12,6 +12,7 @@ import {
   reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
 import { saveReportPresetAction } from '@/app/app/reports/actions'
+import type { UserReportPresetRow } from '@/lib/reports/user-report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -373,8 +374,20 @@ export default async function SalesReportPage({
     salesQuery = salesQuery.eq('platform', selectedPlatform)
   }
 
-  const salesRes = await salesQuery
+  const [salesRes, userPresetsRes] = await Promise.all([
+    salesQuery,
+    supabase
+      .from('user_report_presets')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('report_type', 'sales')
+      .order('created_at', { ascending: false }),
+  ])
+
   const sales: SaleRow[] = (salesRes.data ?? []) as SaleRow[]
+
+  const userSalesPresets =
+    (userPresetsRes.data ?? []) as UserReportPresetRow[]
 
   const inventoryIds = Array.from(
     new Set(
@@ -728,6 +741,30 @@ export default async function SalesReportPage({
             />
           ))}
         </div>
+
+        {userSalesPresets.length > 0 ? (
+          <div className="border-t border-zinc-800 pt-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Saved Presets
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {userSalesPresets.map((preset) => (
+                <PresetShortcut
+                  key={preset.id}
+                  href={buildPresetHref('/app/reports/sales', {
+                    id: preset.id,
+                    reportType: 'sales',
+                    name: preset.name,
+                    description: preset.description || '',
+                    params: preset.params,
+                  })}
+                  label={preset.name}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <ReportSummaryCards

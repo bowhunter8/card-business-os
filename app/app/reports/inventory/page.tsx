@@ -12,6 +12,7 @@ import {
   reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
 import { saveReportPresetAction } from '@/app/app/reports/actions'
+import type { UserReportPresetRow } from '@/lib/reports/user-report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -299,10 +300,26 @@ export default async function InventoryReportPage({
 
   const supabase = await createClient()
 
-  const { data: inventoryItemsRaw, error } = await supabase
-    .from('inventory_items')
-    .select('*')
-    .order('created_at', { ascending: false })
+  const [
+    inventoryItemsResponse,
+    userPresetsResponse,
+  ] = await Promise.all([
+    supabase
+      .from('inventory_items')
+      .select('*')
+      .order('created_at', { ascending: false }),
+
+    supabase
+      .from('user_report_presets')
+      .select('*')
+      .eq('report_type', 'inventory')
+      .order('created_at', { ascending: false }),
+  ])
+
+  const { data: inventoryItemsRaw, error } = inventoryItemsResponse
+
+  const userInventoryPresets =
+    (userPresetsResponse.data ?? []) as UserReportPresetRow[]
 
   const allInventoryItems = (inventoryItemsRaw || []) as InventoryItemRow[]
 
@@ -580,6 +597,30 @@ export default async function InventoryReportPage({
             />
           ))}
         </div>
+
+        {userInventoryPresets.length > 0 ? (
+          <div className="border-t border-zinc-800 pt-3">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Saved Presets
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {userInventoryPresets.map((preset) => (
+                <PresetShortcut
+                  key={preset.id}
+                  href={buildPresetHref('/app/reports/inventory', {
+                    id: preset.id,
+                    reportType: 'inventory',
+                    name: preset.name,
+                    description: preset.description || '',
+                    params: preset.params,
+                  })}
+                  label={preset.name}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <ReportSummaryCards
