@@ -1,5 +1,10 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import {
+  buildReportCsvHref,
+  buildReportPdfHref,
+  buildReportPrintHref,
+} from '@/lib/reports/report-url-utils'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -228,28 +233,20 @@ function buildInventoryHref(search: string, selectedStatus: string) {
 }
 
 function buildInventoryCsvHref(params: SearchParams) {
-  const query = new URLSearchParams()
-
-  const addParam = (key: keyof SearchParams, value: string | undefined) => {
-    const clean = value?.trim()
-    if (clean) query.set(key, clean)
-  }
-
-  addParam('q', params.q)
-  addParam('status', params.status)
-  addParam('value', params.value)
-  addParam('period', params.period)
-  addParam('date', params.date)
-  addParam('year', params.year)
-  addParam('month', params.month)
-  addParam('quarter', params.quarter)
-  addParam('startDate', params.startDate || params.dateFrom)
-  addParam('endDate', params.endDate || params.dateTo)
-  addParam('dateFrom', params.dateFrom || params.startDate)
-  addParam('dateTo', params.dateTo || params.endDate)
-
-  const queryString = query.toString()
-  return `/api/reports/inventory/export${queryString ? `?${queryString}` : ''}`
+  return buildReportCsvHref('inventory', {
+    q: params.q,
+    status: params.status,
+    value: params.value,
+    period: params.period,
+    date: params.date,
+    year: params.year,
+    month: params.month,
+    quarter: params.quarter,
+    startDate: params.startDate || params.dateFrom,
+    endDate: params.endDate || params.dateTo,
+    dateFrom: params.dateFrom || params.startDate,
+    dateTo: params.dateTo || params.endDate,
+  })
 }
 
 export default async function InventoryReportPage({
@@ -325,54 +322,50 @@ export default async function InventoryReportPage({
 
           <ReportExportButtons
   csvHref={csvHref}
-  pdfHref={`/api/reports/inventory/PDF?${
-    new URLSearchParams({
-      ...(search ? { q: search } : {}),
-      ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
-      ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-      ...(resolvedSearchParams.period
-        ? { period: resolvedSearchParams.period }
-        : {}),
-      ...(resolvedSearchParams.date
-        ? { date: resolvedSearchParams.date }
-        : {}),
-      ...(resolvedSearchParams.year
-        ? { year: resolvedSearchParams.year }
-        : {}),
-      ...(resolvedSearchParams.month
-        ? { month: resolvedSearchParams.month }
-        : {}),
-      ...(resolvedSearchParams.quarter
-        ? { quarter: resolvedSearchParams.quarter }
-        : {}),
-    }).toString()
-  }`}
-  printHref={`/api/reports/inventory/print?${
-    new URLSearchParams({
-      ...(search ? { q: search } : {}),
-      ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
-      ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
-      ...(startDate ? { startDate } : {}),
-      ...(endDate ? { endDate } : {}),
-      ...(resolvedSearchParams.period
-        ? { period: resolvedSearchParams.period }
-        : {}),
-      ...(resolvedSearchParams.date
-        ? { date: resolvedSearchParams.date }
-        : {}),
-      ...(resolvedSearchParams.year
-        ? { year: resolvedSearchParams.year }
-        : {}),
-      ...(resolvedSearchParams.month
-        ? { month: resolvedSearchParams.month }
-        : {}),
-      ...(resolvedSearchParams.quarter
-        ? { quarter: resolvedSearchParams.quarter }
-        : {}),
-    }).toString()
-  }`}
+  pdfHref={buildReportPdfHref('inventory', {
+    ...(search ? { q: search } : {}),
+    ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+    ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+    ...(resolvedSearchParams.period
+      ? { period: resolvedSearchParams.period }
+      : {}),
+    ...(resolvedSearchParams.date
+      ? { date: resolvedSearchParams.date }
+      : {}),
+    ...(resolvedSearchParams.year
+      ? { year: resolvedSearchParams.year }
+      : {}),
+    ...(resolvedSearchParams.month
+      ? { month: resolvedSearchParams.month }
+      : {}),
+    ...(resolvedSearchParams.quarter
+      ? { quarter: resolvedSearchParams.quarter }
+      : {}),
+  })}
+  printHref={buildReportPrintHref('inventory', {
+    ...(search ? { q: search } : {}),
+    ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+    ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+    ...(resolvedSearchParams.period
+      ? { period: resolvedSearchParams.period }
+      : {}),
+    ...(resolvedSearchParams.date
+      ? { date: resolvedSearchParams.date }
+      : {}),
+    ...(resolvedSearchParams.year
+      ? { year: resolvedSearchParams.year }
+      : {}),
+    ...(resolvedSearchParams.month
+      ? { month: resolvedSearchParams.month }
+      : {}),
+    ...(resolvedSearchParams.quarter
+      ? { quarter: resolvedSearchParams.quarter }
+      : {}),
+  })}
 />
         </div>
       </div>

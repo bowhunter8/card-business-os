@@ -1,5 +1,10 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import {
+  buildReportCsvHref,
+  buildReportPdfHref,
+  buildReportPrintHref,
+} from '@/lib/reports/report-url-utils'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -250,17 +255,17 @@ function buildSalesCsvHref(params: {
   quarter?: number
   platform?: string
 }) {
-  const searchParams = new URLSearchParams()
-  searchParams.set('year', String(params.year))
-  searchParams.set('period', params.period)
-  searchParams.set('startDate', params.startDate)
-  searchParams.set('endDate', params.endDate)
-  if (params.start) searchParams.set('start', params.start)
-  if (params.end) searchParams.set('end', params.end)
-  if (params.month) searchParams.set('month', String(params.month))
-  if (params.quarter) searchParams.set('quarter', String(params.quarter))
-  if (params.platform) searchParams.set('platform', params.platform)
-  return `/api/reports/sales/export?${searchParams.toString()}`
+  return buildReportCsvHref('sales', {
+    year: String(params.year),
+    period: params.period,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    ...(params.start ? { start: params.start } : {}),
+    ...(params.end ? { end: params.end } : {}),
+    ...(params.month ? { month: String(params.month) } : {}),
+    ...(params.quarter ? { quarter: String(params.quarter) } : {}),
+    ...(params.platform ? { platform: params.platform } : {}),
+  })
 }
 
 function buildItemName(item: InventoryRow | undefined) {
@@ -506,7 +511,7 @@ export default async function SalesReportPage({
               quarter: selectedQuarter,
               platform: selectedPlatform,
             })}
-            pdfHref={`/api/reports/sales/PDF?${new URLSearchParams({
+            pdfHref={buildReportPdfHref('sales', {
               year: String(selectedYear),
               period: selectedPeriod,
               startDate,
@@ -516,8 +521,8 @@ export default async function SalesReportPage({
               ...(selectedMonth ? { month: String(selectedMonth) } : {}),
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedPlatform ? { platform: selectedPlatform } : {}),
-            }).toString()}`}
-            printHref={`/api/reports/sales/print?${new URLSearchParams({
+            })}
+            printHref={buildReportPrintHref('sales', {
               year: String(selectedYear),
               period: selectedPeriod,
               startDate,
@@ -527,7 +532,7 @@ export default async function SalesReportPage({
               ...(selectedMonth ? { month: String(selectedMonth) } : {}),
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedPlatform ? { platform: selectedPlatform } : {}),
-            }).toString()}`}
+            })}
           />
         </div>
       </div>

@@ -1,6 +1,11 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import {
+  buildReportCsvHref,
+  buildReportPdfHref,
+  buildReportPrintHref,
+} from '@/lib/reports/report-url-utils'
+import {
   getExpenseCategoryOptions,
   getExpenseScheduleCArea,
 } from '@/lib/reports/expense-categories'
@@ -486,7 +491,7 @@ export default async function ExpensesReportPage({
           </Link>
 
           <ReportExportButtons
-            csvHref={`/api/reports/expenses/export?${new URLSearchParams({
+            csvHref={buildReportCsvHref('expenses', {
               year: String(selectedYear),
               period: selectedPeriod,
               ...(selectedStart ? { start: selectedStart } : {}),
@@ -494,8 +499,8 @@ export default async function ExpensesReportPage({
               ...(selectedMonth ? { month: String(selectedMonth) } : {}),
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedCategory ? { category: selectedCategory } : {}),
-            }).toString()}`}
-            pdfHref={`/api/reports/expenses/PDF?${new URLSearchParams({
+            })}
+            pdfHref={buildReportPdfHref('expenses', {
               year: String(selectedYear),
               period: selectedPeriod,
               ...(selectedStart ? { start: selectedStart } : {}),
@@ -503,8 +508,8 @@ export default async function ExpensesReportPage({
               ...(selectedMonth ? { month: String(selectedMonth) } : {}),
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedCategory ? { category: selectedCategory } : {}),
-            }).toString()}`}
-            printHref={`/api/reports/expenses/print?${new URLSearchParams({
+            })}
+            printHref={buildReportPrintHref('expenses', {
               year: String(selectedYear),
               period: selectedPeriod,
               ...(selectedStart ? { start: selectedStart } : {}),
@@ -512,7 +517,7 @@ export default async function ExpensesReportPage({
               ...(selectedMonth ? { month: String(selectedMonth) } : {}),
               ...(selectedQuarter ? { quarter: String(selectedQuarter) } : {}),
               ...(selectedCategory ? { category: selectedCategory } : {}),
-            }).toString()}`}
+            })}
           />
         </div>
       </div>
