@@ -11,6 +11,7 @@ import {
   getReportPresets,
   reportPresetShortcutClass,
 } from '@/lib/reports/report-presets'
+import { saveReportPresetAction } from '@/app/app/reports/actions'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -628,6 +629,75 @@ export default async function SalesReportPage({
           <div className="mt-1 text-xs text-zinc-500">
             This page is read-only. Add, edit, delete, and reversal actions stay on the normal Sales page.
           </div>
+        </div>
+      </section>
+
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">
+              Save Current Report Preset
+            </h2>
+
+            <p className="text-sm text-zinc-400">
+              Save the current filters as a reusable sales report preset.
+            </p>
+          </div>
+
+          <form
+            action={saveReportPresetAction}
+            className="flex flex-wrap items-end gap-2"
+          >
+            <input type="hidden" name="reportType" value="sales" />
+            <input type="hidden" name="returnPath" value="/app/reports/sales" />
+
+            <input type="hidden" name="year" value={String(selectedYear)} />
+            <input type="hidden" name="period" value={selectedPeriod} />
+            <input type="hidden" name="startDate" value={startDate} />
+            <input type="hidden" name="endDate" value={endDate} />
+            <input type="hidden" name="platform" value={selectedPlatform} />
+            <input
+              type="hidden"
+              name="start"
+              value={selectedStart || ''}
+            />
+            <input
+              type="hidden"
+              name="end"
+              value={selectedEnd || ''}
+            />
+            <input
+              type="hidden"
+              name="month"
+              value={String(selectedMonth || '')}
+            />
+            <input
+              type="hidden"
+              name="quarter"
+              value={String(selectedQuarter || '')}
+            />
+
+            <label className="block min-w-[220px]">
+              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Preset Name
+              </span>
+
+              <input
+                type="text"
+                name="name"
+                required
+                placeholder="Monthly Sales Review"
+                className="app-input h-9 text-sm"
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="app-button-primary h-9 whitespace-nowrap px-3 text-sm"
+            >
+              Save Preset
+            </button>
+          </form>
         </div>
       </section>
 
