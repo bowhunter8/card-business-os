@@ -5,6 +5,10 @@ import {
   buildReportPdfHref,
   buildReportPrintHref,
 } from '@/lib/reports/report-url-utils'
+import {
+  buildPresetHref,
+  getReportPresets,
+} from '@/lib/reports/report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -282,6 +286,23 @@ function buildItemName(item: InventoryRow | undefined) {
   return parts.filter(Boolean).join(' • ') || item.title || 'Untitled item'
 }
 
+function PresetShortcut({
+  href,
+  label,
+}: {
+  href: string
+  label: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900"
+    >
+      {label}
+    </Link>
+  )
+}
+
 function platformKey(value: string | null | undefined) {
   return String(value || 'Unknown').trim() || 'Unknown'
 }
@@ -481,6 +502,8 @@ export default async function SalesReportPage({
     warnings.push('No major sales report warnings were detected from this summary.')
   }
 
+  const salesPresets = getReportPresets('sales')
+
   return (
     <div className="app-page-wide space-y-4">
       <div className="app-page-header">
@@ -597,6 +620,34 @@ export default async function SalesReportPage({
           <div className="mt-1 text-xs text-zinc-500">
             This page is read-only. Add, edit, delete, and reversal actions stay on the normal Sales page.
           </div>
+        </div>
+      </section>
+
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">
+              Sales Presets
+            </h2>
+
+            <p className="text-sm text-zinc-400">
+              Quick-launch sales report filters for common review and accounting workflows.
+            </p>
+          </div>
+
+          <div className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-300">
+            Shared Presets Active
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {salesPresets.map((preset) => (
+            <PresetShortcut
+              key={preset.id}
+              href={buildPresetHref('/app/reports/sales', preset)}
+              label={preset.name}
+            />
+          ))}
         </div>
       </section>
 

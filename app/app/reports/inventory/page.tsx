@@ -5,6 +5,10 @@ import {
   buildReportPdfHref,
   buildReportPrintHref,
 } from '@/lib/reports/report-url-utils'
+import {
+  buildPresetHref,
+  getReportPresets,
+} from '@/lib/reports/report-presets'
 
 import ReportDateFilters from '@/app/app/components/reports/ReportDateFilters'
 import ReportExportButtons from '@/app/app/components/reports/ReportExportButtons'
@@ -249,6 +253,24 @@ function buildInventoryCsvHref(params: SearchParams) {
   })
 }
 
+
+function PresetShortcut({
+  href,
+  label,
+}: {
+  href: string
+  label: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900"
+    >
+      {label}
+    </Link>
+  )
+}
+
 export default async function InventoryReportPage({
   searchParams,
 }: {
@@ -303,6 +325,8 @@ export default async function InventoryReportPage({
   const allStatuses = Array.from(
     new Set(allInventoryItems.map((item) => normalizeStatus(item.status)).filter(Boolean))
   ).sort((a, b) => a.localeCompare(b))
+
+  const inventoryPresets = getReportPresets('inventory')
 
   return (
     <main className="app-page space-y-4">
@@ -446,6 +470,35 @@ export default async function InventoryReportPage({
           </>
         </ReportDateFilters>
       </form>
+
+
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">
+              Inventory Presets
+            </h2>
+
+            <p className="text-sm text-zinc-400">
+              Quick-launch inventory report filters for common review workflows.
+            </p>
+          </div>
+
+          <div className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-300">
+            Shared Presets Active
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {inventoryPresets.map((preset) => (
+            <PresetShortcut
+              key={preset.id}
+              href={buildPresetHref('/app/reports/inventory', preset)}
+              label={preset.name}
+            />
+          ))}
+        </div>
+      </section>
 
       <ReportSummaryCards
         cards={[

@@ -6,6 +6,10 @@ import {
   buildReportPrintHref,
 } from '@/lib/reports/report-url-utils'
 import {
+  buildPresetHref,
+  getReportPresets,
+} from '@/lib/reports/report-presets'
+import {
   getExpenseCategoryOptions,
   getExpenseScheduleCArea,
 } from '@/lib/reports/expense-categories'
@@ -259,6 +263,23 @@ function normalizeCategoryFilter(raw?: string) {
   return value
 }
 
+function PresetShortcut({
+  href,
+  label,
+}: {
+  href: string
+  label: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-full border border-zinc-800 bg-zinc-950 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:bg-zinc-900"
+    >
+      {label}
+    </Link>
+  )
+}
+
 function buildWarnings({
   expenses,
   categoryRows,
@@ -469,6 +490,8 @@ export default async function ExpensesReportPage({
     selectedPeriod,
   })
 
+  const expensePresets = getReportPresets('expenses')
+
   return (
     <div className="app-page-wide space-y-4">
       <div className="app-page-header">
@@ -626,6 +649,34 @@ export default async function ExpensesReportPage({
           <div className="mt-1 text-xs text-zinc-500">
             This page is read-only. Add, edit, delete, and correction actions stay on the normal Expenses page.
           </div>
+        </div>
+      </section>
+
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">
+              Expense Presets
+            </h2>
+
+            <p className="text-sm text-zinc-400">
+              Quick-launch expense report filters for common accounting and tax review workflows.
+            </p>
+          </div>
+
+          <div className="rounded-full border border-emerald-900 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-300">
+            Shared Presets Active
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {expensePresets.map((preset) => (
+            <PresetShortcut
+              key={preset.id}
+              href={buildPresetHref('/app/reports/expenses', preset)}
+              label={preset.name}
+            />
+          ))}
         </div>
       </section>
 
