@@ -176,7 +176,7 @@ export default function ReportDateFilters({
               type="submit"
               className="app-button-primary h-9 whitespace-nowrap px-3 text-sm"
             >
-              Run Report
+              Search
             </button>
 
             <a

@@ -1,14 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+
+type ReportPeriod = "day" | "week" | "month" | "quarter" | "year" | "custom";
 
 type TaxExportButtonProps = {
   year: number;
+  period?: ReportPeriod;
+  startDate?: string;
+  endDate?: string;
+  month?: number;
+  quarter?: number;
+  reportRangeLabel?: string;
   readinessWarnings?: string[];
 };
 
+function safeFilenamePart(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "report";
+}
+
 export default function TaxExportButton({
   year,
+  period = "year",
+  startDate,
+  endDate,
+  month,
+  quarter,
+  reportRangeLabel,
   readinessWarnings = [],
 }: TaxExportButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
@@ -19,13 +41,33 @@ export default function TaxExportButton({
     (warning) => warning.trim().length > 0,
   );
 
+  const exportQueryString = useMemo(() => {
+    const searchParams = new URLSearchParams();
+    searchParams.set("year", String(year));
+    searchParams.set("period", period);
+
+    if (startDate) searchParams.set("start", startDate);
+    if (endDate) searchParams.set("end", endDate);
+    if (month) searchParams.set("month", String(month));
+    if (quarter) searchParams.set("quarter", String(quarter));
+
+    return searchParams.toString();
+  }, [endDate, month, period, quarter, startDate, year]);
+
+  const filenameRange = useMemo(() => {
+    if (period === "year") return String(year);
+    if (startDate && endDate) return `${startDate}-to-${endDate}`;
+    if (startDate) return startDate;
+    return String(year);
+  }, [endDate, period, startDate, year]);
+
   async function runExport() {
     if (isExporting) return;
 
     try {
       setIsExporting(true);
 
-      const response = await fetch(`/api/reports/tax/export?year=${year}`);
+      const response = await fetch(`/api/reports/tax/export?${exportQueryString}`);
 
       if (!response.ok) {
         throw new Error(`Export failed with status ${response.status}`);
@@ -36,7 +78,7 @@ export default function TaxExportButton({
 
       const link = document.createElement("a");
       link.href = url;
-      link.download = `tax-report-${year}.xls`;
+      link.download = `tax-report-${safeFilenamePart(period)}-${safeFilenamePart(filenameRange)}.xls`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -82,6 +124,11 @@ export default function TaxExportButton({
                     Review these items before exporting the {year} tax workbook
                     for TurboTax, CPA review, or filing support.
                   </p>
+                  {reportRangeLabel && (
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-sky-300">
+                      {reportRangeLabel}
+                    </p>
+                  )}
                 </div>
 
                 <button

@@ -1,14 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+
+type ReportPeriod = "day" | "week" | "month" | "quarter" | "year" | "custom";
 
 type TaxPdfExportButtonProps = {
   year: number;
+  period?: ReportPeriod;
+  startDate?: string;
+  endDate?: string;
+  month?: number;
+  quarter?: number;
+  reportRangeLabel?: string;
   readinessWarnings?: string[];
 };
 
+function safeFilenamePart(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "report";
+}
+
 export default function TaxPdfExportButton({
   year,
+  period = "year",
+  startDate,
+  endDate,
+  month,
+  quarter,
+  reportRangeLabel,
   readinessWarnings = [],
 }: TaxPdfExportButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
@@ -19,13 +41,33 @@ export default function TaxPdfExportButton({
     (warning) => warning.trim().length > 0,
   );
 
+  const exportQueryString = useMemo(() => {
+    const searchParams = new URLSearchParams();
+    searchParams.set("year", String(year));
+    searchParams.set("period", period);
+
+    if (startDate) searchParams.set("start", startDate);
+    if (endDate) searchParams.set("end", endDate);
+    if (month) searchParams.set("month", String(month));
+    if (quarter) searchParams.set("quarter", String(quarter));
+
+    return searchParams.toString();
+  }, [endDate, month, period, quarter, startDate, year]);
+
+  const filenameRange = useMemo(() => {
+    if (period === "year") return String(year);
+    if (startDate && endDate) return `${startDate}-to-${endDate}`;
+    if (startDate) return startDate;
+    return String(year);
+  }, [endDate, period, startDate, year]);
+
   async function runExport() {
     if (isExporting) return;
 
     try {
       setIsExporting(true);
 
-      const response = await fetch(`/api/reports/tax/pdf?year=${year}`);
+      const response = await fetch(`/api/reports/tax/pdf?${exportQueryString}`);
 
       if (!response.ok) {
         throw new Error(`PDF export failed with status ${response.status}`);
@@ -36,7 +78,7 @@ export default function TaxPdfExportButton({
 
       const link = document.createElement("a");
       link.href = url;
-      link.download = `tax-summary-${year}.pdf`;
+      link.download = `tax-summary-${safeFilenamePart(period)}-${safeFilenamePart(filenameRange)}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -82,6 +124,11 @@ export default function TaxPdfExportButton({
                     Review these items before exporting the {year} PDF summary
                     for TurboTax, CPA review, or filing support.
                   </p>
+                  {reportRangeLabel && (
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-sky-300">
+                      {reportRangeLabel}
+                    </p>
+                  )}
                 </div>
 
                 <button

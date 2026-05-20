@@ -104,16 +104,16 @@ export default function UtilitiesPage() {
         <div>
           <h2 className="text-base font-semibold">Tax & Reporting</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Review tax-focused summaries and exportable records.
+            Open the main reporting dashboard for tax summaries, financial reports, exports, and inventory review.
           </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
           <UtilityCard
-            href="/app/reports/tax/summary"
-            title="Tax Summary"
-            description="View income, expenses, COGS, and net profit for tax filing."
-            tone="success"
+            href="/app/reports"
+            title="Report Center"
+            description="Open financial reports, year-end tax tools, inventory reports, sales reports, expenses, open lots, COGS, PDF exports, CSV exports, and future dashboards."
+            tone="primary"
           />
         </div>
       </section>

@@ -18,6 +18,20 @@ type Props = {
   today: string
 }
 
+const PLATFORM_OPTIONS = [
+  'eBay',
+  'Whatnot',
+  'Amazon',
+  'Etsy',
+  'Mercari',
+  'Facebook',
+  'Instagram',
+  'Card Show',
+  'Local Sale',
+  'Website',
+  'Custom',
+]
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -40,6 +54,8 @@ export default function SaleEntryForm({
   const [platformFees, setPlatformFees] = useState('0.00')
   const [otherCosts, setOtherCosts] = useState('0.00')
   const [quantitySold, setQuantitySold] = useState('1')
+  const [platformSelection, setPlatformSelection] = useState('')
+  const [customPlatform, setCustomPlatform] = useState('')
 
   const selectedProfile = useMemo(
     () => shippingProfiles.find((p) => p.id === selectedProfileId) ?? null,
@@ -60,6 +76,11 @@ export default function SaleEntryForm({
       Number(profile.supplies_cost_default ?? 0).toFixed(2)
     )
   }
+
+  const platformValue =
+    platformSelection === 'Custom'
+      ? customPlatform.trim()
+      : platformSelection
 
   const grossSaleNum = Number(grossSale || 0)
   const shippingChargedNum = Number(shippingCharged || 0)
@@ -82,6 +103,7 @@ export default function SaleEntryForm({
     >
       <input type="hidden" name="inventory_item_id" value={itemId} />
       <input type="hidden" name="quantity_sold" value={quantitySoldNum} />
+      <input type="hidden" name="platform" value={platformValue} />
 
       {/* DATE */}
       <div>
@@ -107,6 +129,42 @@ export default function SaleEntryForm({
           className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
         />
       </div>
+
+      {/* PLATFORM */}
+      <div>
+        <label className="text-sm text-zinc-300">Platform</label>
+        <select
+          value={platformSelection}
+          onChange={(e) => {
+            setPlatformSelection(e.target.value)
+
+            if (e.target.value !== 'Custom') {
+              setCustomPlatform('')
+            }
+          }}
+          className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-white"
+        >
+          <option value="">Select platform</option>
+          {PLATFORM_OPTIONS.map((platform) => (
+            <option key={platform} value={platform}>
+              {platform}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {platformSelection === 'Custom' ? (
+        <div>
+          <label className="text-sm text-zinc-300">Custom Platform</label>
+          <input
+            type="text"
+            value={customPlatform}
+            onChange={(e) => setCustomPlatform(e.target.value)}
+            placeholder="Enter platform name"
+            className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2"
+          />
+        </div>
+      ) : null}
 
       {/* SALE */}
       <div>

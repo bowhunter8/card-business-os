@@ -407,7 +407,15 @@ export default async function InventoryDetailPage({
           <p className="app-subtitle mt-1 text-sm leading-snug">
             {buildDisplay(item) || item.title || 'Untitled item'}
           </p>
-          <div className="mt-1.5">{renderStatusPill(item.status)}</div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {renderStatusPill(item.status)}
+
+            {!isFinalizedDisposal && hasAvailableToSell ? (
+              <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
+                Sell Item
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-start gap-2">
@@ -425,10 +433,6 @@ export default async function InventoryDetailPage({
             </div>
           ) : hasAvailableToSell ? (
             <>
-              <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
-                Sell Item
-              </Link>
-
               <form action={markAsGiveawayAction}>
                 <input type="hidden" name="inventory_item_id" value={item.id} />
                 <button type="submit" className="app-button-warning">

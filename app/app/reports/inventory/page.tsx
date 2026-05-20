@@ -37,6 +37,13 @@ type InventoryItemRow = {
   purchase_price?: number | string | null
   cost?: number | string | null
   allocated_cost?: number | string | null
+  quantity?: number | string | null
+  available_quantity?: number | string | null
+  unit_cost?: number | string | null
+  total_cost?: number | string | null
+  cost_basis_unit?: number | string | null
+  cost_basis_total?: number | string | null
+  estimated_value_total?: number | string | null
   current_value?: number | string | null
   estimated_value?: number | string | null
   sale_price?: number | string | null
@@ -54,6 +61,8 @@ type SearchParams = {
   q?: string
   status?: string
   value?: string
+  aging?: string
+  action?: string
   dateFrom?: string
   dateTo?: string
   period?: string
@@ -124,11 +133,63 @@ function getItemDate(item: InventoryItemRow) {
 }
 
 function getItemCost(item: InventoryItemRow) {
-  return asNumber(item.allocated_cost ?? item.purchase_price ?? item.cost ?? 0)
+  const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1)
+  const costBasisTotal = asNumber(item.cost_basis_total)
+  const totalCost = asNumber(item.total_cost)
+  const allocatedCost = asNumber(item.allocated_cost)
+  const costBasisUnit = asNumber(item.cost_basis_unit)
+  const unitCost = asNumber(item.unit_cost)
+  const purchasePrice = asNumber(item.purchase_price)
+  const legacyCost = asNumber(item.cost)
+
+  if (costBasisTotal > 0) return costBasisTotal
+  if (totalCost > 0) return totalCost
+  if (allocatedCost > 0) return allocatedCost
+  if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1)
+  if (unitCost > 0) return unitCost * Math.max(quantity, 1)
+  if (purchasePrice > 0) return purchasePrice
+  if (legacyCost > 0) return legacyCost
+
+  return 0
 }
 
 function getItemValue(item: InventoryItemRow) {
-  return asNumber(item.current_value ?? item.estimated_value ?? item.sale_price ?? item.sold_price ?? 0)
+  const estimatedValueTotal = asNumber(item.estimated_value_total)
+  const currentValue = asNumber(item.current_value)
+  const estimatedValue = asNumber(item.estimated_value)
+  const salePrice = asNumber(item.sale_price)
+  const soldPrice = asNumber(item.sold_price)
+
+  if (estimatedValueTotal > 0) return estimatedValueTotal
+  if (currentValue > 0) return currentValue
+  if (estimatedValue > 0) return estimatedValue
+  if (salePrice > 0) return salePrice
+  if (soldPrice > 0) return soldPrice
+
+  return 0
+}
+
+function getDaysHeld(item: InventoryItemRow) {
+  const rawDate = getItemDate(item)
+  if (!rawDate) return null
+
+  const itemDate = new Date(rawDate)
+  if (Number.isNaN(itemDate.getTime())) return null
+
+  const now = new Date()
+  const millisecondsPerDay = 1000 * 60 * 60 * 24
+
+  return Math.max(0, Math.floor((now.getTime() - itemDate.getTime()) / millisecondsPerDay))
+}
+
+function getAgingBucket(daysHeld: number | null) {
+  if (daysHeld === null) return 'Unknown'
+  if (daysHeld >= 365) return '365+ days'
+  if (daysHeld >= 180) return '180-364 days'
+  if (daysHeld >= 90) return '90-179 days'
+  if (daysHeld >= 60) return '60-89 days'
+  if (daysHeld >= 30) return '30-59 days'
+  return '0-29 days'
 }
 
 function normalizeStatus(status: string | null | undefined) {
@@ -144,6 +205,39 @@ function prettyStatus(status: string | null | undefined) {
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(' ')
+}
+
+function getWorkflowAction(item: InventoryItemRow) {
+  const status = normalizeStatus(item.status).toLowerCase()
+  const value = getItemValue(item)
+  const cost = getItemCost(item)
+  const daysHeld = getDaysHeld(item)
+  const notes = asString(item.notes).toLowerCase()
+
+  if ((status === 'available' || status === 'listed') && cost <= 0) {
+    return 'Missing Cost Basis'
+  }
+
+  if (status === 'available') {
+    if (notes.includes('photo') || notes.includes('scan')) return 'Needs Photos / Scan'
+    if (value <= 0) return 'Missing Estimated Value'
+    if (daysHeld !== null && daysHeld >= 90) return '90+ Days Available'
+    if (daysHeld !== null && daysHeld >= 30) return '30+ Days Available'
+    return 'Ready To List'
+  }
+
+  if (status === 'listed') {
+    if (daysHeld !== null && daysHeld >= 90) return 'Listed 90+ Days'
+    if (daysHeld !== null && daysHeld >= 30) return 'Listed 30+ Days'
+    return 'Monitor Listing'
+  }
+
+  if (status === 'personal') return 'Personal Collection Review'
+  if (status === 'junk') return 'Disposal Candidate'
+  if (status === 'disposed') return 'Finalized Disposal'
+  if (status === 'sold') return 'Sold'
+
+  return 'Review Status'
 }
 
 function matchesSearch(item: InventoryItemRow, search: string) {
@@ -201,6 +295,73 @@ function matchesValueFilter(item: InventoryItemRow, valueFilter: string) {
   return true
 }
 
+function matchesAgingFilter(item: InventoryItemRow, agingFilter: string) {
+  if (!agingFilter || agingFilter === 'all') return true
+
+  const daysHeld = getDaysHeld(item)
+  if (daysHeld === null) return false
+
+  const minimumDays = Number(agingFilter)
+  if (!Number.isFinite(minimumDays) || minimumDays <= 0) return true
+
+  return daysHeld >= minimumDays
+}
+
+function matchesActionNeededFilter(item: InventoryItemRow, actionFilter: string) {
+  if (!actionFilter || actionFilter === 'all') return true
+
+  const status = normalizeStatus(item.status).toLowerCase()
+  const value = getItemValue(item)
+  const cost = getItemCost(item)
+  const daysHeld = getDaysHeld(item)
+  const notes = asString(item.notes).toLowerCase()
+  const action = getWorkflowAction(item)
+
+  if (actionFilter === 'ready-to-list') return action === 'Ready To List'
+  if (actionFilter === 'missing-cost') {
+    return (status === 'available' || status === 'listed') && cost <= 0
+  }
+  if (actionFilter === 'missing-value') return value <= 0
+  if (actionFilter === 'needs-photos') {
+    return notes.includes('photo') || notes.includes('scan')
+  }
+  if (actionFilter === 'available-30') {
+    return status === 'available' && daysHeld !== null && daysHeld >= 30
+  }
+  if (actionFilter === 'available-90') {
+    return status === 'available' && daysHeld !== null && daysHeld >= 90
+  }
+  if (actionFilter === 'listed-30') {
+    return status === 'listed' && daysHeld !== null && daysHeld >= 30
+  }
+  if (actionFilter === 'listed-90') {
+    return status === 'listed' && daysHeld !== null && daysHeld >= 90
+  }
+  if (actionFilter === 'pc-review') return status === 'personal'
+  if (actionFilter === 'notes-review') return Boolean(asString(item.notes).trim())
+  if (actionFilter === 'disposal-candidate') {
+    return status === 'junk' || action === 'Disposal Candidate'
+  }
+
+  if (actionFilter === 'needed') {
+    return (
+      status === 'unknown' ||
+      status === 'junk' ||
+      cost <= 0 ||
+      action === 'Missing Cost Basis' ||
+      action === 'Needs Photos / Scan' ||
+      action === '30+ Days Available' ||
+      action === '90+ Days Available' ||
+      action === 'Listed 30+ Days' ||
+      action === 'Listed 90+ Days' ||
+      action === 'Review Status' ||
+      action === 'Personal Collection Review'
+    )
+  }
+
+  return true
+}
+
 function getStatusCounts(items: InventoryItemRow[]) {
   return items.reduce<Record<string, number>>((counts, item) => {
     const key = normalizeStatus(item.status)
@@ -250,6 +411,8 @@ function buildInventoryCsvHref(params: SearchParams) {
     q: params.q,
     status: params.status,
     value: params.value,
+    aging: params.aging,
+    action: params.action,
     period: params.period,
     date: params.date,
     year: params.year,
@@ -261,7 +424,6 @@ function buildInventoryCsvHref(params: SearchParams) {
     dateTo: params.dateTo || params.endDate,
   })
 }
-
 
 function PresetShortcut({
   href,
@@ -292,6 +454,8 @@ export default async function InventoryReportPage({
   const search = resolvedSearchParams.q?.trim() || ''
   const selectedStatus = resolvedSearchParams.status || 'all'
   const selectedValue = resolvedSearchParams.value || 'all'
+  const selectedAging = resolvedSearchParams.aging || 'all'
+  const selectedAction = resolvedSearchParams.action || 'all'
   const startDate = resolvedSearchParams.startDate || resolvedSearchParams.dateFrom || ''
   const endDate = resolvedSearchParams.endDate || resolvedSearchParams.dateTo || ''
   const csvHref = buildInventoryCsvHref({
@@ -299,6 +463,8 @@ export default async function InventoryReportPage({
     q: search,
     status: selectedStatus,
     value: selectedValue,
+    aging: selectedAging,
+    action: selectedAction,
     startDate,
     endDate,
   })
@@ -335,6 +501,8 @@ export default async function InventoryReportPage({
     if (!matchesSearch(item, search)) return false
     if (!matchesDateRange(item, startDate, endDate)) return false
     if (!matchesValueFilter(item, selectedValue)) return false
+    if (!matchesAgingFilter(item, selectedAging)) return false
+    if (!matchesActionNeededFilter(item, selectedAction)) return false
 
     return true
   })
@@ -348,6 +516,19 @@ export default async function InventoryReportPage({
   const availableCount = statusCounts.available || 0
   const personalCount = statusCounts.personal || 0
   const soldCount = statusCounts.sold || 0
+  const actionNeededCount = inventoryItems.filter((item) => matchesActionNeededFilter(item, 'needed')).length
+  const aged30Count = inventoryItems.filter((item) => {
+    const daysHeld = getDaysHeld(item)
+    return daysHeld !== null && daysHeld >= 30
+  }).length
+  const aged90Count = inventoryItems.filter((item) => {
+    const daysHeld = getDaysHeld(item)
+    return daysHeld !== null && daysHeld >= 90
+  }).length
+  const listed30Count = inventoryItems.filter((item) => {
+    const daysHeld = getDaysHeld(item)
+    return normalizeStatus(item.status).toLowerCase() === 'listed' && daysHeld !== null && daysHeld >= 30
+  }).length
 
   const allStatuses = Array.from(
     new Set(allInventoryItems.map((item) => normalizeStatus(item.status)).filter(Boolean))
@@ -358,6 +539,8 @@ export default async function InventoryReportPage({
   const activePreset = getActiveReportPreset('inventory', {
     status: selectedStatus,
     value: selectedValue,
+    aging: selectedAging,
+    action: selectedAction,
     q: search,
   })
 
@@ -368,7 +551,7 @@ export default async function InventoryReportPage({
           <p className="text-xs uppercase tracking-wide text-zinc-500">Reports</p>
           <h1 className="app-title">Inventory Report</h1>
           <p className="app-subtitle">
-            Read-only inventory reporting for status, cost basis, estimated value, and open inventory review.
+            Read-only inventory reporting for status, cost basis, estimated value, aging, action needed, and open inventory review.
           </p>
         </div>
 
@@ -377,53 +560,61 @@ export default async function InventoryReportPage({
             Back to Reports
           </Link>
 
+          <Link href="/app/reports/operations" className="app-button">
+            Back to Daily Operations
+          </Link>
+
           <ReportExportButtons
-  csvHref={csvHref}
-  pdfHref={buildReportPdfHref('inventory', {
-    ...(search ? { q: search } : {}),
-    ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
-    ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
-    ...(startDate ? { startDate } : {}),
-    ...(endDate ? { endDate } : {}),
-    ...(resolvedSearchParams.period
-      ? { period: resolvedSearchParams.period }
-      : {}),
-    ...(resolvedSearchParams.date
-      ? { date: resolvedSearchParams.date }
-      : {}),
-    ...(resolvedSearchParams.year
-      ? { year: resolvedSearchParams.year }
-      : {}),
-    ...(resolvedSearchParams.month
-      ? { month: resolvedSearchParams.month }
-      : {}),
-    ...(resolvedSearchParams.quarter
-      ? { quarter: resolvedSearchParams.quarter }
-      : {}),
-  })}
-  printHref={buildReportPrintHref('inventory', {
-    ...(search ? { q: search } : {}),
-    ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
-    ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
-    ...(startDate ? { startDate } : {}),
-    ...(endDate ? { endDate } : {}),
-    ...(resolvedSearchParams.period
-      ? { period: resolvedSearchParams.period }
-      : {}),
-    ...(resolvedSearchParams.date
-      ? { date: resolvedSearchParams.date }
-      : {}),
-    ...(resolvedSearchParams.year
-      ? { year: resolvedSearchParams.year }
-      : {}),
-    ...(resolvedSearchParams.month
-      ? { month: resolvedSearchParams.month }
-      : {}),
-    ...(resolvedSearchParams.quarter
-      ? { quarter: resolvedSearchParams.quarter }
-      : {}),
-  })}
-/>
+            csvHref={csvHref}
+            pdfHref={buildReportPdfHref('inventory', {
+              ...(search ? { q: search } : {}),
+              ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+              ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
+              ...(selectedAging !== 'all' ? { aging: selectedAging } : {}),
+              ...(selectedAction !== 'all' ? { action: selectedAction } : {}),
+              ...(startDate ? { startDate } : {}),
+              ...(endDate ? { endDate } : {}),
+              ...(resolvedSearchParams.period
+                ? { period: resolvedSearchParams.period }
+                : {}),
+              ...(resolvedSearchParams.date
+                ? { date: resolvedSearchParams.date }
+                : {}),
+              ...(resolvedSearchParams.year
+                ? { year: resolvedSearchParams.year }
+                : {}),
+              ...(resolvedSearchParams.month
+                ? { month: resolvedSearchParams.month }
+                : {}),
+              ...(resolvedSearchParams.quarter
+                ? { quarter: resolvedSearchParams.quarter }
+                : {}),
+            })}
+            printHref={buildReportPrintHref('inventory', {
+              ...(search ? { q: search } : {}),
+              ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+              ...(selectedValue !== 'all' ? { value: selectedValue } : {}),
+              ...(selectedAging !== 'all' ? { aging: selectedAging } : {}),
+              ...(selectedAction !== 'all' ? { action: selectedAction } : {}),
+              ...(startDate ? { startDate } : {}),
+              ...(endDate ? { endDate } : {}),
+              ...(resolvedSearchParams.period
+                ? { period: resolvedSearchParams.period }
+                : {}),
+              ...(resolvedSearchParams.date
+                ? { date: resolvedSearchParams.date }
+                : {}),
+              ...(resolvedSearchParams.year
+                ? { year: resolvedSearchParams.year }
+                : {}),
+              ...(resolvedSearchParams.month
+                ? { month: resolvedSearchParams.month }
+                : {}),
+              ...(resolvedSearchParams.quarter
+                ? { quarter: resolvedSearchParams.quarter }
+                : {}),
+            })}
+          />
         </div>
       </div>
 
@@ -500,11 +691,54 @@ export default async function InventoryReportPage({
                 <option value="over-100">Over $100</option>
               </select>
             </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Aging
+              </span>
+
+              <select
+                name="aging"
+                defaultValue={selectedAging}
+                className="app-select h-9 text-sm"
+              >
+                <option value="all">All ages</option>
+                <option value="30">30+ days held</option>
+                <option value="60">60+ days held</option>
+                <option value="90">90+ days held</option>
+                <option value="180">180+ days held</option>
+                <option value="365">365+ days held</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+                Action Filter
+              </span>
+
+              <select
+                name="action"
+                defaultValue={selectedAction}
+                className="app-select h-9 text-sm"
+              >
+                <option value="all">All actions</option>
+                <option value="needed">Action needed</option>
+                <option value="ready-to-list">Ready To List</option>
+                <option value="missing-cost">Missing Cost Basis</option>
+                <option value="missing-value">Missing Estimated Value</option>
+                <option value="needs-photos">Needs Photos / Scan</option>
+                <option value="available-30">30+ Days Available</option>
+                <option value="available-90">90+ Days Available</option>
+                <option value="listed-30">Listed 30+ Days</option>
+                <option value="listed-90">Listed 90+ Days</option>
+                <option value="pc-review">Personal Collection Review</option>
+                <option value="notes-review">Notes / Flagged Review</option>
+                <option value="disposal-candidate">Disposal Candidates</option>
+              </select>
+            </label>
           </>
         </ReportDateFilters>
       </form>
-
-
 
       <section className="app-section space-y-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -528,6 +762,8 @@ export default async function InventoryReportPage({
             <input type="hidden" name="q" value={search} />
             <input type="hidden" name="status" value={selectedStatus} />
             <input type="hidden" name="value" value={selectedValue} />
+            <input type="hidden" name="aging" value={selectedAging} />
+            <input type="hidden" name="action" value={selectedAction} />
             <input type="hidden" name="startDate" value={startDate} />
             <input type="hidden" name="endDate" value={endDate} />
             <input
@@ -653,6 +889,26 @@ export default async function InventoryReportPage({
             note: 'Ready for sale/listing',
           },
           {
+            label: 'Action Needed',
+            value: actionNeededCount.toLocaleString(),
+            note: 'Workflow review queue',
+          },
+          {
+            label: '30+ Days Available',
+            value: aged30Count.toLocaleString(),
+            note: 'Aging review',
+          },
+          {
+            label: '90+ Days Available',
+            value: aged90Count.toLocaleString(),
+            note: 'Stale inventory review',
+          },
+          {
+            label: 'Listed 30+ Days',
+            value: listed30Count.toLocaleString(),
+            note: 'Listing follow-up',
+          },
+          {
             label: 'Listed',
             value: listedCount.toLocaleString(),
             note: 'Currently listed',
@@ -715,6 +971,27 @@ export default async function InventoryReportPage({
               key: 'date',
               label: 'Date',
               render: (item) => formatDate(getItemDate(item)),
+            },
+            {
+              key: 'daysHeld',
+              label: 'Days Held',
+              align: 'right',
+              render: (item) => {
+                const daysHeld = getDaysHeld(item)
+                return daysHeld === null ? '—' : daysHeld.toLocaleString()
+              },
+            },
+            {
+              key: 'workflow',
+              label: 'Suggested Action',
+              render: (item) => (
+                <div>
+                  <div className="text-zinc-100">{getWorkflowAction(item)}</div>
+                  <div className="mt-0.5 text-xs text-zinc-500">
+                    {getAgingBucket(getDaysHeld(item))}
+                  </div>
+                </div>
+              ),
             },
             {
               key: 'cost',

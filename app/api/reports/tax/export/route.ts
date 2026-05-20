@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'custom'
+
 type BreakRow = {
   id: string
   break_date: string | null
@@ -84,6 +86,168 @@ function clampYear(raw?: string | null) {
     return currentYear
   }
   return parsed
+}
+
+function clampMonth(raw?: string | null) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 12) {
+    return new Date().getMonth() + 1
+  }
+  return parsed
+}
+
+function clampQuarter(raw?: string | null) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) {
+    return Math.floor(new Date().getMonth() / 3) + 1
+  }
+  return parsed
+}
+
+function normalizePeriod(raw?: string | null): ReportPeriod {
+  if (
+    raw === 'day' ||
+    raw === 'week' ||
+    raw === 'month' ||
+    raw === 'quarter' ||
+    raw === 'custom'
+  ) {
+    return raw
+  }
+
+  return 'year'
+}
+
+function dateToInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseInputDate(value: string | null | undefined, fallback: Date) {
+  if (!value) return fallback
+
+  const parts = value.split('-').map((part) => Number(part))
+  if (parts.length !== 3) return fallback
+
+  const [year, month, day] = parts
+  if (!year || !month || !day) return fallback
+
+  const date = new Date(year, month - 1, day)
+  if (Number.isNaN(date.getTime())) return fallback
+
+  return date
+}
+
+function getStartOfWeek(date: Date) {
+  const result = new Date(date)
+  const day = result.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  result.setDate(result.getDate() + diff)
+  return result
+}
+
+function getEndOfWeek(date: Date) {
+  const result = getStartOfWeek(date)
+  result.setDate(result.getDate() + 6)
+  return result
+}
+
+function getReportDateRange({
+  selectedYear,
+  period,
+  start,
+  end,
+  month,
+  quarter,
+}: {
+  selectedYear: number
+  period: ReportPeriod
+  start?: string | null
+  end?: string | null
+  month: number
+  quarter: number
+}) {
+  const today = new Date()
+  const defaultAnchor =
+    selectedYear === today.getFullYear() ? today : new Date(selectedYear, 0, 1)
+
+  if (period === 'day') {
+    const selectedDay = parseInputDate(start, defaultAnchor)
+    const dateValue = dateToInputValue(selectedDay)
+    return {
+      startDate: dateValue,
+      endDate: dateValue,
+      label: `Daily Report: ${dateValue}`,
+      slug: `daily-${dateValue}`,
+    }
+  }
+
+  if (period === 'week') {
+    const selectedDay = parseInputDate(start, defaultAnchor)
+    const weekStart = getStartOfWeek(selectedDay)
+    const weekEnd = getEndOfWeek(selectedDay)
+    const startValue = dateToInputValue(weekStart)
+    const endValue = dateToInputValue(weekEnd)
+    return {
+      startDate: startValue,
+      endDate: endValue,
+      label: `Weekly Report: ${startValue} to ${endValue}`,
+      slug: `weekly-${startValue}-to-${endValue}`,
+    }
+  }
+
+  if (period === 'month') {
+    const monthStart = new Date(selectedYear, month - 1, 1)
+    const monthEnd = new Date(selectedYear, month, 0)
+    return {
+      startDate: dateToInputValue(monthStart),
+      endDate: dateToInputValue(monthEnd),
+      label: `Monthly Report: ${monthStart.toLocaleString('default', {
+        month: 'long',
+      })} ${selectedYear}`,
+      slug: `monthly-${selectedYear}-${String(month).padStart(2, '0')}`,
+    }
+  }
+
+  if (period === 'quarter') {
+    const quarterStartMonth = (quarter - 1) * 3
+    const quarterStart = new Date(selectedYear, quarterStartMonth, 1)
+    const quarterEnd = new Date(selectedYear, quarterStartMonth + 3, 0)
+    return {
+      startDate: dateToInputValue(quarterStart),
+      endDate: dateToInputValue(quarterEnd),
+      label: `Quarterly Report: Q${quarter} ${selectedYear}`,
+      slug: `quarterly-${selectedYear}-q${quarter}`,
+    }
+  }
+
+  if (period === 'custom') {
+    const fallbackStart = new Date(selectedYear, 0, 1)
+    const fallbackEnd = new Date(selectedYear, 11, 31)
+    const customStart = parseInputDate(start, fallbackStart)
+    const customEnd = parseInputDate(end, fallbackEnd)
+    const normalizedStart =
+      customStart.getTime() <= customEnd.getTime() ? customStart : customEnd
+    const normalizedEnd =
+      customStart.getTime() <= customEnd.getTime() ? customEnd : customStart
+    const startValue = dateToInputValue(normalizedStart)
+    const endValue = dateToInputValue(normalizedEnd)
+    return {
+      startDate: startValue,
+      endDate: endValue,
+      label: `Custom Report: ${startValue} to ${endValue}`,
+      slug: `custom-${startValue}-to-${endValue}`,
+    }
+  }
+
+  return {
+    startDate: `${selectedYear}-01-01`,
+    endDate: `${selectedYear}-12-31`,
+    label: `Year-End Tax Report: ${selectedYear}`,
+    slug: `yearly-${selectedYear}`,
+  }
 }
 
 function roundMoney(value: number) {
@@ -223,8 +387,23 @@ function categoryIncludes(row: ExpenseCategorySummaryRow, keywords: string[]) {
 
 export async function GET(request: NextRequest) {
   const year = clampYear(request.nextUrl.searchParams.get('year'))
-  const startDate = `${year}-01-01`
-  const endDate = `${year}-12-31`
+  const period = normalizePeriod(request.nextUrl.searchParams.get('period'))
+  const month = clampMonth(request.nextUrl.searchParams.get('month'))
+  const quarter = clampQuarter(request.nextUrl.searchParams.get('quarter'))
+  const {
+    startDate,
+    endDate,
+    label: reportRangeLabel,
+    slug: reportFileSlug,
+  } = getReportDateRange({
+    selectedYear: year,
+    period,
+    start: request.nextUrl.searchParams.get('start'),
+    end: request.nextUrl.searchParams.get('end'),
+    month,
+    quarter,
+  })
+  const isYearEndReport = period === 'year'
 
   const supabase = await createClient()
 
@@ -471,6 +650,7 @@ export async function GET(request: NextRequest) {
   )
 
   const manualCommissionsAndFees = sumRows(expenseCategoryRows, 'Commissions and fees')
+  const manualCommissionsAndFeesCount = countRows(expenseCategoryRows, 'Commissions and fees')
   const turbotaxCommissionsAndFees = roundMoney(totalPlatformFees + manualCommissionsAndFees)
   const turbotaxAdvertising = sumRows(expenseCategoryRows, 'Advertising')
   const turbotaxSupplies = sumRows(expenseCategoryRows, 'Supplies')
@@ -587,15 +767,20 @@ export async function GET(request: NextRequest) {
     warnings.push('Ending inventory is NOT locked. Export values may change if inventory changes. Lock the tax-year snapshot before filing or sending final numbers to a CPA.')
   }
 
+  if (!isYearEndReport) {
+    warnings.push('This workbook is a period report. Sales, expenses, break purchases, and sale-level COGS are filtered to the selected range. Beginning inventory, ending inventory, and annual Schedule C settings remain tax-year support values.')
+  }
+
   const readMeRows: CellValue[][] = [
     ['Worksheet', 'Purpose', 'How to Use'],
+    ['Report Range', reportRangeLabel, `${startDate} through ${endDate}`],
     ['Read_Me', 'Quick explanation of this workbook', 'Start here first before entering anything into tax software or sharing with a CPA'],
     ['TurboTax_Ready', 'Simple entry sheet for Schedule C / TurboTax', 'Use this first during tax prep. It is designed to show the numbers users need without hunting through every worksheet'],
     ['QuickBooks_Level_Summary', 'Top-level summary in business-report style', 'Use this like a QuickBooks-style profit and loss plus inventory support overview'],
     ['Schedule_C_Summary', 'Schedule C category mapping', 'Use this tab when entering annual totals into TurboTax or giving numbers to a preparer'],
     ['Schedule_C_Entry_Guide', 'Plain-English guide for where numbers go', 'Use this tab to avoid hunting through detail rows during tax prep'],
     ['COGS_Worksheet', 'Inventory / COGS support', 'Uses Beginning Inventory + Purchases - Ending Inventory = COGS'],
-    ['Break_Purchases', 'Detailed purchase support', 'Reference only; supports break acquisition history for the year'],
+    ['Break_Purchases', 'Detailed purchase support', 'Reference only; supports break acquisition history for the selected report range'],
     ['Sales_Detail', 'Detailed sale support', 'Reference only; supports gross sales, fees, shipping/supplies, COGS, and profit'],
     ['Sale_Expense_Detail', 'Expense-focused sales view', 'Reference only; easier for reviewing sale-level expense buckets'],
     ['Manual_Expense_Summary', 'User-entered expense totals by category', 'Use this for QuickBooks-style expense category review'],
@@ -603,8 +788,9 @@ export async function GET(request: NextRequest) {
     ['Ending_Inventory', 'Unsold inventory snapshot', 'Reference only; supports ending inventory at export time'],
     ['Tax_Readiness_Checks', 'Warnings and review points', 'Review before filing or sending to a CPA'],
     ['Important note', 'TurboTax import', 'This workbook is designed for clean reference and manual entry, not direct TurboTax Schedule C import'],
-    ['Important note', 'Beginning inventory', 'Beginning inventory now comes from tax_year_settings.beginning_inventory instead of being hardcoded to zero'],
+    ['Important note', 'Beginning inventory', 'Beginning inventory comes from tax_year_settings.beginning_inventory and is tax-year support even in period exports'],
     ['Important note', 'Ending inventory lock', endingInventoryIsLocked ? 'Ending inventory uses the locked tax-year snapshot for CPA-safe reporting' : 'Ending inventory is using live inventory because no locked snapshot exists yet'],
+    ['Important note', 'Period exports', isYearEndReport ? 'This is a full year export' : 'This is a period export. Sales, break purchases, and manual expenses are date-filtered; annual settings and inventory support remain tax-year values.'],
     ['Important note', 'COGS formula', 'Purchases support is calculated as COGS + Ending Inventory - Beginning Inventory'],
     ['Important note', 'Shipping and supplies', 'Your current sale schema stores sale-level postage and supplies together in shipping_cost, so this workbook preserves that combined bucket honestly'],
     ['Important note', 'Giveaways', 'Giveaways marked through inventory should show as Advertising / Marketing expenses if the giveaway workflow created the expense record'],
@@ -613,8 +799,9 @@ export async function GET(request: NextRequest) {
 
   const turbotaxReadyRows: CellValue[][] = [
     ['TurboTax / Schedule C Entry Area', 'Amount', 'Where It Comes From', 'What To Do'],
+    ['REPORT RANGE', '', reportRangeLabel, `${startDate} through ${endDate}`],
     ['INCOME', '', '', ''],
-    ['Gross receipts or sales', totalGrossSales, 'Sales_Detail gross sales total', 'Enter as gross receipts / sales income'],
+    ['Gross receipts or sales', totalGrossSales, 'Sales_Detail gross sales total', 'Enter as gross receipts / sales income for the selected report range'],
     ['Returns and allowances', 0, 'Not tracked separately yet', 'Enter 0 unless refunds/returns are separately tracked'],
     ['Gross income after COGS', grossIncomeLine7, 'Gross sales minus COGS', 'Use as Schedule C Line 7 cross-check'],
     ['EXPENSES', '', '', ''],
@@ -660,8 +847,11 @@ export async function GET(request: NextRequest) {
 
   const quickBooksLevelSummaryRows: CellValue[][] = [
     ['Category', 'Amount', 'What it Means'],
-    ['Gross Sales / Gross Receipts', totalGrossSales, 'Total business sales income for the selected year'],
-    ['Realized Cost of Goods Sold', totalCOGS, 'Cost basis for items actually sold'],
+    ['Report Range', '', reportRangeLabel],
+    ['Report Start Date', '', startDate],
+    ['Report End Date', '', endDate],
+    ['Gross Sales / Gross Receipts', totalGrossSales, 'Total business sales income for the selected report range'],
+    ['Realized Cost of Goods Sold', totalCOGS, 'Cost basis for items actually sold in the selected report range'],
     ['Gross Income After COGS', grossIncomeLine7, 'Gross sales minus realized COGS'],
     ['Sale-Level Platform Fees', totalPlatformFees, 'Marketplace / selling fees captured on sale records'],
     ['Manual Commissions / Fee Expenses', manualCommissionsAndFees, 'Manual expenses mapped to Commissions and fees'],
@@ -673,7 +863,7 @@ export async function GET(request: NextRequest) {
     ['Net Proceeds From Sales', totalNetProceeds, 'Gross sales less sale-level direct selling costs'],
     ['Sales Profit Before Manual Expenses', totalSalesProfit, 'Net proceeds less realized COGS'],
     ['Schedule C Net Profit After All Tracked Expenses', scheduleCLine31NetProfit, 'Gross sales minus COGS, tracked expenses, and home office amount'],
-    ['Break Purchases Recorded This Year', totalBreakPurchases, 'Purchase support from break records during the selected year'],
+    ['Break Purchases Recorded In Report Range', totalBreakPurchases, 'Purchase support from break records during the selected report range'],
     ['Beginning Inventory', beginningInventory, 'Tax year settings beginning inventory'],
     ['Purchases Support From COGS Formula', purchasesForCogsSupport, 'COGS + Ending Inventory - Beginning Inventory'],
     ['Ending Inventory Cost', endingInventoryCost, endingInventoryIsLocked ? 'Locked ending inventory snapshot from tax_year_settings' : 'Live unsold inventory cost at export time'],
@@ -684,6 +874,7 @@ export async function GET(request: NextRequest) {
 
   const scheduleCRows: CellValue[][] = [
     ['Category', 'Amount', 'Schedule C Area', 'Notes'],
+    ['Report Range', '', 'Report period', `${reportRangeLabel} (${startDate} through ${endDate})`],
     ['Line 1: Gross receipts or sales', totalGrossSales, 'Income', 'Includes shipping charged to buyers'],
     ['Line 2: Returns and allowances', 0, 'Income', 'Currently treated as zero unless you track them separately'],
     ['Line 3: Gross receipts minus returns', totalGrossSales, 'Income', 'Gross receipts less returns/allowances'],
@@ -716,7 +907,8 @@ export async function GET(request: NextRequest) {
 
   const scheduleCEntryGuideRows: CellValue[][] = [
     ['Step', 'Use This Amount', 'Source Worksheet', 'Reason'],
-    ['1', 'Gross receipts or sales', 'TurboTax_Ready / Schedule_C_Summary', 'Primary business income number for the year'],
+    ['Report range', reportRangeLabel, 'Read_Me / TurboTax_Ready', `${startDate} through ${endDate}`],
+    ['1', 'Gross receipts or sales', 'TurboTax_Ready / Schedule_C_Summary', 'Primary business income number for the selected report range'],
     ['2', 'Cost of goods sold', 'TurboTax_Ready / Schedule_C_Summary / COGS_Worksheet', 'Use realized COGS and the worksheet support if your preparer wants inventory detail'],
     ['3', 'Commissions and fees', 'TurboTax_Ready / Schedule_C_Summary', 'Sale-level platform fees plus manual fee categories; review duplicates'],
     ['4', 'Advertising', 'TurboTax_Ready / Manual_Expense_Summary', 'Advertising / Marketing expenses, including qualifying giveaways if recorded correctly'],
@@ -731,14 +923,15 @@ export async function GET(request: NextRequest) {
 
   const cogsWorksheetRows: CellValue[][] = [
     ['Field', 'Amount', 'Notes'],
+    ['Report Range', '', `${reportRangeLabel} (${startDate} through ${endDate})`],
     ['Beginning Inventory', beginningInventory, 'From tax_year_settings.beginning_inventory'],
-    ['Purchases During Year (derived support)', purchasesForCogsSupport, 'Calculated as COGS + Ending Inventory - Beginning Inventory'],
-    ['Break Purchases Recorded This Year', totalBreakPurchases, 'Reference from break records only; may not include all non-break acquisitions'],
+    ['Purchases During Year / Range (derived support)', purchasesForCogsSupport, 'Calculated as COGS + Ending Inventory - Beginning Inventory'],
+    ['Break Purchases Recorded In Report Range', totalBreakPurchases, 'Reference from break records only; may not include all non-break acquisitions'],
     ['Cost of Items Available for Sale', costOfItemsAvailableForSale, 'Beginning inventory + purchases support'],
     ['Ending Inventory', endingInventoryCost, endingInventoryIsLocked ? 'Locked tax-year ending inventory snapshot' : 'Live unsold inventory cost at export time'],
     ['Ending Inventory Source', endingInventoryIsLocked ? 'Locked' : 'Live', endingInventoryIsLocked ? `Locked at ${taxSettings?.ending_inventory_locked_at || ''}` : 'Lock before filing for CPA-safe reports'],
     ['Live Ending Inventory Reference', liveEndingInventoryCost, 'Current live unsold inventory value; reference only when locked snapshot exists'],
-    ['Cost of Goods Sold', totalCOGS, 'Cost of items sold during the selected year'],
+    ['Cost of Goods Sold', totalCOGS, 'Cost of items sold during the selected report range'],
     ['COGS Cross-Check', cogsCrossCheck, 'Cost of items available for sale minus ending inventory; should match Cost of Goods Sold'],
     ['Review note', '', 'Important: for strongest tax support, set beginning inventory before exporting and save a year-end backup / snapshot'],
   ]
@@ -876,6 +1069,7 @@ export async function GET(request: NextRequest) {
 
   const taxReadinessRows: CellValue[][] = [
     ['Check', 'Status / Amount', 'Notes'],
+    ['Report range', reportRangeLabel, `${startDate} through ${endDate}`],
     ['Tax year settings record', taxSettings ? 'Found' : 'Missing', taxSettings ? 'Beginning inventory and annual Schedule C settings were loaded' : 'Beginning inventory and annual Schedule C settings are using zero defaults'],
     ['Beginning inventory', beginningInventory, 'Must be correct for Schedule C Part III'],
     ['Ending inventory', endingInventoryCost, endingInventoryIsLocked ? 'Locked snapshot from tax_year_settings' : 'Live snapshot at export time; lock before filing'],
@@ -883,7 +1077,7 @@ export async function GET(request: NextRequest) {
     ['Live ending inventory reference', liveEndingInventoryCost, 'Current live inventory value, included for review'],
     ['Purchases support', purchasesForCogsSupport, 'COGS + Ending Inventory - Beginning Inventory'],
     ['COGS cross-check', cogsCrossCheck, 'Should match realized COGS'],
-    ['Manual commission / fee expenses', manualCommissionsAndFees, 'Included in Line 10; confirm these do not duplicate sale-level platform fees'],
+    ['Manual commission / fee expenses', manualCommissionsAndFees, `Included in Line 10; ${manualCommissionsAndFeesCount} manual fee entries; confirm these do not duplicate sale-level platform fees`],
     ['Manual advertising giveaway amount', advertisingGiveaways, 'Deduct only with business intent and records; do not double count inventory and expense'],
     ['Sale-level shipping_cost', totalShippingAndSupplies, 'Currently treated as Other expenses / postage and shipping; schema stores postage and supplies together'],
     ['Equipment review bucket', otherExpensesEquipmentReview, 'Review for expense vs depreciation / Section 179 treatment'],
@@ -900,10 +1094,10 @@ export async function GET(request: NextRequest) {
   xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
   xmlns:html="http://www.w3.org/TR/REC-html40">
   <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
-    <Author>Card Business OS</Author>
-    <LastAuthor>Card Business OS</LastAuthor>
+    <Author>HITS</Author>
+    <LastAuthor>HITS</LastAuthor>
     <Created>${new Date().toISOString()}</Created>
-    <Company>Card Business OS</Company>
+    <Company>HITS</Company>
     <Version>16.00</Version>
   </DocumentProperties>
   <ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel">
@@ -945,7 +1139,7 @@ export async function GET(request: NextRequest) {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.ms-excel; charset=utf-8',
-      'Content-Disposition': `attachment; filename="tax-report-${year}.xls"`,
+      'Content-Disposition': `attachment; filename="tax-report-${reportFileSlug}.xls"`,
       'Cache-Control': 'no-store',
     },
   })

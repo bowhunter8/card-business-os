@@ -3,6 +3,9 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
+const TERMS_VERSION = '2026-05-11'
+const PRIVACY_VERSION = '2026-05-11'
+
 function friendlyAuthError(message: string) {
   const normalized = message.toLowerCase()
 
@@ -38,6 +41,7 @@ function trialDefaults() {
 export async function signUpAction(formData: FormData) {
   const email = String(formData.get('email') ?? '').trim().toLowerCase()
   const password = String(formData.get('password') ?? '').trim()
+  const acceptedTerms = String(formData.get('accept_terms') ?? '') === 'yes'
 
   if (!email || !password) {
     redirect('/signup?error=Email and password are required')
@@ -45,6 +49,12 @@ export async function signUpAction(formData: FormData) {
 
   if (password.length < 6) {
     redirect('/signup?error=Password must be at least 6 characters')
+  }
+
+  if (!acceptedTerms) {
+    redirect(
+      '/signup?error=You must agree to the Terms & Conditions and Privacy Policy before creating an account'
+    )
   }
 
   const supabase = await createClient()
@@ -67,9 +77,15 @@ export async function signUpAction(formData: FormData) {
     .maybeSingle()
 
   if (!existingUser) {
+    const acceptedAt = new Date().toISOString()
+
     await supabase.from('app_users').insert({
       email,
       ...trialDefaults(),
+      terms_accepted_at: acceptedAt,
+      terms_version: TERMS_VERSION,
+      privacy_accepted_at: acceptedAt,
+      privacy_version: PRIVACY_VERSION,
     })
   }
 

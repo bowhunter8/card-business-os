@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+type ReportPeriod = 'day' | 'week' | 'month' | 'quarter' | 'year' | 'custom'
+
 type SaleRow = {
   gross_sale: number | null
   platform_fees: number | null
@@ -99,6 +101,169 @@ function clampYear(raw?: string | null) {
     return currentYear
   }
   return parsed
+}
+
+
+function clampMonth(raw?: string | null) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 12) {
+    return new Date().getMonth() + 1
+  }
+  return parsed
+}
+
+function clampQuarter(raw?: string | null) {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) {
+    return Math.floor(new Date().getMonth() / 3) + 1
+  }
+  return parsed
+}
+
+function normalizePeriod(raw?: string | null): ReportPeriod {
+  if (
+    raw === 'day' ||
+    raw === 'week' ||
+    raw === 'month' ||
+    raw === 'quarter' ||
+    raw === 'custom'
+  ) {
+    return raw
+  }
+
+  return 'year'
+}
+
+function dateToInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function parseInputDate(value: string | null | undefined, fallback: Date) {
+  if (!value) return fallback
+
+  const parts = value.split('-').map((part) => Number(part))
+  if (parts.length !== 3) return fallback
+
+  const [year, month, day] = parts
+  if (!year || !month || !day) return fallback
+
+  const date = new Date(year, month - 1, day)
+  if (Number.isNaN(date.getTime())) return fallback
+
+  return date
+}
+
+function getStartOfWeek(date: Date) {
+  const result = new Date(date)
+  const day = result.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  result.setDate(result.getDate() + diff)
+  return result
+}
+
+function getEndOfWeek(date: Date) {
+  const result = getStartOfWeek(date)
+  result.setDate(result.getDate() + 6)
+  return result
+}
+
+function getReportDateRange({
+  selectedYear,
+  period,
+  start,
+  end,
+  month,
+  quarter,
+}: {
+  selectedYear: number
+  period: ReportPeriod
+  start?: string | null
+  end?: string | null
+  month: number
+  quarter: number
+}) {
+  const today = new Date()
+  const defaultAnchor =
+    selectedYear === today.getFullYear() ? today : new Date(selectedYear, 0, 1)
+
+  if (period === 'day') {
+    const selectedDay = parseInputDate(start, defaultAnchor)
+    const dateValue = dateToInputValue(selectedDay)
+    return {
+      startDate: dateValue,
+      endDate: dateValue,
+      label: `Daily Report: ${dateValue}`,
+      slug: `daily-${dateValue}`,
+    }
+  }
+
+  if (period === 'week') {
+    const selectedDay = parseInputDate(start, defaultAnchor)
+    const weekStart = getStartOfWeek(selectedDay)
+    const weekEnd = getEndOfWeek(selectedDay)
+    const startValue = dateToInputValue(weekStart)
+    const endValue = dateToInputValue(weekEnd)
+    return {
+      startDate: startValue,
+      endDate: endValue,
+      label: `Weekly Report: ${startValue} to ${endValue}`,
+      slug: `weekly-${startValue}-to-${endValue}`,
+    }
+  }
+
+  if (period === 'month') {
+    const monthStart = new Date(selectedYear, month - 1, 1)
+    const monthEnd = new Date(selectedYear, month, 0)
+    return {
+      startDate: dateToInputValue(monthStart),
+      endDate: dateToInputValue(monthEnd),
+      label: `Monthly Report: ${monthStart.toLocaleString('default', {
+        month: 'long',
+      })} ${selectedYear}`,
+      slug: `monthly-${selectedYear}-${String(month).padStart(2, '0')}`,
+    }
+  }
+
+  if (period === 'quarter') {
+    const quarterStartMonth = (quarter - 1) * 3
+    const quarterStart = new Date(selectedYear, quarterStartMonth, 1)
+    const quarterEnd = new Date(selectedYear, quarterStartMonth + 3, 0)
+    return {
+      startDate: dateToInputValue(quarterStart),
+      endDate: dateToInputValue(quarterEnd),
+      label: `Quarterly Report: Q${quarter} ${selectedYear}`,
+      slug: `quarterly-${selectedYear}-q${quarter}`,
+    }
+  }
+
+  if (period === 'custom') {
+    const fallbackStart = new Date(selectedYear, 0, 1)
+    const fallbackEnd = new Date(selectedYear, 11, 31)
+    const customStart = parseInputDate(start, fallbackStart)
+    const customEnd = parseInputDate(end, fallbackEnd)
+    const normalizedStart =
+      customStart.getTime() <= customEnd.getTime() ? customStart : customEnd
+    const normalizedEnd =
+      customStart.getTime() <= customEnd.getTime() ? customEnd : customStart
+    const startValue = dateToInputValue(normalizedStart)
+    const endValue = dateToInputValue(normalizedEnd)
+    return {
+      startDate: startValue,
+      endDate: endValue,
+      label: `Custom Report: ${startValue} to ${endValue}`,
+      slug: `custom-${startValue}-to-${endValue}`,
+    }
+  }
+
+  return {
+    startDate: `${selectedYear}-01-01`,
+    endDate: `${selectedYear}-12-31`,
+    label: `Year-End Tax Report: ${selectedYear}`,
+    slug: `yearly-${selectedYear}`,
+  }
 }
 
 function roundMoney(value: number) {
@@ -493,8 +658,23 @@ function buildPdf(lines: PdfLine[]) {
 
 export async function GET(request: NextRequest) {
   const year = clampYear(request.nextUrl.searchParams.get('year'))
-  const startDate = `${year}-01-01`
-  const endDate = `${year}-12-31`
+  const period = normalizePeriod(request.nextUrl.searchParams.get('period'))
+  const month = clampMonth(request.nextUrl.searchParams.get('month'))
+  const quarter = clampQuarter(request.nextUrl.searchParams.get('quarter'))
+  const {
+    startDate,
+    endDate,
+    label: reportRangeLabel,
+    slug: reportFileSlug,
+  } = getReportDateRange({
+    selectedYear: year,
+    period,
+    start: request.nextUrl.searchParams.get('start'),
+    end: request.nextUrl.searchParams.get('end'),
+    month,
+    quarter,
+  })
+  const isYearEndReport = period === 'year'
 
   const supabase = await createClient()
 
@@ -896,6 +1076,12 @@ export async function GET(request: NextRequest) {
     warnings.push('Beginning inventory is zero. Confirm this is correct before filing.')
   }
 
+  if (!isYearEndReport) {
+    warnings.push(
+      'This is a period PDF. Sales, expenses, and finalized disposal review records are filtered to the selected range, but beginning inventory, ending inventory, and annual Schedule C settings remain tax-year support values.'
+    )
+  }
+
   if (purchasesForCogsSupport < 0) {
     warnings.push('COGS support produced negative purchases. Review beginning inventory and ending inventory before filing.')
   }
@@ -947,20 +1133,20 @@ export async function GET(request: NextRequest) {
   const taxpayerProfileLines = buildTaxpayerProfileLines(profile, user.email)
 
   const pdfLines: PdfLine[] = [
-    { label: `Schedule C Ready Tax Report - ${year}`, type: 'title' },
+    { label: `Schedule C Ready Tax Report - ${reportRangeLabel}`, type: 'title' },
     { label: 'TAXPAYER / BUSINESS INFORMATION', type: 'section' },
     ...taxpayerProfileLines,
     { label: '', type: 'spacer' },
     {
       label:
-        'This report is designed as a line-by-line Schedule C entry guide. Keep the tax workbook export as detailed backup and supporting worksheets.',
+        'This report is designed as a line-by-line Schedule C entry guide for the selected report range. Keep the tax workbook export as detailed backup and supporting worksheets.',
       type: 'note',
     },
     {
       label:
         endingInventoryIsLocked
-          ? 'Amounts are based on tracked sales, expenses, locked ending inventory, beginning inventory settings, and COGS records in HITS™.'
-          : 'Amounts are based on tracked sales, expenses, live inventory, beginning inventory settings, and COGS records in HITS™. Lock ending inventory before filing.',
+          ? 'Amounts are based on tracked sales and expenses for the selected range, plus locked ending inventory, beginning inventory settings, and COGS records in HITS™.'
+          : 'Amounts are based on tracked sales and expenses for the selected range, plus live inventory, beginning inventory settings, and COGS records in HITS™. Lock ending inventory before filing.',
       type: 'note',
     },
     { label: '', type: 'spacer' },
@@ -1288,7 +1474,7 @@ export async function GET(request: NextRequest) {
         }))
       : [
           {
-            label: 'No finalized disposal / write-off review records found for this tax year.',
+            label: 'No finalized disposal / write-off review records found for this report range.',
             type: 'note' as const,
           },
         ]),
@@ -1316,7 +1502,7 @@ export async function GET(request: NextRequest) {
 
     { label: 'AUDIT SUPPORT / RECORD COUNTS', type: 'section' },
     {
-      label: 'Sales reviewed for this tax year',
+      label: 'Sales reviewed for this report range',
       amount: saleCount,
       valueType: 'count',
       type: 'main',
@@ -1490,7 +1676,7 @@ export async function GET(request: NextRequest) {
     status: 200,
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="schedule-c-tax-report-${year}.pdf"`,
+      'Content-Disposition': `attachment; filename="schedule-c-tax-report-${reportFileSlug}.pdf"`,
       'Cache-Control': 'no-store',
     },
   })

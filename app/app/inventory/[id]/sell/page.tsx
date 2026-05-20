@@ -75,6 +75,20 @@ type InventoryItem = {
   item_type?: string | null
 }
 
+const PLATFORM_OPTIONS = [
+  'eBay',
+  'Whatnot',
+  'Amazon',
+  'Etsy',
+  'Mercari',
+  'Facebook',
+  'Instagram',
+  'Card Show',
+  'Local Sale',
+  'Website',
+  'Custom',
+]
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -267,6 +281,7 @@ export default async function SellInventoryPage({
         id="sell-item-form"
       >
         <input type="hidden" name="inventory_item_id" value={item.id} />
+        <input type="hidden" id="platform" name="platform" value="" />
 
         <div className="grid gap-3 lg:grid-cols-[1.35fr_0.9fr]">
           <div className="space-y-3">
@@ -331,7 +346,7 @@ export default async function SellInventoryPage({
             <div className="app-section-tight space-y-2.5">
               <div className="text-sm font-semibold">Sale Amounts</div>
 
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 <Field label="Item Sale Price">
                   <input
                     id="gross_sale"
@@ -341,19 +356,6 @@ export default async function SellInventoryPage({
                     step="0.01"
                     defaultValue="0.00"
                     required
-                    className="app-input"
-                    disabled={availableQty <= 0}
-                  />
-                </Field>
-
-                <Field label="Shipping Charged">
-                  <input
-                    id="shipping_charged"
-                    name="shipping_charged"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    defaultValue="0.00"
                     className="app-input"
                     disabled={availableQty <= 0}
                   />
@@ -397,7 +399,7 @@ export default async function SellInventoryPage({
                 </div>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-3">
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
                 <Field label="Shipping Profile">
                   <select
                     id="shipping_profile_id"
@@ -418,6 +420,19 @@ export default async function SellInventoryPage({
                       </option>
                     ))}
                   </select>
+                </Field>
+
+                <Field label="Shipping Charged">
+                  <input
+                    id="shipping_charged"
+                    name="shipping_charged"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    defaultValue="0.00"
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
                 </Field>
 
                 <Field label="Actual Postage">
@@ -452,16 +467,30 @@ export default async function SellInventoryPage({
 
             <div className="grid gap-2 md:grid-cols-2">
               <Field label="Platform">
+                <select
+                  id="platform_select"
+                  defaultValue=""
+                  className="app-select"
+                  disabled={availableQty <= 0}
+                >
+                  <option value="">Select platform</option>
+                  {PLATFORM_OPTIONS.map((platform) => (
+                    <option key={platform} value={platform}>
+                      {platform}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Custom Platform">
                 <input
-                  name="platform"
+                  id="custom_platform"
                   type="text"
-                  placeholder="eBay, Whatnot, local, etc."
+                  placeholder="Only needed if Custom is selected"
                   className="app-input"
                   disabled={availableQty <= 0}
                 />
               </Field>
-
-              <div />
             </div>
 
             <div>
@@ -557,6 +586,9 @@ export default async function SellInventoryPage({
             const suppliesCostInput = form.querySelector('#supplies_cost');
             const otherCostsInput = form.querySelector('#other_costs');
             const shippingProfileSelect = form.querySelector('#shipping_profile_id');
+            const platformHiddenInput = form.querySelector('#platform');
+            const platformSelect = form.querySelector('#platform_select');
+            const customPlatformInput = form.querySelector('#custom_platform');
             const remainingField = form.querySelector('#remaining_after_sale');
 
             const previewQty = document.getElementById('preview_qty_sold');
@@ -572,6 +604,16 @@ export default async function SellInventoryPage({
             const asNumber = (value) => {
               const num = Number(value ?? 0);
               return Number.isFinite(num) ? num : 0;
+            };
+
+            const updatePlatformValue = () => {
+              if (!platformHiddenInput || !platformSelect) return;
+
+              const selectedPlatform = String(platformSelect.value || '').trim();
+              const customPlatform = String(customPlatformInput?.value || '').trim();
+
+              platformHiddenInput.value =
+                selectedPlatform === 'Custom' ? customPlatform : selectedPlatform;
             };
 
             const clampQty = () => {
@@ -595,6 +637,8 @@ export default async function SellInventoryPage({
             };
 
             const updatePreview = () => {
+              updatePlatformValue();
+
               const qty = clampQty();
               const itemSalePrice = asNumber(grossSaleInput?.value);
               const shippingCharged = asNumber(shippingChargedInput?.value);
@@ -620,27 +664,44 @@ export default async function SellInventoryPage({
               if (previewProfit) previewProfit.textContent = money(profit);
             };
 
-            if (shippingProfileSelect) {
-              shippingProfileSelect.addEventListener('change', () => {
-                const option = shippingProfileSelect.options[shippingProfileSelect.selectedIndex];
-                if (!option) {
-                  updatePreview();
-                  return;
-                }
-
-                const shippingCharged = option.getAttribute('data-shipping-charged');
-                const suppliesCost = option.getAttribute('data-supplies-cost');
-
-                if (shippingChargedInput && shippingCharged !== null) {
-                  shippingChargedInput.value = String(Number(shippingCharged).toFixed(2));
-                }
-
-                if (suppliesCostInput && suppliesCost !== null) {
-                  suppliesCostInput.value = String(Number(suppliesCost).toFixed(2));
-                }
-
+            const applyShippingProfileDefaults = () => {
+              if (!shippingProfileSelect) {
                 updatePreview();
-              });
+                return;
+              }
+
+              const option = shippingProfileSelect.options[shippingProfileSelect.selectedIndex];
+
+              if (!option || !option.value) {
+                updatePreview();
+                return;
+              }
+
+              const shippingCharged = option.getAttribute('data-shipping-charged');
+              const suppliesCost = option.getAttribute('data-supplies-cost');
+
+              if (shippingChargedInput && shippingCharged !== null) {
+                shippingChargedInput.value = String(Number(shippingCharged).toFixed(2));
+              }
+
+              if (suppliesCostInput && suppliesCost !== null) {
+                suppliesCostInput.value = String(Number(suppliesCost).toFixed(2));
+              }
+
+              updatePreview();
+            };
+
+            if (shippingProfileSelect) {
+              shippingProfileSelect.addEventListener('change', applyShippingProfileDefaults);
+            }
+
+            if (platformSelect) {
+              platformSelect.addEventListener('change', updatePreview);
+            }
+
+            if (customPlatformInput) {
+              customPlatformInput.addEventListener('input', updatePreview);
+              customPlatformInput.addEventListener('change', updatePreview);
             }
 
             quickQtyButtons.forEach((button) => {
@@ -666,6 +727,7 @@ export default async function SellInventoryPage({
               input.addEventListener('change', updatePreview);
             });
 
+            applyShippingProfileDefaults();
             updatePreview();
           })();
         `}

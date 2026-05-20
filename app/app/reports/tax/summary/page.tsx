@@ -162,9 +162,9 @@ function clampYear(raw?: string) {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="app-card-tight p-5">
-      <div className="text-sm text-zinc-400">{label}</div>
-      <div className="mt-2 text-2xl font-semibold">{value}</div>
+    <div className="app-card-tight p-3">
+      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-1 text-lg font-semibold text-zinc-100">{value}</div>
     </div>
   )
 }
@@ -636,18 +636,22 @@ export default async function TaxReportPage({
   }
 
   return (
-    <div className="app-page-wide space-y-4">
+    <div className="app-page-wide space-y-3">
       <div className="app-page-header gap-4">
         <div>
-          <h1 className="app-title">Tax Summary</h1>
+          <h1 className="app-title">Year-End Tax Center</h1>
           <p className="app-subtitle">
-            Year-end summary, Schedule C settings, workbook export, and PDF tax report.
+            Year-end tax summary, Schedule C settings, inventory carryover, workbook export, and PDF tax report.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-2">
           <Link href="/app" className="app-button">
             Back to Dashboard
+          </Link>
+
+          <Link href="/app/reports/tax" className="app-button-primary">
+            Open Financial Reports
           </Link>
 
           <TaxExportButton year={selectedYear} readinessWarnings={taxReadinessWarnings} />
@@ -656,14 +660,14 @@ export default async function TaxReportPage({
         </div>
       </div>
 
-      <div className="app-section p-5">
+      <div className="app-section p-3">
         <form method="get" className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Tax Year</label>
             <select
               name="year"
               defaultValue={String(selectedYear)}
-              className="app-select"
+              className="app-select h-9 text-sm"
             >
               {Array.from({ length: 6 }).map((_, i) => {
                 const year = new Date().getFullYear() + 1 - i
@@ -686,36 +690,29 @@ export default async function TaxReportPage({
         </form>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Break Purchases" value={money(totalBreakPurchases)} />
-        <StatCard label="Gross Sales" value={money(totalGrossSales)} />
-        <StatCard label="Selling Costs" value={money(totalSellingCosts)} />
-        <StatCard label="Net Proceeds" value={money(totalNetProceeds)} />
+      <div className="app-section p-3">
+        <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-8">
+          <StatCard label="Break Purchases" value={money(totalBreakPurchases)} />
+          <StatCard label="Gross Sales" value={money(totalGrossSales)} />
+          <StatCard label="Selling Costs" value={money(totalSellingCosts)} />
+          <StatCard label="Net Proceeds" value={money(totalNetProceeds)} />
+          <StatCard label="Realized COGS" value={money(totalCOGS)} />
+          <StatCard label="Realized Profit" value={money(totalProfit)} />
+          <StatCard label="Beginning Inventory" value={money(beginningInventory)} />
+          <StatCard label="Ending Inventory Cost" value={money(endingInventoryCost)} />
+          <StatCard label="Ending Inventory Est. Value" value={money(endingInventoryEstimatedValue)} />
+          <StatCard label="Home Office" value={money(businessUseOfHome)} />
+          <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
+          <StatCard label="Legal / Professional" value={money(legalProfessional)} />
+          <StatCard label="Disposal Review Items" value={String(disposalTransactions.length)} />
+          <StatCard label="Disposal Review Qty" value={String(totalDisposalReviewQuantity)} />
+          <StatCard label="Disposal Review Cost" value={money(totalDisposalReviewCost)} />
+          <StatCard label="Write-Off Status" value="Review" />
+        </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Realized COGS" value={money(totalCOGS)} />
-        <StatCard label="Realized Profit" value={money(totalProfit)} />
-        <StatCard label="Beginning Inventory" value={money(beginningInventory)} />
-        <StatCard label="Ending Inventory Cost" value={money(endingInventoryCost)} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Ending Inventory Est. Value" value={money(endingInventoryEstimatedValue)} />
-        <StatCard label="Home Office" value={money(businessUseOfHome)} />
-        <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
-        <StatCard label="Legal / Professional" value={money(legalProfessional)} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Disposal Review Items" value={String(disposalTransactions.length)} />
-        <StatCard label="Disposal Review Qty" value={String(totalDisposalReviewQuantity)} />
-        <StatCard label="Disposal Review Cost" value={money(totalDisposalReviewCost)} />
-        <StatCard label="Write-Off Status" value="Review" />
-      </div>
-
-      <div className="app-section p-5">
-        <div className="mb-4">
+      <div className="app-section p-4">
+        <div className="mb-3">
           <h2 className="text-xl font-semibold">Disposal / Write-Off Review</h2>
           <p className="mt-1 text-sm text-zinc-400">
             Finalized disposal records are shown here for accountant and year-end review. These are not treated as a second manual expense; they document inventory that physically left the business.
@@ -771,8 +768,8 @@ export default async function TaxReportPage({
         </div>
       )}
 
-      <div className="app-section p-5">
-        <div className="mb-4">
+      <div className="app-section p-4">
+        <div className="mb-3">
           <h2 className="text-xl font-semibold">Schedule C Year Settings</h2>
           <p className="mt-1 text-sm text-zinc-400">
             These amounts feed the Schedule C PDF report for {selectedYear}. Use this for beginning inventory and Schedule C lines that are not created from sales or expense records.
@@ -785,10 +782,10 @@ export default async function TaxReportPage({
           </div>
         )}
 
-        <form action={saveTaxYearSettings} className="space-y-5">
+        <form action={saveTaxYearSettings} className="space-y-4">
           <input type="hidden" name="tax_year" value={selectedYear} />
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <label className="block">
               <span className="mb-1 block text-sm text-zinc-300">Beginning Inventory</span>
               <input
@@ -921,7 +918,7 @@ export default async function TaxReportPage({
             <textarea
               name="notes"
               defaultValue={taxSettings?.notes ?? ''}
-              className="app-input min-h-28"
+              className="app-input min-h-20"
               placeholder="Optional notes for this tax year..."
             />
           </label>
@@ -935,7 +932,7 @@ export default async function TaxReportPage({
           </div>
         </form>
 
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5">
+        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <h3 className="text-lg font-semibold">Inventory Carryover</h3>

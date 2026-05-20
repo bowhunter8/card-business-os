@@ -31,6 +31,13 @@ type InventoryItemRow = {
   purchase_price?: number | string | null
   cost?: number | string | null
   allocated_cost?: number | string | null
+  quantity?: number | string | null
+  available_quantity?: number | string | null
+  unit_cost?: number | string | null
+  total_cost?: number | string | null
+  cost_basis_unit?: number | string | null
+  cost_basis_total?: number | string | null
+  estimated_value_total?: number | string | null
   current_value?: number | string | null
   estimated_value?: number | string | null
   sale_price?: number | string | null
@@ -118,17 +125,40 @@ function getItemDate(item: InventoryItemRow) {
 }
 
 function getItemCost(item: InventoryItemRow) {
-  return asNumber(item.allocated_cost ?? item.purchase_price ?? item.cost ?? 0)
+  const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1)
+  const costBasisTotal = asNumber(item.cost_basis_total)
+  const totalCost = asNumber(item.total_cost)
+  const allocatedCost = asNumber(item.allocated_cost)
+  const costBasisUnit = asNumber(item.cost_basis_unit)
+  const unitCost = asNumber(item.unit_cost)
+  const purchasePrice = asNumber(item.purchase_price)
+  const legacyCost = asNumber(item.cost)
+
+  if (costBasisTotal > 0) return costBasisTotal
+  if (totalCost > 0) return totalCost
+  if (allocatedCost > 0) return allocatedCost
+  if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1)
+  if (unitCost > 0) return unitCost * Math.max(quantity, 1)
+  if (purchasePrice > 0) return purchasePrice
+  if (legacyCost > 0) return legacyCost
+
+  return 0
 }
 
 function getItemValue(item: InventoryItemRow) {
-  return asNumber(
-    item.current_value ??
-      item.estimated_value ??
-      item.sale_price ??
-      item.sold_price ??
-      0
-  )
+  const estimatedValueTotal = asNumber(item.estimated_value_total)
+  const currentValue = asNumber(item.current_value)
+  const estimatedValue = asNumber(item.estimated_value)
+  const salePrice = asNumber(item.sale_price)
+  const soldPrice = asNumber(item.sold_price)
+
+  if (estimatedValueTotal > 0) return estimatedValueTotal
+  if (currentValue > 0) return currentValue
+  if (estimatedValue > 0) return estimatedValue
+  if (salePrice > 0) return salePrice
+  if (soldPrice > 0) return soldPrice
+
+  return 0
 }
 
 function getBaseItemName(item: InventoryItemRow) {
