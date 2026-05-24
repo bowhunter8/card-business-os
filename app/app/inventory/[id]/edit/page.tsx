@@ -43,6 +43,14 @@ function renderStatusPill(status: string | null) {
     )
   }
 
+  if (status === 'sold') {
+    return (
+      <span className="rounded-full border border-red-800 bg-red-950/40 px-2 py-1 text-xs text-red-300">
+        Sold
+      </span>
+    )
+  }
+
   if (status === 'personal') {
     return (
       <span className="rounded-full border border-blue-800 bg-blue-950/40 px-2 py-1 text-xs text-blue-300">
@@ -254,6 +262,7 @@ export default async function EditInventoryPage({
             <select name="status" defaultValue={item.status ?? 'available'} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2">
               <option value="available">For Sale</option>
               <option value="listed">Listed</option>
+              <option value="sold">Sold</option>
               <option value="personal">Personal</option>
               <option value="junk">Junk</option>
             </select>

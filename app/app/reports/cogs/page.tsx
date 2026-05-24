@@ -279,16 +279,24 @@ function buildCogsExportParams({
   search,
   selectedPlatform,
   selectedProfitability,
+  selectedPeriod,
+  selectedYear,
+  selectedMonth,
+  selectedQuarter,
+  selectedDate,
   startDate,
   endDate,
-  resolvedSearchParams,
 }: {
   search: string;
   selectedPlatform: string;
   selectedProfitability: string;
+  selectedPeriod: ReportPeriod;
+  selectedYear: number;
+  selectedMonth: number;
+  selectedQuarter: number;
+  selectedDate: string;
   startDate: string;
   endDate: string;
-  resolvedSearchParams: SearchParams;
 }) {
   return {
     ...(search ? { q: search } : {}),
@@ -296,18 +304,17 @@ function buildCogsExportParams({
     ...(selectedProfitability !== "all"
       ? { profitability: selectedProfitability }
       : {}),
-    ...(startDate ? { startDate, dateFrom: startDate } : {}),
-    ...(endDate ? { endDate, dateTo: endDate } : {}),
-    ...(resolvedSearchParams.period
-      ? { period: resolvedSearchParams.period }
+    period: periodToSharedFilterValue(selectedPeriod),
+    year: String(selectedYear),
+    ...(selectedPeriod === "day" || selectedPeriod === "week"
+      ? { date: selectedDate }
       : {}),
-    ...(resolvedSearchParams.date ? { date: resolvedSearchParams.date } : {}),
-    ...(resolvedSearchParams.year ? { year: resolvedSearchParams.year } : {}),
-    ...(resolvedSearchParams.month
-      ? { month: resolvedSearchParams.month }
+    ...(selectedPeriod === "month" ? { month: String(selectedMonth) } : {}),
+    ...(selectedPeriod === "quarter"
+      ? { quarter: String(selectedQuarter) }
       : {}),
-    ...(resolvedSearchParams.quarter
-      ? { quarter: resolvedSearchParams.quarter }
+    ...(selectedPeriod === "custom"
+      ? { startDate, endDate, dateFrom: startDate, dateTo: endDate }
       : {}),
   };
 }
@@ -444,10 +451,7 @@ function parseInputDate(value: string | undefined | null, fallback: Date) {
 
 function getStartOfWeek(date: Date) {
   const result = new Date(date);
-  const day = result.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-
-  result.setDate(result.getDate() + diff);
+  result.setDate(result.getDate() - result.getDay());
 
   return result;
 }
@@ -570,17 +574,28 @@ export default async function CogsReportPage({
   const selectedPeriod = normalizePeriod(resolvedSearchParams.period);
   const selectedMonth = clampMonth(resolvedSearchParams.month);
   const selectedQuarter = clampQuarter(resolvedSearchParams.quarter);
+
+  const selectedDate =
+    selectedPeriod === "day" || selectedPeriod === "week"
+      ? resolvedSearchParams.date || ""
+      : "";
+
   const selectedStart =
-    resolvedSearchParams.start ||
-    resolvedSearchParams.startDate ||
-    resolvedSearchParams.date ||
-    resolvedSearchParams.dateFrom ||
-    "";
+    selectedPeriod === "custom"
+      ? resolvedSearchParams.start ||
+        resolvedSearchParams.startDate ||
+        resolvedSearchParams.dateFrom ||
+        ""
+      : selectedDate;
+
   const selectedEnd =
-    resolvedSearchParams.end ||
-    resolvedSearchParams.endDate ||
-    resolvedSearchParams.dateTo ||
-    "";
+    selectedPeriod === "custom"
+      ? resolvedSearchParams.end ||
+        resolvedSearchParams.endDate ||
+        resolvedSearchParams.dateTo ||
+        ""
+      : "";
+
   const { startDate, endDate } = getReportDateRange({
     selectedYear,
     period: selectedPeriod,
@@ -594,18 +609,20 @@ export default async function CogsReportPage({
     search,
     selectedPlatform,
     selectedProfitability,
+    selectedPeriod,
+    selectedYear,
+    selectedMonth,
+    selectedQuarter,
+    selectedDate: selectedDate || startDate,
     startDate,
     endDate,
-    resolvedSearchParams,
   });
 
   const csvHref = buildCogsCsvHref({
-    ...resolvedSearchParams,
+    ...exportParams,
     q: search,
     platform: selectedPlatform,
     profitability: selectedProfitability,
-    startDate,
-    endDate,
   });
 
   const supabase = await createClient();
@@ -802,12 +819,16 @@ export default async function CogsReportPage({
       <form action="/app/reports/cogs" method="get" className="space-y-2">
         <ReportDateFilters
           period={periodToSharedFilterValue(selectedPeriod)}
-          date={selectedStart || startDate}
+          date={
+            selectedPeriod === "day" || selectedPeriod === "week"
+              ? selectedDate || startDate
+              : ""
+          }
           year={String(selectedYear)}
           month={String(selectedMonth)}
           quarter={String(selectedQuarter)}
-          startDate={startDate}
-          endDate={endDate}
+          startDate={selectedPeriod === "custom" ? startDate : ""}
+          endDate={selectedPeriod === "custom" ? endDate : ""}
           resetHref="/app/reports/cogs"
         >
           <>

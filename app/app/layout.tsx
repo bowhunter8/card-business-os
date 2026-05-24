@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { signOutAction } from '@/app/actions/auth'
 import AppGlobalSearch from './components/app-global-search'
+import AppReadyGuard from './components/AppReadyGuard'
 
 type AppUserAccessRow = {
   id: string
@@ -138,6 +139,7 @@ export default async function AppLayout({
 
         {/* Main */}
         <main className="min-w-0">
+          <AppReadyGuard />
 
           {/* Top Bar */}
           <div className="sticky top-0 z-50 px-3 py-3 backdrop-blur md:px-6 md:py-4">

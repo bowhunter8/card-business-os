@@ -604,76 +604,19 @@ export default async function ExpensesReportPage({
       </form>
 
       <section className="app-section px-3 py-3">
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={buildRangeHref({
-              year: currentYear,
-              period: 'day',
-              start: todayValue,
-              category: selectedCategory,
-            })}
-            className="app-button"
-          >
-            Today
-          </Link>
-
-          <Link
-            href={buildRangeHref({
-              year: currentYear,
-              period: 'week',
-              start: todayValue,
-              category: selectedCategory,
-            })}
-            className="app-button"
-          >
-            This Week
-          </Link>
-
-          <Link
-            href={buildRangeHref({
-              year: currentYear,
-              period: 'month',
-              month: currentMonth,
-              category: selectedCategory,
-            })}
-            className="app-button"
-          >
-            This Month
-          </Link>
-
-          <Link
-            href={buildRangeHref({
-              year: currentYear,
-              period: 'quarter',
-              quarter: currentQuarter,
-              category: selectedCategory,
-            })}
-            className="app-button"
-          >
-            This Quarter
-          </Link>
-
-          <Link
-            href={buildRangeHref({
-              year: currentYear,
-              period: 'year',
-              category: selectedCategory,
-            })}
-            className="app-button"
-          >
-            This Year
-          </Link>
+        <div className="text-sm font-semibold text-zinc-100">
+          {reportRangeLabel}
         </div>
 
-        <div className="mt-3 border-t border-zinc-800 pt-3">
-          <div className="text-sm font-semibold text-zinc-100">{reportRangeLabel}</div>
-          <div className="mt-1 text-xs text-zinc-400">
-            Range used for manual expenses: {startDate} through {endDate}.
-            {selectedCategory ? ` Category filter: ${selectedCategory}.` : ' Category filter: all categories.'}
-          </div>
-          <div className="mt-1 text-xs text-zinc-500">
-            This page is read-only. Add, edit, delete, and correction actions stay on the normal Expenses page.
-          </div>
+        <div className="mt-1 text-xs text-zinc-400">
+          Range used for manual expenses: {startDate} through {endDate}.
+          {selectedCategory
+            ? ` Category filter: ${selectedCategory}.`
+            : ' Category filter: all categories.'}
+        </div>
+
+        <div className="mt-1 text-xs text-zinc-500">
+          This page is read-only. Add, edit, delete, and correction actions stay on the normal Expenses page.
         </div>
       </section>
 

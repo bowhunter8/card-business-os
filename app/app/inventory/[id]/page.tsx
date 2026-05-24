@@ -112,6 +112,10 @@ function renderStatusPill(status: string | null) {
     return <span className="app-badge app-badge-info">Listed</span>
   }
 
+  if (status === 'sold') {
+    return <span className="app-badge app-badge-danger">Sold</span>
+  }
+
   if (status === 'personal') {
     return <span className="app-badge app-badge-info">Personal</span>
   }
@@ -207,6 +211,7 @@ function EditableSelect({
       >
         <option value="available">For Sale</option>
         <option value="listed">Listed</option>
+        <option value="sold">Sold</option>
         <option value="personal">Personal</option>
         <option value="junk">Junk</option>
         <option value="giveaway">Giveaway</option>
@@ -383,6 +388,9 @@ export default async function InventoryDetailPage({
   const totalQtySold = activeSales.reduce((sum, row) => sum + Number(row.quantity_sold ?? 0), 0)
 
   const availableQuantity = Number(item.available_quantity ?? 0)
+  const effectiveStatus =
+    availableQuantity <= 0 && totalQtySold > 0 ? 'sold' : item.status
+
   const hasAvailableToSell = availableQuantity > 0
   const latestActiveSale = activeSales[0] ?? null
   const canDelete = activeSales.length === 0
@@ -408,7 +416,7 @@ export default async function InventoryDetailPage({
             {buildDisplay(item) || item.title || 'Untitled item'}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            {renderStatusPill(item.status)}
+            {renderStatusPill(effectiveStatus)}
 
             {!isFinalizedDisposal && hasAvailableToSell ? (
               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
@@ -464,26 +472,26 @@ export default async function InventoryDetailPage({
       {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
       {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
 
-      {(item.status === 'personal' || item.status === 'giveaway' || item.status === 'junk') ? (
+      {(effectiveStatus === 'personal' || effectiveStatus === 'giveaway' || effectiveStatus === 'junk') ? (
         <div className="app-alert-warning">
           This status change affects tax reporting. Ensure this item is not also counted as an expense or inventory elsewhere to avoid double counting.
         </div>
       ) : null}
 
 
-      {item.status === 'junk' ? (
+      {effectiveStatus === 'junk' ? (
         <div className="app-alert-info">
           This item is marked as Junk and is being kept for recordkeeping, not active selling.
         </div>
       ) : null}
 
-      {item.status === 'personal' ? (
+      {effectiveStatus === 'personal' ? (
         <div className="app-alert-info">
           This item is marked as Personal Collection and is not currently part of your active sell inventory.
         </div>
       ) : null}
 
-      {item.status === 'giveaway' ? (
+      {effectiveStatus === 'giveaway' ? (
         <div className="app-alert-info">
           This item has been marked as a Giveaway and recorded as a marketing expense.
         </div>
@@ -536,7 +544,7 @@ export default async function InventoryDetailPage({
         <EditableSelect
           label="Status"
           name="status"
-          defaultValue={item.status ?? 'available'}
+          defaultValue={effectiveStatus ?? 'available'}
           formId={itemFormId}
         />
 

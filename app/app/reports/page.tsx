@@ -213,6 +213,24 @@ export default function ReportsPage() {
                 description:
                   'Review sales, gross receipts, selling costs, net proceeds, realized COGS, and profit.',
               },
+              {
+                href: '/app/reports/platform-profitability',
+                title: 'Platform Profitability',
+                description:
+                  'Compare Whatnot, eBay, direct sales, fees, shipping impact, margins, and platform profitability.',
+              },
+              {
+                href: '/app/reports/break-profitability',
+                title: 'Break Profitability',
+                description:
+                  'Review break cost, realized profit, remaining inventory basis, projected value, and overall break ROI.',
+              },
+              {
+                href: '/app/reports/shipping',
+                title: 'Shipping Reports',
+                description:
+                  'Review shipping charged, postage costs, supplies costs, shipping profit/loss, and fulfillment trends.',
+              },
             ]}
           />
 
@@ -257,6 +275,24 @@ export default function ReportsPage() {
                 title: 'Year-End Tax Center',
                 description:
                   'Review Schedule C support, beginning inventory, ending inventory carryover, workbook exports, and year-end tax reporting.',
+              },
+              {
+                href: '/app/reports/profit-loss',
+                title: 'Profit & Loss Statement',
+                description:
+                  'Review income, COGS, selling costs, expenses, and net profit/loss for monthly, quarterly, yearly, or custom periods.',
+              },
+              {
+                href: '/app/reports/sales-tax',
+                title: 'Sales Tax Reports',
+                description:
+                  'Review sales-tax support, platform summaries, marketplace tax placeholders, and taxable sales review notes.',
+              },
+              {
+                href: '/app/reports/shipping',
+                title: 'Shipping Summary',
+                description:
+                  'Analyze shipping charged, postage expenses, supplies costs, and shipping profitability.',
               },
             ]}
           />

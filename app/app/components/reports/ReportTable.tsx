@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import React from 'react'
 
 type ReportTableColumn<T> = {
@@ -20,28 +19,6 @@ function getAlignClass(align?: 'left' | 'right' | 'center') {
   if (align === 'right') return 'text-right'
   if (align === 'center') return 'text-center'
   return ''
-}
-
-function getStringValue(value: unknown) {
-  if (typeof value !== 'string') return ''
-  return value.trim()
-}
-
-function getDefaultRowHref<T>(row: T) {
-  if (!row || typeof row !== 'object') return null
-
-  const record = row as Record<string, unknown>
-
-  const inventoryItemId = getStringValue(record.inventory_item_id)
-  if (inventoryItemId) return `/app/inventory/${inventoryItemId}`
-
-  const itemId = getStringValue(record.item_id)
-  if (itemId) return `/app/inventory/${itemId}`
-
-  const id = getStringValue(record.id)
-  if (id) return `/app/inventory/${id}`
-
-  return null
 }
 
 export default function ReportTable<T>({
@@ -71,7 +48,7 @@ export default function ReportTable<T>({
 
           <tbody>
             {rows.map((row, rowIndex) => {
-              const href = rowHref ? rowHref(row) : getDefaultRowHref(row)
+              const href = rowHref ? rowHref(row) : null
 
               return (
                 <tr
@@ -91,13 +68,12 @@ export default function ReportTable<T>({
                         )} ${column.className ?? ''}`}
                       >
                         {href ? (
-                          <Link
+                          <a
                             href={href}
-                            prefetch={false}
                             className="block h-full w-full text-inherit"
                           >
                             {cellContent}
-                          </Link>
+                          </a>
                         ) : (
                           cellContent
                         )}

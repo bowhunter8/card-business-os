@@ -1,6 +1,11 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import {
+  buildReportCsvHref,
+  buildReportPdfHref,
+  buildReportPrintHref,
+} from '@/lib/reports/report-url-utils'
+import {
   deleteReportPresetAction,
   saveReportPresetAction,
   toggleFavoriteReportPresetAction,
@@ -269,6 +274,241 @@ function buildInventoryHref(search: string, selectedStatus: string) {
   return `/app/inventory${queryString ? `?${queryString}` : ''}`
 }
 
+type ReportPeriod = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
+
+function normalizePeriod(raw?: string | null): ReportPeriod {
+  if (raw === 'day' || raw === 'daily') return 'daily'
+  if (raw === 'week' || raw === 'weekly') return 'weekly'
+  if (raw === 'month' || raw === 'monthly') return 'monthly'
+  if (raw === 'quarter' || raw === 'quarterly') return 'quarterly'
+  if (raw === 'year' || raw === 'yearly') return 'yearly'
+  if (raw === 'custom') return 'custom'
+
+  return 'monthly'
+}
+
+function clampYear(raw?: string | null) {
+  const currentYear = new Date().getFullYear()
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 2000 || parsed > currentYear + 1) {
+    return currentYear
+  }
+
+  return parsed
+}
+
+function clampMonth(raw?: string | null) {
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 12) {
+    return new Date().getMonth() + 1
+  }
+
+  return parsed
+}
+
+function clampQuarter(raw?: string | null) {
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 4) {
+    return Math.floor(new Date().getMonth() / 3) + 1
+  }
+
+  return parsed
+}
+
+function dateToInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+function parseInputDate(value: string | undefined | null, fallback: Date) {
+  if (!value) return fallback
+
+  const parts = value.split('-').map((part) => Number(part))
+  if (parts.length !== 3) return fallback
+
+  const [year, month, day] = parts
+  if (!year || !month || !day) return fallback
+
+  const date = new Date(year, month - 1, day)
+
+  if (Number.isNaN(date.getTime())) return fallback
+
+  return date
+}
+
+function getStartOfWeekSunday(date: Date) {
+  const result = new Date(date)
+  result.setDate(result.getDate() - result.getDay())
+
+  return result
+}
+
+function getEndOfWeekSunday(date: Date) {
+  const result = getStartOfWeekSunday(date)
+  result.setDate(result.getDate() + 6)
+
+  return result
+}
+
+function getReportDateRange({
+  selectedYear,
+  period,
+  date,
+  start,
+  end,
+  month,
+  quarter,
+}: {
+  selectedYear: number
+  period: ReportPeriod
+  date?: string | null
+  start?: string | null
+  end?: string | null
+  month: number
+  quarter: number
+}) {
+  const today = new Date()
+  const defaultAnchor =
+    selectedYear === today.getFullYear() ? today : new Date(selectedYear, 0, 1)
+
+  if (period === 'daily') {
+    const selectedDay = parseInputDate(date, defaultAnchor)
+
+    return {
+      startDate: dateToInputValue(selectedDay),
+      endDate: dateToInputValue(selectedDay),
+      date: dateToInputValue(selectedDay),
+      year: selectedDay.getFullYear(),
+      month: selectedDay.getMonth() + 1,
+      quarter: Math.floor(selectedDay.getMonth() / 3) + 1,
+    }
+  }
+
+  if (period === 'weekly') {
+    const selectedDay = parseInputDate(date, defaultAnchor)
+    const weekStart = getStartOfWeekSunday(selectedDay)
+    const weekEnd = getEndOfWeekSunday(selectedDay)
+
+    return {
+      startDate: dateToInputValue(weekStart),
+      endDate: dateToInputValue(weekEnd),
+      date: dateToInputValue(weekStart),
+      year: weekStart.getFullYear(),
+      month: weekStart.getMonth() + 1,
+      quarter: Math.floor(weekStart.getMonth() / 3) + 1,
+    }
+  }
+
+  if (period === 'monthly') {
+    const monthStart = new Date(selectedYear, month - 1, 1)
+    const monthEnd = new Date(selectedYear, month, 0)
+
+    return {
+      startDate: dateToInputValue(monthStart),
+      endDate: dateToInputValue(monthEnd),
+      date: dateToInputValue(monthStart),
+      year: selectedYear,
+      month,
+      quarter: Math.floor((month - 1) / 3) + 1,
+    }
+  }
+
+  if (period === 'quarterly') {
+    const quarterStartMonth = (quarter - 1) * 3
+    const quarterStart = new Date(selectedYear, quarterStartMonth, 1)
+    const quarterEnd = new Date(selectedYear, quarterStartMonth + 3, 0)
+
+    return {
+      startDate: dateToInputValue(quarterStart),
+      endDate: dateToInputValue(quarterEnd),
+      date: dateToInputValue(quarterStart),
+      year: selectedYear,
+      month: quarterStartMonth + 1,
+      quarter,
+    }
+  }
+
+  if (period === 'yearly') {
+    return {
+      startDate: `${selectedYear}-01-01`,
+      endDate: `${selectedYear}-12-31`,
+      date: `${selectedYear}-01-01`,
+      year: selectedYear,
+      month: new Date().getMonth() + 1,
+      quarter: Math.floor(new Date().getMonth() / 3) + 1,
+    }
+  }
+
+  const fallbackStart = new Date(selectedYear, 0, 1)
+  const fallbackEnd = new Date(selectedYear, 11, 31)
+  const customStart = parseInputDate(start, fallbackStart)
+  const customEnd = parseInputDate(end, fallbackEnd)
+
+  const normalizedStart =
+    customStart.getTime() <= customEnd.getTime() ? customStart : customEnd
+  const normalizedEnd =
+    customStart.getTime() <= customEnd.getTime() ? customEnd : customStart
+
+  return {
+    startDate: dateToInputValue(normalizedStart),
+    endDate: dateToInputValue(normalizedEnd),
+    date: dateToInputValue(normalizedStart),
+    year: selectedYear,
+    month,
+    quarter,
+  }
+}
+
+function buildWriteOffExportParams({
+  search,
+  selectedStatus,
+  selectedPeriod,
+  selectedYear,
+  selectedMonth,
+  selectedQuarter,
+  selectedDate,
+  startDate,
+  endDate,
+}: {
+  search: string
+  selectedStatus: string
+  selectedPeriod: ReportPeriod
+  selectedYear: number
+  selectedMonth: number
+  selectedQuarter: number
+  selectedDate: string
+  startDate: string
+  endDate: string
+}) {
+  return {
+    ...(search ? { q: search } : {}),
+    ...(selectedStatus !== 'all' ? { status: selectedStatus } : {}),
+    period: selectedPeriod,
+    year: String(selectedYear),
+    ...(selectedPeriod === 'daily' || selectedPeriod === 'weekly'
+      ? { date: selectedDate }
+      : {}),
+    ...(selectedPeriod === 'monthly' ? { month: String(selectedMonth) } : {}),
+    ...(selectedPeriod === 'quarterly' ? { quarter: String(selectedQuarter) } : {}),
+    ...(selectedPeriod === 'custom'
+      ? {
+          startDate,
+          endDate,
+          dateFrom: startDate,
+          dateTo: endDate,
+          from: startDate,
+          to: endDate,
+        }
+      : {}),
+  }
+}
+
 export default async function WriteOffDisposalReportPage({
   searchParams,
 }: {
@@ -278,16 +518,53 @@ export default async function WriteOffDisposalReportPage({
 
   const search = resolvedSearchParams.q?.trim() || ''
   const selectedStatus = resolvedSearchParams.status || 'all'
-  const startDate =
-    resolvedSearchParams.startDate ||
-    resolvedSearchParams.dateFrom ||
-    resolvedSearchParams.from ||
-    ''
-  const endDate =
-    resolvedSearchParams.endDate ||
-    resolvedSearchParams.dateTo ||
-    resolvedSearchParams.to ||
-    ''
+  const selectedPeriod = normalizePeriod(resolvedSearchParams.period)
+  const selectedYear = clampYear(resolvedSearchParams.year)
+  const selectedMonth = clampMonth(resolvedSearchParams.month)
+  const selectedQuarter = clampQuarter(resolvedSearchParams.quarter)
+  const selectedDate =
+    selectedPeriod === 'daily' || selectedPeriod === 'weekly'
+      ? resolvedSearchParams.date || ''
+      : ''
+  const selectedStart =
+    selectedPeriod === 'custom'
+      ? resolvedSearchParams.startDate ||
+        resolvedSearchParams.dateFrom ||
+        resolvedSearchParams.from ||
+        ''
+      : ''
+  const selectedEnd =
+    selectedPeriod === 'custom'
+      ? resolvedSearchParams.endDate ||
+        resolvedSearchParams.dateTo ||
+        resolvedSearchParams.to ||
+        ''
+      : ''
+
+  const resolvedDateRange = getReportDateRange({
+    selectedYear,
+    period: selectedPeriod,
+    date: selectedDate,
+    start: selectedStart,
+    end: selectedEnd,
+    month: selectedMonth,
+    quarter: selectedQuarter,
+  })
+
+  const startDate = resolvedDateRange.startDate
+  const endDate = resolvedDateRange.endDate
+
+  const exportParams = buildWriteOffExportParams({
+    search,
+    selectedStatus,
+    selectedPeriod,
+    selectedYear,
+    selectedMonth,
+    selectedQuarter,
+    selectedDate: selectedDate || resolvedDateRange.date,
+    startDate,
+    endDate,
+  })
 
   const supabase = await createClient()
 
@@ -367,7 +644,11 @@ export default async function WriteOffDisposalReportPage({
             Year-End Tax Center
           </Link>
 
-          <ReportExportButtons />
+          <ReportExportButtons
+            csvHref={buildReportCsvHref('write-offs', exportParams)}
+            pdfHref={buildReportPdfHref('write-offs', exportParams)}
+            printHref={buildReportPrintHref('write-offs', exportParams)}
+          />
         </div>
       </div>
 
@@ -384,13 +665,17 @@ export default async function WriteOffDisposalReportPage({
 
       <form action="/app/reports/write-offs" method="get" className="space-y-3">
         <ReportDateFilters
-          period={resolvedSearchParams.period || 'monthly'}
-          date={resolvedSearchParams.date || ''}
-          year={resolvedSearchParams.year || ''}
-          month={resolvedSearchParams.month || ''}
-          quarter={resolvedSearchParams.quarter || ''}
-          startDate={startDate}
-          endDate={endDate}
+          period={selectedPeriod}
+          date={
+            selectedPeriod === 'daily' || selectedPeriod === 'weekly'
+              ? selectedDate || resolvedDateRange.date
+              : ''
+          }
+          year={String(selectedYear)}
+          month={String(selectedMonth)}
+          quarter={String(selectedQuarter)}
+          startDate={selectedPeriod === 'custom' ? startDate : ''}
+          endDate={selectedPeriod === 'custom' ? endDate : ''}
           resetHref="/app/reports/write-offs"
         >
           <>
@@ -453,22 +738,22 @@ export default async function WriteOffDisposalReportPage({
             <input
               type="hidden"
               name="period"
-              value={resolvedSearchParams.period || ''}
+              value={selectedPeriod}
             />
             <input
               type="hidden"
               name="year"
-              value={resolvedSearchParams.year || ''}
+              value={String(selectedYear)}
             />
             <input
               type="hidden"
               name="month"
-              value={resolvedSearchParams.month || ''}
+              value={String(selectedMonth)}
             />
             <input
               type="hidden"
               name="quarter"
-              value={resolvedSearchParams.quarter || ''}
+              value={String(selectedQuarter)}
             />
 
             <label className="block min-w-[220px]">
@@ -588,6 +873,7 @@ export default async function WriteOffDisposalReportPage({
 
         <ReportTable
           rows={writeOffItems}
+          rowHref={(item) => `/app/inventory/${item.id}`}
           emptyMessage="No write-off or disposal records matched those filters."
           columns={[
             {
@@ -595,12 +881,9 @@ export default async function WriteOffDisposalReportPage({
               label: 'Item',
               render: (item) => (
                 <div className="min-w-[240px]">
-                  <Link
-                    href={`/app/inventory/${item.id}`}
-                    className="font-medium text-zinc-100 hover:underline"
-                  >
+                  <div className="font-medium text-zinc-100">
                     {getItemName(item)}
-                  </Link>
+                  </div>
                   <div className="mt-0.5 text-xs text-zinc-500">
                     {getItemDetails(item)}
                   </div>

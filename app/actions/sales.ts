@@ -12,8 +12,44 @@ function safeNumber(value: FormDataEntryValue | null) {
   return Number.isFinite(num) ? num : 0
 }
 
+function safeOptionalNumber(value: FormDataEntryValue | null) {
+  if (value === null) return null
+
+  const text = String(value).trim()
+  if (text === '') return null
+
+  const num = Number(text)
+  return Number.isFinite(num) ? num : null
+}
+
 function roundMoney(value: number) {
   return Number(value.toFixed(2))
+}
+
+function normalizeSalesTaxResponsibility(value: string) {
+  if (
+    value === 'marketplace_collected' ||
+    value === 'seller_collected' ||
+    value === 'not_collected' ||
+    value === 'exempt_or_not_taxable'
+  ) {
+    return value
+  }
+
+  return 'marketplace_collected'
+}
+
+function normalizeSalesChannelType(value: string) {
+  if (
+    value === 'marketplace' ||
+    value === 'local_sale' ||
+    value === 'card_show' ||
+    value === 'direct_private'
+  ) {
+    return value
+  }
+
+  return 'marketplace'
 }
 
 function getSafeUnitCost(item: {
@@ -70,6 +106,14 @@ type SaleCalculationInput = {
   otherCosts: number
   unitCost: number
   quantitySold: number
+}
+
+type SalesTaxTrackingInput = {
+  salesTaxCollected: number
+  salesTaxResponsibility: string
+  salesChannelType: string
+  taxState: string
+  taxNotes: string
 }
 
 function calculateSaleNumbers(input: SaleCalculationInput) {
@@ -193,6 +237,11 @@ async function insertSaleAndUpdateInventory({
   shippingCost,
   suppliesCost,
   unitCost,
+  salesTaxCollected,
+  salesTaxResponsibility,
+  salesChannelType,
+  taxState,
+  taxNotes,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>
   userId: string
@@ -214,7 +263,7 @@ async function insertSaleAndUpdateInventory({
   shippingCost: number
   suppliesCost: number
   unitCost: number
-}) {
+} & SalesTaxTrackingInput) {
   const saleInsert = await supabase
     .from('sales')
     .insert({
@@ -231,6 +280,13 @@ async function insertSaleAndUpdateInventory({
       profit,
       platform: platform || null,
       notes: notes || null,
+      shipping_charged: shippingCharged,
+      supplies_cost: suppliesCost,
+      sales_tax_collected: salesTaxCollected,
+      sales_tax_responsibility: salesTaxResponsibility,
+      sales_channel_type: salesChannelType,
+      tax_state: taxState || null,
+      tax_notes: taxNotes || null,
     })
     .select('id')
     .single()
@@ -270,7 +326,7 @@ async function insertSaleAndUpdateInventory({
     event_date: saleDate,
     notes:
       notes ||
-      `Recorded sale. Unit cost ${unitCost.toFixed(2)}, quantity ${quantitySold}, COGS ${cogs.toFixed(2)}. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}. Do not also enter sale-level supplies as a separate manual expense.`,
+      `Recorded sale. Unit cost ${unitCost.toFixed(2)}, quantity ${quantitySold}, COGS ${cogs.toFixed(2)}. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}. Sales tax collected ${salesTaxCollected.toFixed(2)} (${salesTaxResponsibility}, ${salesChannelType}). Do not also enter sale-level supplies as a separate manual expense.`,
   })
 
   return {
@@ -289,13 +345,26 @@ export async function createSaleAction(formData: FormData) {
   const itemSalePrice = safeNumber(formData.get('gross_sale'))
   const shippingChargedInput = safeNumber(formData.get('shipping_charged'))
   const platformFees = safeNumber(formData.get('platform_fees'))
-  const shippingCostInput = safeNumber(formData.get('shipping_cost'))
+  const shippingCostInput =
+    safeOptionalNumber(formData.get('shipping_cost')) ??
+    safeOptionalNumber(formData.get('postage_cost')) ??
+    0
   const suppliesCostInput = safeNumber(formData.get('supplies_cost'))
   const otherCosts = safeNumber(formData.get('other_costs'))
 
   const platform = safeText(formData.get('platform'))
   const notes = safeText(formData.get('notes'))
   const shippingProfileId = safeText(formData.get('shipping_profile_id'))
+
+  const salesTaxCollected = roundMoney(safeNumber(formData.get('sales_tax_collected')))
+  const salesTaxResponsibility = normalizeSalesTaxResponsibility(
+    safeText(formData.get('sales_tax_responsibility'))
+  )
+  const salesChannelType = normalizeSalesChannelType(
+    safeText(formData.get('sales_channel_type'))
+  )
+  const taxState = safeText(formData.get('tax_state')).toUpperCase()
+  const taxNotes = safeText(formData.get('tax_notes'))
 
   if (!inventoryItemId) {
     redirect('/app/inventory?error=Missing inventory item id')
@@ -383,6 +452,11 @@ export async function createSaleAction(formData: FormData) {
     shippingCost,
     suppliesCost,
     unitCost,
+    salesTaxCollected,
+    salesTaxResponsibility,
+    salesChannelType,
+    taxState,
+    taxNotes,
   })
 
   if (!result.ok) {
@@ -404,12 +478,25 @@ export async function quickSellAction(formData: FormData) {
   const itemSalePrice = safeNumber(formData.get('gross_sale'))
   const shippingCharged = safeNumber(formData.get('shipping_charged'))
   const platformFees = safeNumber(formData.get('platform_fees'))
-  const shippingCost = safeNumber(formData.get('shipping_cost'))
+  const shippingCost =
+    safeOptionalNumber(formData.get('shipping_cost')) ??
+    safeOptionalNumber(formData.get('postage_cost')) ??
+    0
   const suppliesCost = safeNumber(formData.get('supplies_cost'))
   const otherCosts = safeNumber(formData.get('other_costs'))
 
   const platform = safeText(formData.get('platform'))
   const notes = safeText(formData.get('notes'))
+
+  const salesTaxCollected = roundMoney(safeNumber(formData.get('sales_tax_collected')))
+  const salesTaxResponsibility = normalizeSalesTaxResponsibility(
+    safeText(formData.get('sales_tax_responsibility'))
+  )
+  const salesChannelType = normalizeSalesChannelType(
+    safeText(formData.get('sales_channel_type'))
+  )
+  const taxState = safeText(formData.get('tax_state')).toUpperCase()
+  const taxNotes = safeText(formData.get('tax_notes'))
 
   if (!inventoryItemId) {
     redirect('/app/inventory?error=Missing inventory item id')
@@ -483,6 +570,11 @@ export async function quickSellAction(formData: FormData) {
     shippingCost,
     suppliesCost,
     unitCost,
+    salesTaxCollected,
+    salesTaxResponsibility,
+    salesChannelType,
+    taxState,
+    taxNotes,
   })
 
   if (!result.ok) {
@@ -536,6 +628,13 @@ export async function updateSaleAction(formData: FormData) {
         net_proceeds,
         cost_of_goods_sold,
         profit,
+        shipping_charged,
+        supplies_cost,
+        sales_tax_collected,
+        sales_tax_responsibility,
+        sales_channel_type,
+        tax_state,
+        tax_notes,
         reversed_at
       `)
       .eq('id', saleId)
@@ -586,6 +685,24 @@ export async function updateSaleAction(formData: FormData) {
     redirect(buildCostBasisErrorRedirect(inventoryItemId, `/app/sales/${saleId}/edit`))
   }
 
+  const salesTaxCollected =
+    safeOptionalNumber(formData.get('sales_tax_collected')) ??
+    Number(existingSale.sales_tax_collected ?? 0)
+  const salesTaxResponsibility = normalizeSalesTaxResponsibility(
+    safeText(formData.get('sales_tax_responsibility')) ||
+      String(existingSale.sales_tax_responsibility ?? 'marketplace_collected')
+  )
+  const salesChannelType = normalizeSalesChannelType(
+    safeText(formData.get('sales_channel_type')) ||
+      String(existingSale.sales_channel_type ?? 'marketplace')
+  )
+  const taxState =
+    safeText(formData.get('tax_state')).toUpperCase() ||
+    String(existingSale.tax_state ?? '')
+  const taxNotes =
+    safeText(formData.get('tax_notes')) ||
+    String(existingSale.tax_notes ?? '')
+
   const netProceeds = roundMoney(grossSale - platformFees - shippingCost - otherCosts)
   const cogs = roundMoney(unitCost * quantitySold)
   const profit = roundMoney(netProceeds - cogs)
@@ -608,6 +725,11 @@ export async function updateSaleAction(formData: FormData) {
       profit,
       platform: platform || null,
       notes: notes || null,
+      sales_tax_collected: roundMoney(salesTaxCollected),
+      sales_tax_responsibility: salesTaxResponsibility,
+      sales_channel_type: salesChannelType,
+      tax_state: taxState || null,
+      tax_notes: taxNotes || null,
       reversed_at: null,
     })
     .eq('id', saleId)
@@ -642,7 +764,7 @@ export async function updateSaleAction(formData: FormData) {
     event_date: saleDate,
     notes:
       notes ||
-      `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}. Unit cost ${unitCost.toFixed(2)}, COGS ${cogs.toFixed(2)}.`,
+      `Edited sale. Previous qty ${oldQtySold}, new qty ${quantitySold}. Unit cost ${unitCost.toFixed(2)}, COGS ${cogs.toFixed(2)}. Sales tax collected ${roundMoney(salesTaxCollected).toFixed(2)} (${salesTaxResponsibility}, ${salesChannelType}).`,
   })
 
   redirect(`/app/inventory/${inventoryItemId}?updatedSale=1`)

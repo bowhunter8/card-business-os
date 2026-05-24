@@ -16,7 +16,7 @@ function cleanParams(params: ReportUrlParams) {
 
 export function buildReportCsvHref(reportType: string, params: ReportUrlParams = {}) {
   const query = cleanParams(params)
-  return `/api/reports/${reportType}/export${query ? `?${query}` : ''}`
+  return `/api/reports/${reportType}${query ? `?${query}` : ''}`
 }
 
 export function buildReportPdfHref(reportType: string, params: ReportUrlParams = {}) {

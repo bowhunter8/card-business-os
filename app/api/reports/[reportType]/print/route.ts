@@ -6,7 +6,12 @@ import {
   type PrintableReportColumn,
   type PrintableReportRow,
 } from '@/lib/reports/report-print-utils'
-import { formatReportDate, jsonError, moneyString, unauthorizedError } from '@/lib/reports/report-export-utils'
+import {
+  formatReportDate,
+  jsonError,
+  moneyString,
+  unauthorizedError,
+} from '@/lib/reports/report-export-utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,13 +71,15 @@ type SaleRow = {
 
 type SaleInventoryRow = {
   id: string
-  title: string | null
-  player_name: string | null
-  year: number | null
-  set_name: string | null
-  card_number: string | null
-  notes: string | null
-  status: string | null
+  title?: string | null
+  item_name?: string | null
+  player_name?: string | null
+  year?: number | string | null
+  set_name?: string | null
+  card_number?: string | null
+  item_number?: string | null
+  notes?: string | null
+  status?: string | null
 }
 
 type ExpenseRow = {
@@ -85,10 +92,46 @@ type ExpenseRow = {
   created_at: string | null
 }
 
+type BreakRow = {
+  id: string
+  break_date: string | null
+  source_name: string | null
+  product_name: string | null
+  order_number: string | null
+  total_cost: number | null
+}
+
+type TaxYearSettingsRow = {
+  beginning_inventory: number | null
+  ending_inventory_snapshot: number | null
+  ending_inventory_locked_at: string | null
+  business_use_of_home: number | null
+  vehicle_expense: number | null
+  depreciation_expense: number | null
+  legal_professional: number | null
+  insurance: number | null
+  utilities: number | null
+  taxes_licenses: number | null
+  repairs_maintenance: number | null
+  notes: string | null
+}
+
+type ReportConfig = Parameters<typeof buildPrintableReportHtml>[0]
+
 const REPORT_LABELS: Record<string, string> = {
   inventory: 'Inventory Report',
   sales: 'Sales Report',
+  cogs: 'Realized COGS Report',
   expenses: 'Expenses Report',
+  financial: 'Financial Report',
+  'sales-tax': 'Sales Tax Report',
+  shipping: 'Shipping Report',
+  'cpa-packet': 'CPA Export Packet',
+  'open-lots': 'Open Lots Report',
+  'write-offs': 'Write-Offs Report',
+  'break-profitability': 'Break Profitability Report',
+  'platform-profitability': 'Platform Profitability Report',
+  operations: 'Operations Report',
 }
 
 function asString(value: unknown) {
@@ -120,108 +163,8 @@ function normalizeStatus(status: string | null | undefined) {
   return clean || 'unknown'
 }
 
-function getItemDate(item: InventoryItemRow) {
-  return item.acquired_at || item.purchase_date || item.date_added || item.created_at || null
-}
-
-function getItemCost(item: InventoryItemRow) {
-  const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1)
-  const costBasisTotal = asNumber(item.cost_basis_total)
-  const totalCost = asNumber(item.total_cost)
-  const allocatedCost = asNumber(item.allocated_cost)
-  const costBasisUnit = asNumber(item.cost_basis_unit)
-  const unitCost = asNumber(item.unit_cost)
-  const purchasePrice = asNumber(item.purchase_price)
-  const legacyCost = asNumber(item.cost)
-
-  if (costBasisTotal > 0) return costBasisTotal
-  if (totalCost > 0) return totalCost
-  if (allocatedCost > 0) return allocatedCost
-  if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1)
-  if (unitCost > 0) return unitCost * Math.max(quantity, 1)
-  if (purchasePrice > 0) return purchasePrice
-  if (legacyCost > 0) return legacyCost
-
-  return 0
-}
-
-function getItemValue(item: InventoryItemRow) {
-  const estimatedValueTotal = asNumber(item.estimated_value_total)
-  const currentValue = asNumber(item.current_value)
-  const estimatedValue = asNumber(item.estimated_value)
-  const salePrice = asNumber(item.sale_price)
-  const soldPrice = asNumber(item.sold_price)
-
-  if (estimatedValueTotal > 0) return estimatedValueTotal
-  if (currentValue > 0) return currentValue
-  if (estimatedValue > 0) return estimatedValue
-  if (salePrice > 0) return salePrice
-  if (soldPrice > 0) return soldPrice
-
-  return 0
-}
-
-function getBaseItemName(item: InventoryItemRow) {
-  return item.title || item.item_name || item.player_name || 'Untitled item'
-}
-
-function getItemNumber(item: InventoryItemRow) {
-  return asString(item.item_number || item.card_number)
-}
-
-function matchesSearch(item: InventoryItemRow, search: string) {
-  if (!search) return true
-
-  const haystack = [
-    item.title,
-    item.item_name,
-    item.player_name,
-    item.year,
-    item.set_name,
-    item.card_number,
-    item.item_number,
-    item.status,
-    item.notes,
-  ]
-    .map(asString)
-    .join(' ')
-    .toLowerCase()
-
-  return haystack.includes(search.toLowerCase())
-}
-
-function matchesDateRange(item: InventoryItemRow, startDate: string, endDate: string) {
-  const rawDate = getItemDate(item)
-  if (!rawDate) return true
-
-  const itemDate = new Date(rawDate)
-  if (Number.isNaN(itemDate.getTime())) return true
-
-  if (startDate) {
-    const fromDate = new Date(`${startDate}T00:00:00`)
-    if (!Number.isNaN(fromDate.getTime()) && itemDate < fromDate) return false
-  }
-
-  if (endDate) {
-    const toDate = new Date(`${endDate}T23:59:59`)
-    if (!Number.isNaN(toDate.getTime()) && itemDate > toDate) return false
-  }
-
-  return true
-}
-
-function matchesValueFilter(item: InventoryItemRow, valueFilter: string) {
-  if (!valueFilter || valueFilter === 'all') return true
-
-  const value = getItemValue(item)
-
-  if (valueFilter === 'no-value') return value <= 0
-  if (valueFilter === 'under-10') return value > 0 && value < 10
-  if (valueFilter === '10-50') return value >= 10 && value <= 50
-  if (valueFilter === '50-100') return value > 50 && value <= 100
-  if (valueFilter === 'over-100') return value > 100
-
-  return true
+function platformKey(value: string | null | undefined) {
+  return String(value || 'Unknown').trim() || 'Unknown'
 }
 
 function clampYear(raw?: string | null) {
@@ -401,33 +344,6 @@ function getPeriodReportDateRange({
   }
 }
 
-function buildSaleItemName(item: SaleInventoryRow | undefined) {
-  if (!item) return 'Unlinked sale'
-
-  const parts = [
-    item.year,
-    item.set_name,
-    item.player_name,
-    item.card_number ? `#${item.card_number}` : null,
-    item.notes,
-  ]
-
-  return parts.filter(Boolean).join(' • ') || item.title || 'Untitled item'
-}
-
-function platformKey(value: string | null | undefined) {
-  return String(value || 'Unknown').trim() || 'Unknown'
-}
-
-function formatDateForPrint(value: string | null | undefined) {
-  if (!value) return 'Unknown'
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-
-  return date.toISOString().slice(0, 10)
-}
-
 function getDateRange(searchParams: URLSearchParams) {
   const startDate =
     searchParams.get('startDate') || searchParams.get('dateFrom') || ''
@@ -447,6 +363,132 @@ function getDateRange(searchParams: URLSearchParams) {
   }
 
   return 'All dates'
+}
+
+function getItemDate(item: InventoryItemRow) {
+  return item.acquired_at || item.purchase_date || item.date_added || item.created_at || null
+}
+
+function getItemCost(item: InventoryItemRow) {
+  const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1)
+  const costBasisTotal = asNumber(item.cost_basis_total)
+  const totalCost = asNumber(item.total_cost)
+  const allocatedCost = asNumber(item.allocated_cost)
+  const costBasisUnit = asNumber(item.cost_basis_unit)
+  const unitCost = asNumber(item.unit_cost)
+  const purchasePrice = asNumber(item.purchase_price)
+  const legacyCost = asNumber(item.cost)
+
+  if (costBasisTotal > 0) return costBasisTotal
+  if (totalCost > 0) return totalCost
+  if (allocatedCost > 0) return allocatedCost
+  if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1)
+  if (unitCost > 0) return unitCost * Math.max(quantity, 1)
+  if (purchasePrice > 0) return purchasePrice
+  if (legacyCost > 0) return legacyCost
+
+  return 0
+}
+
+function getItemValue(item: InventoryItemRow) {
+  const estimatedValueTotal = asNumber(item.estimated_value_total)
+  const currentValue = asNumber(item.current_value)
+  const estimatedValue = asNumber(item.estimated_value)
+  const salePrice = asNumber(item.sale_price)
+  const soldPrice = asNumber(item.sold_price)
+
+  if (estimatedValueTotal > 0) return estimatedValueTotal
+  if (currentValue > 0) return currentValue
+  if (estimatedValue > 0) return estimatedValue
+  if (salePrice > 0) return salePrice
+  if (soldPrice > 0) return soldPrice
+
+  return 0
+}
+
+function getBaseItemName(item: InventoryItemRow) {
+  return item.title || item.item_name || item.player_name || 'Untitled item'
+}
+
+function getItemNumber(item: InventoryItemRow) {
+  return asString(item.item_number || item.card_number)
+}
+
+function buildSaleItemName(item: SaleInventoryRow | undefined) {
+  if (!item) return 'Unlinked sale'
+
+  const directTitle = item.title || item.item_name || item.player_name || 'Untitled item'
+  const parts = [
+    item.year ? String(item.year) : '',
+    item.set_name || '',
+    item.item_number || item.card_number ? `#${item.item_number || item.card_number}` : '',
+  ].filter(Boolean)
+
+  return parts.length ? `${directTitle} — ${parts.join(' ')}` : directTitle
+}
+
+function formatDateForPrint(value: string | null | undefined) {
+  if (!value) return 'Unknown'
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toISOString().slice(0, 10)
+}
+
+function matchesSearch(item: InventoryItemRow, search: string) {
+  if (!search) return true
+
+  const haystack = [
+    item.title,
+    item.item_name,
+    item.player_name,
+    item.year,
+    item.set_name,
+    item.card_number,
+    item.item_number,
+    item.status,
+    item.notes,
+  ]
+    .map(asString)
+    .join(' ')
+    .toLowerCase()
+
+  return haystack.includes(search.toLowerCase())
+}
+
+function matchesDateRange(item: InventoryItemRow, startDate: string, endDate: string) {
+  const rawDate = getItemDate(item)
+  if (!rawDate) return true
+
+  const itemDate = new Date(rawDate)
+  if (Number.isNaN(itemDate.getTime())) return true
+
+  if (startDate) {
+    const fromDate = new Date(`${startDate}T00:00:00`)
+    if (!Number.isNaN(fromDate.getTime()) && itemDate < fromDate) return false
+  }
+
+  if (endDate) {
+    const toDate = new Date(`${endDate}T23:59:59`)
+    if (!Number.isNaN(toDate.getTime()) && itemDate > toDate) return false
+  }
+
+  return true
+}
+
+function matchesValueFilter(item: InventoryItemRow, valueFilter: string) {
+  if (!valueFilter || valueFilter === 'all') return true
+
+  const value = getItemValue(item)
+
+  if (valueFilter === 'no-value') return value <= 0
+  if (valueFilter === 'under-10') return value > 0 && value < 10
+  if (valueFilter === '10-50') return value >= 10 && value <= 50
+  if (valueFilter === '50-100') return value > 50 && value <= 100
+  if (valueFilter === 'over-100') return value > 100
+
+  return true
 }
 
 function htmlResponse(html: string) {
@@ -470,7 +512,43 @@ function withPrintScript(html: string) {
   )
 }
 
-function buildInventoryPrintConfig(items: InventoryItemRow[], reportLabel: string) {
+function getSelectedRange(searchParams: URLSearchParams, labelPrefix: string) {
+  const selectedYear = clampYear(searchParams.get('year'))
+  const selectedPeriod = normalizePeriod(searchParams.get('period'))
+  const selectedMonth = clampMonth(searchParams.get('month'))
+  const selectedQuarter = clampQuarter(searchParams.get('quarter'))
+
+  const explicitStart =
+    searchParams.get('start') ||
+    searchParams.get('startDate') ||
+    searchParams.get('dateFrom')
+  const explicitEnd =
+    searchParams.get('end') ||
+    searchParams.get('endDate') ||
+    searchParams.get('dateTo')
+  const selectedDate = searchParams.get('date')
+
+  const selectedStart =
+    selectedPeriod === 'custom'
+      ? explicitStart || selectedDate
+      : selectedDate || explicitStart
+  const selectedEnd =
+    selectedPeriod === 'custom'
+      ? explicitEnd
+      : explicitEnd
+
+  return getPeriodReportDateRange({
+    selectedYear,
+    period: selectedPeriod,
+    start: selectedStart,
+    end: selectedEnd,
+    month: selectedMonth,
+    quarter: selectedQuarter,
+    labelPrefix,
+  })
+}
+
+function buildInventoryPrintConfig(items: InventoryItemRow[], reportLabel: string): ReportConfig {
   const totalCost = items.reduce((sum, item) => sum + getItemCost(item), 0)
   const totalValue = items.reduce((sum, item) => sum + getItemValue(item), 0)
   const totalGainLoss = totalValue - totalCost
@@ -521,17 +599,222 @@ function buildInventoryPrintConfig(items: InventoryItemRow[], reportLabel: strin
   }
 }
 
+function buildOpenLotsPrintConfig({
+  items,
+  reportLabel,
+  statusFilter,
+  staleDays,
+}: {
+  items: InventoryItemRow[]
+  reportLabel: string
+  statusFilter: string
+  staleDays: number
+}): ReportConfig {
+  const totalRemainingCost = items.reduce((sum, item) => sum + getItemCost(item), 0)
+  const totalEstimatedValue = items.reduce((sum, item) => sum + getItemValue(item), 0)
+  const totalSpread = totalEstimatedValue - totalRemainingCost
+
+  const staleCount = items.filter((item) => {
+    const rawDate = getItemDate(item)
+    if (!rawDate) return false
+
+    const acquiredDate = new Date(rawDate)
+    if (Number.isNaN(acquiredDate.getTime())) return false
+
+    const ageDays = Math.floor(
+      (Date.now() - acquiredDate.getTime()) / (1000 * 60 * 60 * 24)
+    )
+
+    return ageDays >= staleDays
+  }).length
+
+  const rows: PrintableReportRow[] = items.map((item, index) => {
+    const costBasis = getItemCost(item)
+    const estimatedValue = getItemValue(item)
+    const rawDate = getItemDate(item)
+    const acquiredDate = rawDate ? new Date(rawDate) : null
+    const ageDays =
+      acquiredDate && !Number.isNaN(acquiredDate.getTime())
+        ? Math.max(
+            0,
+            Math.floor(
+              (Date.now() - acquiredDate.getTime()) / (1000 * 60 * 60 * 24)
+            )
+          )
+        : null
+
+    return {
+      number: index + 1,
+      item: getBaseItemName(item),
+      status: normalizeStatus(item.status),
+      qty: asNumber(item.available_quantity ?? item.quantity ?? 1),
+      date: formatDateForPrint(rawDate),
+      age: ageDays === null ? '' : `${ageDays} days`,
+      year: asString(item.year),
+      set: asString(item.set_name),
+      itemNumber: getItemNumber(item),
+      cost: currency(costBasis),
+      value: currency(estimatedValue),
+      spread: currency(estimatedValue - costBasis),
+      notes: asString(item.notes),
+    }
+  })
+
+  return {
+    title: `Open Lots Report - ${reportLabel}`,
+    subtitle:
+      `Printable open lots report. Status filter: ${statusFilter || 'open'}. Stale threshold: ${staleDays} days. Open lots remain inventory until sold, disposed, donated, used as documented giveaways, or otherwise finalized.`,
+    summary: [
+      { label: 'Open lots/items', value: items.length },
+      { label: 'Remaining cost basis', value: currency(totalRemainingCost) },
+      { label: 'Estimated value', value: currency(totalEstimatedValue) },
+      { label: 'Unrealized spread', value: currency(totalSpread) },
+      { label: 'Stale lots', value: staleCount },
+      { label: 'Tax status', value: 'Still inventory' },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'item', label: 'Item / Lot', width: '22%' },
+      { key: 'status', label: 'Status', width: '8%' },
+      { key: 'qty', label: 'Qty', align: 'right', width: '6%' },
+      { key: 'date', label: 'Date', width: '9%' },
+      { key: 'age', label: 'Age', width: '8%' },
+      { key: 'year', label: 'Year', width: '6%' },
+      { key: 'set', label: 'Set', width: '12%' },
+      { key: 'itemNumber', label: 'Item #', width: '7%' },
+      { key: 'cost', label: 'Cost', align: 'right', width: '8%' },
+      { key: 'value', label: 'Value', align: 'right', width: '8%' },
+      { key: 'spread', label: 'Spread', align: 'right', width: '10%' },
+    ],
+    rows,
+    emptyMessage: 'No open lots found for this report filter.',
+  }
+}
+
+
+function getWriteOffPrintDate(item: InventoryItemRow) {
+  const row = item as Record<string, unknown>
+
+  return (
+    asString(row.disposed_at) ||
+    asString(row.disposal_date) ||
+    asString(row.updated_at) ||
+    asString(row.created_at) ||
+    getItemDate(item)
+  )
+}
+
+function getWriteOffPrintReason(item: InventoryItemRow) {
+  const row = item as Record<string, unknown>
+
+  return (
+    asString(row.disposal_reason) ||
+    asString(row.disposed_reason) ||
+    asString(row.write_off_reason) ||
+    asString(row.reason) ||
+    asString(item.notes) ||
+    '—'
+  )
+}
+
+function matchesWriteOffPrintDateRange(item: InventoryItemRow, startDate: string, endDate: string) {
+  const rawDate = getWriteOffPrintDate(item)
+  if (!rawDate) return true
+
+  const itemDate = new Date(rawDate)
+  if (Number.isNaN(itemDate.getTime())) return true
+
+  if (startDate) {
+    const fromDate = new Date(`${startDate}T00:00:00`)
+    if (!Number.isNaN(fromDate.getTime()) && itemDate < fromDate) return false
+  }
+
+  if (endDate) {
+    const toDate = new Date(`${endDate}T23:59:59`)
+    if (!Number.isNaN(toDate.getTime()) && itemDate > toDate) return false
+  }
+
+  return true
+}
+
+function buildWriteOffsPrintConfig({
+  items,
+  reportLabel,
+  statusFilter,
+}: {
+  items: InventoryItemRow[]
+  reportLabel: string
+  statusFilter: string
+}): ReportConfig {
+  const disposedCount = items.filter((item) => normalizeStatus(item.status).toLowerCase() === 'disposed').length
+  const junkCount = items.filter((item) => normalizeStatus(item.status).toLowerCase() === 'junk').length
+  const totalQuantity = items.reduce((sum, item) => sum + Math.max(asNumber(item.quantity ?? item.available_quantity ?? 1), 1), 0)
+  const totalCost = items.reduce((sum, item) => sum + getItemCost(item), 0)
+  const totalValue = items.reduce((sum, item) => sum + getItemValue(item), 0)
+
+  const rows: PrintableReportRow[] = items.map((item, index) => {
+    const costBasis = getItemCost(item)
+    const estimatedValue = getItemValue(item)
+
+    return {
+      number: index + 1,
+      item: getBaseItemName(item),
+      status: normalizeStatus(item.status),
+      qty: Math.max(asNumber(item.quantity ?? item.available_quantity ?? 1), 1),
+      date: formatDateForPrint(getWriteOffPrintDate(item)),
+      year: asString(item.year),
+      set: asString(item.set_name),
+      itemNumber: getItemNumber(item),
+      cost: currency(costBasis),
+      value: currency(estimatedValue),
+      gainLoss: currency(estimatedValue - costBasis),
+      reason: getWriteOffPrintReason(item),
+    }
+  })
+
+  return {
+    title: `Write-Off / Disposal Review - ${reportLabel}`,
+    subtitle:
+      `Printable write-off and disposal review. Status filter: ${statusFilter || 'all'}. Review junk, donated, giveaway, damaged, and finalized disposal records for CPA support without double counting.`,
+    summary: [
+      { label: 'Records in view', value: items.length },
+      { label: 'Quantity', value: totalQuantity },
+      { label: 'Disposed', value: disposedCount },
+      { label: 'Junk', value: junkCount },
+      { label: 'Cost basis', value: currency(totalCost) },
+      { label: 'Estimated value', value: currency(totalValue) },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'item', label: 'Item', width: '24%' },
+      { key: 'status', label: 'Status', width: '8%' },
+      { key: 'qty', label: 'Qty', align: 'right', width: '6%' },
+      { key: 'date', label: 'Review Date', width: '10%' },
+      { key: 'year', label: 'Year', width: '6%' },
+      { key: 'set', label: 'Set', width: '12%' },
+      { key: 'itemNumber', label: 'Item #', width: '7%' },
+      { key: 'cost', label: 'Cost', align: 'right', width: '8%' },
+      { key: 'value', label: 'Value', align: 'right', width: '8%' },
+      { key: 'reason', label: 'Reason / Notes', width: '17%' },
+    ],
+    rows,
+    emptyMessage: 'No write-off or disposal records found for this report filter.',
+  }
+}
+
 function buildSalesPrintConfig({
   sales,
   inventoryById,
   reportLabel,
   platformFilter,
+  cogsMode = false,
 }: {
   sales: SaleRow[]
   inventoryById: Map<string, SaleInventoryRow>
   reportLabel: string
   platformFilter: string
-}) {
+  cogsMode?: boolean
+}): ReportConfig {
   const totalGrossSales = roundMoney(
     sales.reduce((sum, row) => sum + Number(row.gross_sale ?? 0), 0)
   )
@@ -588,8 +871,10 @@ function buildSalesPrintConfig({
   })
 
   return {
-    title: reportLabel,
-    subtitle: `Printable sales report. Platform filter: ${platformFilter || 'All platforms'}.`,
+    title: cogsMode ? reportLabel.replace('Sales Report', 'Realized COGS Report') : reportLabel,
+    subtitle: cogsMode
+      ? 'Printable realized COGS report. Unsold inventory remains in ending inventory and is not deducted here.'
+      : `Printable sales report. Platform filter: ${platformFilter || 'All platforms'}.`,
     summary: [
       { label: 'Sales count', value: sales.length },
       { label: 'Gross sales', value: currency(totalGrossSales) },
@@ -612,7 +897,7 @@ function buildExpensesPrintConfig({
   expenses: ExpenseRow[]
   reportLabel: string
   categoryFilter: string
-}) {
+}): ReportConfig {
   const totalExpenses = roundMoney(
     expenses.reduce((sum, expense) => sum + Number(expense.amount ?? 0), 0)
   )
@@ -656,6 +941,698 @@ function buildExpensesPrintConfig({
   }
 }
 
+function buildShippingPrintConfig({
+  sales,
+  reportLabel,
+  platformFilter,
+}: {
+  sales: SaleRow[]
+  reportLabel: string
+  platformFilter: string
+}): ReportConfig {
+  const shipmentCount = sales.length
+  const totalGrossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.gross_sale ?? 0), 0)
+  )
+  const totalPostage = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.shipping_cost ?? 0), 0)
+  )
+  const totalSupplies = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.other_costs ?? 0), 0)
+  )
+  const totalShippingExpense = roundMoney(totalPostage + totalSupplies)
+  const averageShippingExpense = shipmentCount > 0 ? roundMoney(totalShippingExpense / shipmentCount) : 0
+
+  const platformSummary = Array.from(
+    sales.reduce((map, sale) => {
+      const platform = platformKey(sale.platform)
+      const current = map.get(platform) ?? {
+        count: 0,
+        gross: 0,
+        postage: 0,
+        supplies: 0,
+        profit: 0,
+      }
+
+      map.set(platform, {
+        count: current.count + 1,
+        gross: current.gross + Number(sale.gross_sale ?? 0),
+        postage: current.postage + Number(sale.shipping_cost ?? 0),
+        supplies: current.supplies + Number(sale.other_costs ?? 0),
+        profit: current.profit + Number(sale.profit ?? 0),
+      })
+
+      return map
+    }, new Map<string, { count: number; gross: number; postage: number; supplies: number; profit: number }>()),
+  ).sort(([a], [b]) => a.localeCompare(b))
+
+  const rows: PrintableReportRow[] = platformSummary.map(([platform, values], index) => {
+    const totalCost = roundMoney(values.postage + values.supplies)
+    const averageCost = values.count > 0 ? roundMoney(totalCost / values.count) : 0
+
+    return {
+      number: index + 1,
+      platform,
+      shipments: values.count,
+      gross: currency(roundMoney(values.gross)),
+      postage: currency(roundMoney(values.postage)),
+      supplies: currency(roundMoney(values.supplies)),
+      totalCost: currency(totalCost),
+      averageCost: currency(averageCost),
+      profit: currency(roundMoney(values.profit)),
+    }
+  })
+
+  return {
+    title: reportLabel,
+    subtitle:
+      `Printable shipping report. Platform filter: ${platformFilter || 'All platforms'}. Shipping charged is not stored separately yet, so this report uses postage/shipping cost plus other selling costs as the tracked shipping/supplies side.`,
+    summary: [
+      { label: 'Shipments / sales', value: shipmentCount },
+      { label: 'Gross sales', value: currency(totalGrossSales) },
+      { label: 'Postage / shipping cost', value: currency(totalPostage) },
+      { label: 'Supplies / other costs', value: currency(totalSupplies) },
+      { label: 'Tracked shipping expense', value: currency(totalShippingExpense) },
+      { label: 'Avg. tracked cost', value: currency(averageShippingExpense) },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'platform', label: 'Platform', width: '18%' },
+      { key: 'shipments', label: 'Shipments', align: 'right', width: '10%' },
+      { key: 'gross', label: 'Gross', align: 'right', width: '11%' },
+      { key: 'postage', label: 'Postage', align: 'right', width: '11%' },
+      { key: 'supplies', label: 'Supplies', align: 'right', width: '11%' },
+      { key: 'totalCost', label: 'Ship Cost', align: 'right', width: '11%' },
+      { key: 'averageCost', label: 'Avg Cost', align: 'right', width: '11%' },
+      { key: 'profit', label: 'Profit', align: 'right', width: '13%' },
+    ],
+    rows,
+    emptyMessage: 'No shipping records found for this report range.',
+  }
+}
+
+function buildSalesTaxPrintConfig({
+  sales,
+  reportLabel,
+  platformFilter,
+}: {
+  sales: SaleRow[]
+  reportLabel: string
+  platformFilter: string
+}): ReportConfig {
+  const totalGrossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.gross_sale ?? 0), 0)
+  )
+  const totalNetProceeds = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.net_proceeds ?? 0), 0)
+  )
+
+  const rows: PrintableReportRow[] = Array.from(
+    sales.reduce((map, sale) => {
+      const platform = platformKey(sale.platform)
+      const current = map.get(platform) ?? { count: 0, gross: 0, net: 0 }
+
+      map.set(platform, {
+        count: current.count + 1,
+        gross: current.gross + Number(sale.gross_sale ?? 0),
+        net: current.net + Number(sale.net_proceeds ?? 0),
+      })
+
+      return map
+    }, new Map<string, { count: number; gross: number; net: number }>()),
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([platform, values], index) => ({
+      number: index + 1,
+      platform,
+      sales: values.count,
+      gross: currency(roundMoney(values.gross)),
+      trackedTax: currency(0),
+      marketplaceTax: currency(0),
+      taxable: currency(0),
+      net: currency(roundMoney(values.net)),
+      notes: 'Dedicated sales-tax fields are not stored yet.',
+    }))
+
+  return {
+    title: reportLabel,
+    subtitle:
+      `Printable sales tax report. Platform filter: ${platformFilter || 'All platforms'}. Marketplace tax fields are placeholders until dedicated tax fields are added.`,
+    summary: [
+      { label: 'Sales count', value: sales.length },
+      { label: 'Gross sales', value: currency(totalGrossSales) },
+      { label: 'Tracked sales tax', value: currency(0) },
+      { label: 'Marketplace tax', value: currency(0) },
+      { label: 'Taxable tracked', value: currency(0) },
+      { label: 'Net proceeds', value: currency(totalNetProceeds) },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'platform', label: 'Platform', width: '17%' },
+      { key: 'sales', label: 'Sales', align: 'right', width: '8%' },
+      { key: 'gross', label: 'Gross', align: 'right', width: '10%' },
+      { key: 'trackedTax', label: 'Tax', align: 'right', width: '10%' },
+      { key: 'marketplaceTax', label: 'Mkt Tax', align: 'right', width: '10%' },
+      { key: 'taxable', label: 'Taxable', align: 'right', width: '10%' },
+      { key: 'net', label: 'Net', align: 'right', width: '10%' },
+      { key: 'notes', label: 'Notes', width: '21%' },
+    ],
+    rows,
+    emptyMessage: 'No sales found for this sales-tax report range.',
+  }
+}
+
+function buildFinancialPrintConfig({
+  reportLabel,
+  sales,
+  expenses,
+  breaks,
+  inventoryItems,
+  taxSettings,
+  cpaMode = false,
+}: {
+  reportLabel: string
+  sales: SaleRow[]
+  expenses: ExpenseRow[]
+  breaks: BreakRow[]
+  inventoryItems: InventoryItemRow[]
+  taxSettings: TaxYearSettingsRow | null
+  cpaMode?: boolean
+}): ReportConfig {
+  const totalGrossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.gross_sale ?? 0), 0)
+  )
+  const totalPlatformFees = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.platform_fees ?? 0), 0)
+  )
+  const totalShippingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.shipping_cost ?? 0), 0)
+  )
+  const totalOtherCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.other_costs ?? 0), 0)
+  )
+  const totalSellingCosts = roundMoney(totalPlatformFees + totalShippingCosts + totalOtherCosts)
+  const totalNetProceeds = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.net_proceeds ?? 0), 0)
+  )
+  const totalCOGS = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.cost_of_goods_sold ?? 0), 0)
+  )
+  const totalProfit = roundMoney(
+    sales.reduce((sum, sale) => sum + Number(sale.profit ?? 0), 0)
+  )
+  const totalExpenses = roundMoney(
+    expenses.reduce((sum, expense) => sum + Number(expense.amount ?? 0), 0)
+  )
+  const totalBreakPurchases = roundMoney(
+    breaks.reduce((sum, row) => sum + Number(row.total_cost ?? 0), 0)
+  )
+  const beginningInventory = roundMoney(Number(taxSettings?.beginning_inventory ?? 0))
+  const endingInventory = roundMoney(
+    inventoryItems
+      .filter((item) => normalizeStatus(item.status).toLowerCase() !== 'sold')
+      .filter((item) => normalizeStatus(item.status).toLowerCase() !== 'disposed')
+      .reduce((sum, item) => sum + getItemCost(item), 0)
+  )
+  const scheduleCExtra = roundMoney(
+    Number(taxSettings?.business_use_of_home ?? 0) +
+      Number(taxSettings?.vehicle_expense ?? 0) +
+      Number(taxSettings?.depreciation_expense ?? 0) +
+      Number(taxSettings?.legal_professional ?? 0) +
+      Number(taxSettings?.insurance ?? 0) +
+      Number(taxSettings?.utilities ?? 0) +
+      Number(taxSettings?.taxes_licenses ?? 0) +
+      Number(taxSettings?.repairs_maintenance ?? 0)
+  )
+  const netAfterTrackedExpenses = roundMoney(
+    totalGrossSales - totalCOGS - totalSellingCosts - totalExpenses - scheduleCExtra
+  )
+
+  const rows: PrintableReportRow[] = [
+    { section: 'Sales', metric: 'Gross sales / receipts', amount: currency(totalGrossSales), notes: 'Completed, non-reversed sales.' },
+    { section: 'Sales', metric: 'Net proceeds', amount: currency(totalNetProceeds), notes: 'After platform/selling costs as recorded.' },
+    { section: 'COGS', metric: 'Realized COGS', amount: currency(totalCOGS), notes: 'Sold item cost basis.' },
+    { section: 'Selling costs', metric: 'Platform fees', amount: currency(totalPlatformFees), notes: 'Marketplace/platform fees from sales.' },
+    { section: 'Selling costs', metric: 'Shipping/postage costs', amount: currency(totalShippingCosts), notes: 'Shipping cost field from sales.' },
+    { section: 'Selling costs', metric: 'Other selling/supplies costs', amount: currency(totalOtherCosts), notes: 'Other cost field from sales.' },
+    { section: 'Expenses', metric: 'Manual expenses', amount: currency(totalExpenses), notes: 'Expenses table records.' },
+    { section: 'Purchases', metric: 'Break purchases', amount: currency(totalBreakPurchases), notes: 'Break/acquisition records.' },
+    { section: 'Inventory', metric: 'Beginning inventory', amount: currency(beginningInventory), notes: 'Tax year settings.' },
+    { section: 'Inventory', metric: 'Ending inventory cost', amount: currency(endingInventory), notes: taxSettings?.ending_inventory_snapshot != null ? 'Tax settings snapshot exists.' : 'Live inventory cost basis.' },
+    { section: 'Schedule C', metric: 'Extra Schedule C settings', amount: currency(scheduleCExtra), notes: 'Home office, vehicle, depreciation, insurance, utilities, licenses, repairs, professional fees.' },
+    { section: 'Profit', metric: 'Tracked profit from sales', amount: currency(totalProfit), notes: 'Sales profit field.' },
+    { section: 'Profit', metric: 'Net after tracked expenses', amount: currency(netAfterTrackedExpenses), notes: 'Gross sales - COGS - selling costs - expenses - extra Schedule C settings.' },
+  ]
+
+  return {
+    title: cpaMode ? reportLabel : `Financial Report - ${reportLabel}`,
+    subtitle: cpaMode
+      ? 'Printable CPA packet summary. Use the CPA PDF/CSV packet for full accountant backup details.'
+      : 'Printable financial summary for sales, COGS, expenses, purchases, inventory, and Schedule C support.',
+    summary: [
+      { label: 'Gross sales', value: currency(totalGrossSales) },
+      { label: 'Realized COGS', value: currency(totalCOGS) },
+      { label: 'Selling costs', value: currency(totalSellingCosts) },
+      { label: 'Manual expenses', value: currency(totalExpenses) },
+      { label: 'Ending inventory', value: currency(endingInventory) },
+      { label: 'Net after tracked expenses', value: currency(netAfterTrackedExpenses) },
+    ],
+    columns: [
+      { key: 'section', label: 'Section', width: '14%' },
+      { key: 'metric', label: 'Metric', width: '30%' },
+      { key: 'amount', label: 'Amount', align: 'right', width: '14%' },
+      { key: 'notes', label: 'Notes', width: '42%' },
+    ],
+    rows,
+    emptyMessage: 'No financial rows found for this report range.',
+  }
+}
+
+function getInventoryBreakId(item: InventoryItemRow) {
+  const row = item as Record<string, unknown>
+
+  return (
+    asString(row.break_id) ||
+    asString(row.source_break_id) ||
+    asString(row.order_id)
+  )
+}
+
+function getRemainingQuantity(item: InventoryItemRow) {
+  const status = normalizeStatus(item.status).toLowerCase()
+  const availableQuantity = asNumber(item.available_quantity)
+  const quantity = asNumber(item.quantity)
+
+  if (availableQuantity > 0) return availableQuantity
+  if (quantity > 0 && status !== 'sold' && status !== 'disposed') return quantity
+
+  return 0
+}
+
+function buildBreakProfitabilityPrintConfig({
+  breaks,
+  inventoryItems,
+  sales,
+  reportLabel,
+  sourceFilter,
+  statusFilter,
+  profitabilityFilter,
+  search,
+}: {
+  breaks: BreakRow[]
+  inventoryItems: InventoryItemRow[]
+  sales: SaleRow[]
+  reportLabel: string
+  sourceFilter: string
+  statusFilter: string
+  profitabilityFilter: string
+  search: string
+}): ReportConfig {
+  const inventoryByBreakId = new Map<string, InventoryItemRow[]>()
+
+  inventoryItems.forEach((item) => {
+    const breakId = getInventoryBreakId(item)
+    if (!breakId) return
+
+    const existing = inventoryByBreakId.get(breakId) ?? []
+    existing.push(item)
+    inventoryByBreakId.set(breakId, existing)
+  })
+
+  const salesByInventoryId = new Map<string, SaleRow[]>()
+
+  sales.forEach((sale) => {
+    const inventoryId = sale.inventory_item_id
+    if (!inventoryId) return
+
+    const existing = salesByInventoryId.get(inventoryId) ?? []
+    existing.push(sale)
+    salesByInventoryId.set(inventoryId, existing)
+  })
+
+  const computedRows = breaks.map((breakRow) => {
+    const linkedItems = inventoryByBreakId.get(breakRow.id) ?? []
+    const linkedSales = linkedItems.flatMap((item) => salesByInventoryId.get(item.id) ?? [])
+    const breakCost = roundMoney(asNumber(breakRow.total_cost))
+    const netProceeds = roundMoney(linkedSales.reduce((sum, sale) => sum + asNumber(sale.net_proceeds), 0))
+    const realizedProfit = roundMoney(linkedSales.reduce((sum, sale) => sum + asNumber(sale.profit), 0))
+
+    const soldItemIds = new Set(
+      linkedSales
+        .map((sale) => sale.inventory_item_id)
+        .filter((id): id is string => Boolean(id))
+    )
+
+    const remainingItems = linkedItems.filter((item) => {
+      const status = normalizeStatus(item.status).toLowerCase()
+      return status !== 'sold' && status !== 'disposed' && getRemainingQuantity(item) > 0
+    })
+
+    const remainingCostBasis = roundMoney(
+      remainingItems.reduce((sum, item) => sum + getItemCost(item), 0)
+    )
+    const remainingEstimatedValue = roundMoney(
+      remainingItems.reduce((sum, item) => sum + getItemValue(item), 0)
+    )
+    const projectedTotalValue = roundMoney(netProceeds + remainingEstimatedValue)
+    const projectedProfitLoss = roundMoney(projectedTotalValue - breakCost)
+    const roiPercent = breakCost > 0 ? projectedProfitLoss / breakCost : null
+
+    let suggestedAction = 'Completed break review'
+    if (linkedItems.length === 0) suggestedAction = 'No inventory linked'
+    else if (soldItemIds.size === 0 && remainingItems.length > 0) suggestedAction = 'No sales yet'
+    else if (projectedProfitLoss < 0 && remainingItems.length > 0) suggestedAction = 'Reprice / sell remaining'
+    else if (projectedProfitLoss < 0) suggestedAction = 'Loss review'
+    else if (remainingItems.length > 0 && realizedProfit > 0) suggestedAction = 'Profit locked / review remaining'
+    else if (remainingItems.length > 0) suggestedAction = 'Monitor remaining inventory'
+
+    return {
+      id: breakRow.id,
+      breakDate: breakRow.break_date || '',
+      source: breakRow.source_name || 'Unknown source',
+      product: breakRow.product_name || breakRow.order_number || 'Untitled break',
+      orderNumber: breakRow.order_number || '',
+      breakCost,
+      itemCount: linkedItems.length,
+      soldItemCount: soldItemIds.size,
+      remainingItemCount: remainingItems.length,
+      netProceeds,
+      realizedProfit,
+      remainingCostBasis,
+      remainingEstimatedValue,
+      projectedTotalValue,
+      projectedProfitLoss,
+      roiPercent,
+      suggestedAction,
+    }
+  })
+
+  const filteredRows = computedRows.filter((row) => {
+    if (sourceFilter !== 'all' && row.source !== sourceFilter) return false
+    if (statusFilter === 'open' && row.remainingItemCount <= 0) return false
+    if (statusFilter === 'profitable' && row.projectedProfitLoss <= 0) return false
+    if (statusFilter === 'loss' && row.projectedProfitLoss >= 0) return false
+    if (statusFilter === 'unsold' && row.soldItemCount !== 0) return false
+    if (statusFilter === 'partial' && !(row.soldItemCount > 0 && row.remainingItemCount > 0)) return false
+    if (statusFilter === 'complete' && !(row.remainingItemCount <= 0 && row.itemCount > 0)) return false
+    if (profitabilityFilter === 'green' && row.projectedProfitLoss <= 0) return false
+    if (profitabilityFilter === 'red' && row.projectedProfitLoss >= 0) return false
+    if (profitabilityFilter === 'unrealized' && row.remainingItemCount <= row.soldItemCount) return false
+    if (
+      profitabilityFilter === 'needs-review' &&
+      !(row.itemCount === 0 || row.projectedProfitLoss < 0 || row.soldItemCount === 0)
+    ) return false
+
+    if (search) {
+      const haystack = [
+        row.breakDate,
+        row.source,
+        row.product,
+        row.orderNumber,
+        row.suggestedAction,
+      ]
+        .map(asString)
+        .join(' ')
+        .toLowerCase()
+
+      if (!haystack.includes(search.toLowerCase())) return false
+    }
+
+    return true
+  })
+
+  const totalBreakCost = roundMoney(filteredRows.reduce((sum, row) => sum + row.breakCost, 0))
+  const totalNetProceeds = roundMoney(filteredRows.reduce((sum, row) => sum + row.netProceeds, 0))
+  const totalRealizedProfit = roundMoney(filteredRows.reduce((sum, row) => sum + row.realizedProfit, 0))
+  const totalRemainingBasis = roundMoney(filteredRows.reduce((sum, row) => sum + row.remainingCostBasis, 0))
+  const totalRemainingValue = roundMoney(filteredRows.reduce((sum, row) => sum + row.remainingEstimatedValue, 0))
+  const totalProjectedProfitLoss = roundMoney(filteredRows.reduce((sum, row) => sum + row.projectedProfitLoss, 0))
+  const lossBreakCount = filteredRows.filter((row) => row.projectedProfitLoss < 0).length
+
+  const rows: PrintableReportRow[] = filteredRows.map((row, index) => ({
+    number: index + 1,
+    date: formatDateForPrint(row.breakDate),
+    source: row.source,
+    product: row.product,
+    cost: currency(row.breakCost),
+    items: `${row.soldItemCount}/${row.itemCount}`,
+    remaining: row.remainingItemCount,
+    net: currency(row.netProceeds),
+    realized: currency(row.realizedProfit),
+    basis: currency(row.remainingCostBasis),
+    value: currency(row.remainingEstimatedValue),
+    projected: currency(row.projectedProfitLoss),
+    roi: row.roiPercent === null ? '' : `${(row.roiPercent * 100).toFixed(1)}%`,
+  }))
+
+  return {
+    title: `Break Profitability Report - ${reportLabel}`,
+    subtitle:
+      `Printable break profitability report. Source: ${sourceFilter || 'all'}. Status: ${statusFilter || 'all'}. Profitability: ${profitabilityFilter || 'all'}. Unsold linked items remain inventory until sold, disposed, given away with documentation, or otherwise finalized.`,
+    summary: [
+      { label: 'Breaks', value: filteredRows.length },
+      { label: 'Break cost', value: currency(totalBreakCost) },
+      { label: 'Net proceeds', value: currency(totalNetProceeds) },
+      { label: 'Realized profit', value: currency(totalRealizedProfit) },
+      { label: 'Remaining basis', value: currency(totalRemainingBasis) },
+      { label: 'Remaining value', value: currency(totalRemainingValue) },
+      { label: 'Projected P/L', value: currency(totalProjectedProfitLoss) },
+      { label: 'Loss breaks', value: lossBreakCount },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'date', label: 'Date', width: '8%' },
+      { key: 'source', label: 'Source', width: '11%' },
+      { key: 'product', label: 'Break', width: '18%' },
+      { key: 'cost', label: 'Cost', align: 'right', width: '8%' },
+      { key: 'items', label: 'Items', align: 'right', width: '6%' },
+      { key: 'remaining', label: 'Remain', align: 'right', width: '7%' },
+      { key: 'net', label: 'Net', align: 'right', width: '8%' },
+      { key: 'realized', label: 'Realized', align: 'right', width: '8%' },
+      { key: 'basis', label: 'Basis', align: 'right', width: '8%' },
+      { key: 'value', label: 'Value', align: 'right', width: '8%' },
+      { key: 'projected', label: 'Proj P/L', align: 'right', width: '8%' },
+    ],
+    rows,
+    emptyMessage: 'No breaks matched this profitability report filter.',
+  }
+}
+
+function buildPlatformProfitabilityPrintConfig({
+  sales,
+  reportLabel,
+  platformFilter,
+}: {
+  sales: SaleRow[]
+  reportLabel: string
+  platformFilter: string
+}): ReportConfig {
+  const totalGrossSales = roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0))
+  const totalProfit = roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.profit), 0))
+
+  const rows: PrintableReportRow[] = Array.from(
+    sales.reduce((map, sale) => {
+      const platform = platformKey(sale.platform)
+      const current = map.get(platform) ?? {
+        count: 0,
+        gross: 0,
+        fees: 0,
+        shipping: 0,
+        other: 0,
+        net: 0,
+        cogs: 0,
+        profit: 0,
+      }
+
+      map.set(platform, {
+        count: current.count + 1,
+        gross: current.gross + asNumber(sale.gross_sale),
+        fees: current.fees + asNumber(sale.platform_fees),
+        shipping: current.shipping + asNumber(sale.shipping_cost),
+        other: current.other + asNumber(sale.other_costs),
+        net: current.net + asNumber(sale.net_proceeds),
+        cogs: current.cogs + asNumber(sale.cost_of_goods_sold),
+        profit: current.profit + asNumber(sale.profit),
+      })
+
+      return map
+    }, new Map<string, { count: number; gross: number; fees: number; shipping: number; other: number; net: number; cogs: number; profit: number }>())
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([platform, values], index) => ({
+      number: index + 1,
+      platform,
+      sales: values.count,
+      gross: currency(roundMoney(values.gross)),
+      fees: currency(roundMoney(values.fees)),
+      shipping: currency(roundMoney(values.shipping)),
+      other: currency(roundMoney(values.other)),
+      net: currency(roundMoney(values.net)),
+      cogs: currency(roundMoney(values.cogs)),
+      profit: currency(roundMoney(values.profit)),
+    }))
+
+  return {
+    title: `Platform Profitability Report - ${reportLabel}`,
+    subtitle: `Printable platform profitability report. Platform filter: ${platformFilter || 'All platforms'}.`,
+    summary: [
+      { label: 'Sales count', value: sales.length },
+      { label: 'Gross sales', value: currency(totalGrossSales) },
+      { label: 'Platform fees', value: currency(roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.platform_fees), 0))) },
+      { label: 'Shipping / other', value: currency(roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.shipping_cost) + asNumber(sale.other_costs), 0))) },
+      { label: 'COGS', value: currency(roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.cost_of_goods_sold), 0))) },
+      { label: 'Profit', value: currency(totalProfit) },
+    ],
+    columns: [
+      { key: 'number', label: '#', align: 'right', width: '4%' },
+      { key: 'platform', label: 'Platform', width: '17%' },
+      { key: 'sales', label: 'Sales', align: 'right', width: '7%' },
+      { key: 'gross', label: 'Gross', align: 'right', width: '10%' },
+      { key: 'fees', label: 'Fees', align: 'right', width: '9%' },
+      { key: 'shipping', label: 'Ship', align: 'right', width: '9%' },
+      { key: 'other', label: 'Other', align: 'right', width: '9%' },
+      { key: 'net', label: 'Net', align: 'right', width: '10%' },
+      { key: 'cogs', label: 'COGS', align: 'right', width: '10%' },
+      { key: 'profit', label: 'Profit', align: 'right', width: '10%' },
+    ],
+    rows,
+    emptyMessage: 'No platform profitability records found for this report range.',
+  }
+}
+
+function buildOperationsPrintConfig({
+  reportLabel,
+  sales,
+  expenses,
+  breaks,
+  inventoryItems,
+}: {
+  reportLabel: string
+  sales: SaleRow[]
+  expenses: ExpenseRow[]
+  breaks: BreakRow[]
+  inventoryItems: InventoryItemRow[]
+}): ReportConfig {
+  const openInventory = inventoryItems.filter((item) => {
+    const status = normalizeStatus(item.status).toLowerCase()
+    return status !== 'sold' && status !== 'disposed' && status !== 'archived'
+  })
+
+  const totalGrossSales = roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0))
+  const totalProfit = roundMoney(sales.reduce((sum, sale) => sum + asNumber(sale.profit), 0))
+  const totalExpenses = roundMoney(expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0))
+  const totalBreakCost = roundMoney(breaks.reduce((sum, row) => sum + asNumber(row.total_cost), 0))
+  const openInventoryCost = roundMoney(openInventory.reduce((sum, item) => sum + getItemCost(item), 0))
+
+  const rows: PrintableReportRow[] = [
+    { section: 'Sales', metric: 'Completed sales', count: sales.length, amount: currency(totalGrossSales), notes: 'Gross sales in selected range.' },
+    { section: 'Sales', metric: 'Profit', count: sales.length, amount: currency(totalProfit), notes: 'Profit from completed non-reversed sales.' },
+    { section: 'Expenses', metric: 'Manual expenses', count: expenses.length, amount: currency(totalExpenses), notes: 'Expenses in selected range.' },
+    { section: 'Purchases', metric: 'Break purchases', count: breaks.length, amount: currency(totalBreakCost), notes: 'Break/acquisition records in selected range.' },
+    { section: 'Inventory', metric: 'Open inventory', count: openInventory.length, amount: currency(openInventoryCost), notes: 'Current non-sold inventory cost basis.' },
+  ]
+
+  return {
+    title: `Operations Report - ${reportLabel}`,
+    subtitle: 'Printable operations report. Read-only workflow overview for daily business review.',
+    summary: [
+      { label: 'Sales', value: sales.length },
+      { label: 'Breaks', value: breaks.length },
+      { label: 'Expenses', value: expenses.length },
+      { label: 'Open inventory', value: openInventory.length },
+      { label: 'Gross sales', value: currency(totalGrossSales) },
+      { label: 'Profit', value: currency(totalProfit) },
+      { label: 'Expenses total', value: currency(totalExpenses) },
+      { label: 'Open cost basis', value: currency(openInventoryCost) },
+    ],
+    columns: [
+      { key: 'section', label: 'Section', width: '14%' },
+      { key: 'metric', label: 'Metric', width: '28%' },
+      { key: 'count', label: 'Count', align: 'right', width: '10%' },
+      { key: 'amount', label: 'Amount', align: 'right', width: '14%' },
+      { key: 'notes', label: 'Notes', width: '34%' },
+    ],
+    rows,
+    emptyMessage: 'No operations records found for this report range.',
+  }
+}
+
+async function loadSalesForPrint({
+  supabase,
+  userId,
+  startDate,
+  endDate,
+  platform,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  startDate: string
+  endDate: string
+  platform: string
+}) {
+  let salesQuery = supabase
+    .from('sales')
+    .select(`
+      id,
+      sale_date,
+      gross_sale,
+      platform_fees,
+      shipping_cost,
+      other_costs,
+      net_proceeds,
+      cost_of_goods_sold,
+      profit,
+      platform,
+      notes,
+      inventory_item_id
+    `)
+    .eq('user_id', userId)
+    .is('reversed_at', null)
+    .gte('sale_date', startDate)
+    .lte('sale_date', endDate)
+    .order('sale_date', { ascending: false })
+
+  if (platform) {
+    salesQuery = salesQuery.eq('platform', platform)
+  }
+
+  return salesQuery
+}
+
+async function loadInventoryMapForSales({
+  supabase,
+  userId,
+  sales,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  sales: SaleRow[]
+}) {
+  const inventoryIds = Array.from(
+    new Set(
+      sales
+        .map((sale) => sale.inventory_item_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  )
+
+  const inventoryRes =
+    inventoryIds.length > 0
+      ? await supabase
+          .from('inventory_items')
+          .select('id, title, player_name, year, set_name, card_number, notes, status')
+          .eq('user_id', userId)
+          .in('id', inventoryIds)
+      : { data: [], error: null }
+
+  if (inventoryRes.error) {
+    throw new Error(inventoryRes.error.message)
+  }
+
+  const inventoryItems = (inventoryRes.data ?? []) as SaleInventoryRow[]
+  return new Map(inventoryItems.map((item) => [item.id, item]))
+}
+
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const { reportType } = await context.params
@@ -681,86 +1658,71 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return unauthorizedError()
     }
 
-    if (reportType === 'sales') {
-      const selectedYear = clampYear(searchParams.get('year'))
-      const selectedPeriod = normalizePeriod(searchParams.get('period'))
-      const selectedMonth = clampMonth(searchParams.get('month'))
-      const selectedQuarter = clampQuarter(searchParams.get('quarter'))
-      const selectedPlatform = String(searchParams.get('platform') || '').trim()
-      const selectedStart =
-        searchParams.get('start') ||
-        searchParams.get('startDate') ||
-        searchParams.get('date')
-      const selectedEnd = searchParams.get('end') || searchParams.get('endDate')
+    if (reportType === 'sales' || reportType === 'cogs' || reportType === 'sales-tax' || reportType === 'shipping') {
+      const selectedPlatformRaw = String(searchParams.get('platform') || '').trim()
+      const selectedPlatform =
+        selectedPlatformRaw && selectedPlatformRaw !== 'all' ? selectedPlatformRaw : ''
+      const labelPrefix =
+        reportType === 'cogs'
+          ? 'Realized COGS Report'
+          : reportType === 'sales-tax'
+            ? 'Sales Tax Report'
+            : reportType === 'shipping'
+              ? 'Shipping Report'
+              : 'Sales Report'
 
-      const { startDate, endDate, label } = getPeriodReportDateRange({
-        selectedYear,
-        period: selectedPeriod,
-        start: selectedStart,
-        end: selectedEnd,
-        month: selectedMonth,
-        quarter: selectedQuarter,
-        labelPrefix: 'Sales Report',
+      const { startDate, endDate, label } = getSelectedRange(searchParams, labelPrefix)
+
+      const salesRes = await loadSalesForPrint({
+        supabase,
+        userId: user.id,
+        startDate,
+        endDate,
+        platform: selectedPlatform,
       })
 
-      let salesQuery = supabase
-        .from('sales')
-        .select(`
-          id,
-          sale_date,
-          gross_sale,
-          platform_fees,
-          shipping_cost,
-          other_costs,
-          net_proceeds,
-          cost_of_goods_sold,
-          profit,
-          platform,
-          notes,
-          inventory_item_id
-        `)
-        .eq('user_id', user.id)
-        .is('reversed_at', null)
-        .gte('sale_date', startDate)
-        .lte('sale_date', endDate)
-        .order('sale_date', { ascending: false })
-
-      if (selectedPlatform) {
-        salesQuery = salesQuery.eq('platform', selectedPlatform)
+      if (salesRes.error) {
+        return jsonError(`Could not build ${labelPrefix.toLowerCase()} print view: ${salesRes.error.message}`)
       }
 
-      const { data: salesData, error: salesError } = await salesQuery
+      const sales = (salesRes.data ?? []) as SaleRow[]
 
-      if (salesError) {
-        return jsonError(`Could not build sales print view: ${salesError.message}`)
-      }
-
-      const sales = (salesData ?? []) as SaleRow[]
-      const inventoryIds = Array.from(
-        new Set(
-          sales
-            .map((sale) => sale.inventory_item_id)
-            .filter((id): id is string => Boolean(id))
+      if (reportType === 'shipping') {
+        const html = buildPrintableReportHtml(
+          buildShippingPrintConfig({
+            sales,
+            reportLabel: label,
+            platformFilter: selectedPlatform,
+          })
         )
-      )
 
-      const inventoryRes =
-        inventoryIds.length > 0
-          ? await supabase
-              .from('inventory_items')
-              .select('id, title, player_name, year, set_name, card_number, notes, status')
-              .eq('user_id', user.id)
-              .in('id', inventoryIds)
-          : { data: [], error: null }
-
-      if (inventoryRes.error) {
-        return jsonError(
-          `Could not load inventory item details for sales print view: ${inventoryRes.error.message}`
-        )
+        return htmlResponse(withPrintScript(html))
       }
 
-      const inventoryItems = (inventoryRes.data ?? []) as SaleInventoryRow[]
-      const inventoryById = new Map(inventoryItems.map((item) => [item.id, item]))
+      if (reportType === 'sales-tax') {
+        const html = buildPrintableReportHtml(
+          buildSalesTaxPrintConfig({
+            sales,
+            reportLabel: label,
+            platformFilter: selectedPlatform,
+          })
+        )
+
+        return htmlResponse(withPrintScript(html))
+      }
+
+      let inventoryById: Map<string, SaleInventoryRow>
+
+      try {
+        inventoryById = await loadInventoryMapForSales({
+          supabase,
+          userId: user.id,
+          sales,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown inventory lookup error.'
+        return jsonError(`Could not load inventory item details for sales print view: ${message}`)
+      }
 
       const html = buildPrintableReportHtml(
         buildSalesPrintConfig({
@@ -768,6 +1730,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
           inventoryById,
           reportLabel: label,
           platformFilter: selectedPlatform,
+          cogsMode: reportType === 'cogs',
         })
       )
 
@@ -775,26 +1738,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     if (reportType === 'expenses') {
-      const selectedYear = clampYear(searchParams.get('year'))
-      const selectedPeriod = normalizePeriod(searchParams.get('period'))
-      const selectedMonth = clampMonth(searchParams.get('month'))
-      const selectedQuarter = clampQuarter(searchParams.get('quarter'))
       const selectedCategory = String(searchParams.get('category') || '').trim()
-      const selectedStart =
-        searchParams.get('start') ||
-        searchParams.get('startDate') ||
-        searchParams.get('date')
-      const selectedEnd = searchParams.get('end') || searchParams.get('endDate')
-
-      const { startDate, endDate, label } = getPeriodReportDateRange({
-        selectedYear,
-        period: selectedPeriod,
-        start: selectedStart,
-        end: selectedEnd,
-        month: selectedMonth,
-        quarter: selectedQuarter,
-        labelPrefix: 'Expenses Report',
-      })
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Expenses Report')
 
       let expensesQuery = supabase
         .from('expenses')
@@ -829,6 +1774,377 @@ export async function GET(request: NextRequest, context: RouteContext) {
           expenses,
           reportLabel: label,
           categoryFilter: selectedCategory,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+    if (reportType === 'financial' || reportType === 'cpa-packet') {
+      const selectedYear = clampYear(searchParams.get('year'))
+      const { startDate, endDate, label } =
+        reportType === 'cpa-packet'
+          ? {
+              startDate: `${selectedYear}-01-01`,
+              endDate: `${selectedYear}-12-31`,
+              label: `HITS™ CPA Export Packet ${selectedYear}`,
+            }
+          : getSelectedRange(searchParams, 'Financial Report')
+
+      const [salesRes, expensesRes, breaksRes, inventoryRes, taxSettingsRes] = await Promise.all([
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null)
+          .gte('sale_date', startDate)
+          .lte('sale_date', endDate)
+          .order('sale_date', { ascending: false }),
+
+        supabase
+          .from('expenses')
+          .select('id, expense_date, category, vendor, amount, notes, created_at')
+          .eq('user_id', user.id)
+          .gte('expense_date', startDate)
+          .lte('expense_date', endDate)
+          .order('expense_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+
+        supabase
+          .from('breaks')
+          .select('id, break_date, source_name, product_name, order_number, total_cost')
+          .eq('user_id', user.id)
+          .gte('break_date', startDate)
+          .lte('break_date', endDate)
+          .order('break_date', { ascending: false }),
+
+        supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+
+        supabase
+          .from('tax_year_settings')
+          .select(`
+            beginning_inventory,
+            ending_inventory_snapshot,
+            ending_inventory_locked_at,
+            business_use_of_home,
+            vehicle_expense,
+            depreciation_expense,
+            legal_professional,
+            insurance,
+            utilities,
+            taxes_licenses,
+            repairs_maintenance,
+            notes
+          `)
+          .eq('user_id', user.id)
+          .eq('tax_year', selectedYear)
+          .maybeSingle(),
+      ])
+
+      if (salesRes.error) return jsonError(`Could not build ${reportName} print view sales: ${salesRes.error.message}`)
+      if (expensesRes.error) return jsonError(`Could not build ${reportName} print view expenses: ${expensesRes.error.message}`)
+      if (breaksRes.error) return jsonError(`Could not build ${reportName} print view purchases: ${breaksRes.error.message}`)
+      if (inventoryRes.error) return jsonError(`Could not build ${reportName} print view inventory: ${inventoryRes.error.message}`)
+      if (taxSettingsRes.error) return jsonError(`Could not build ${reportName} print view tax settings: ${taxSettingsRes.error.message}`)
+
+      const html = buildPrintableReportHtml(
+        buildFinancialPrintConfig({
+          reportLabel: label,
+          sales: (salesRes.data ?? []) as SaleRow[],
+          expenses: (expensesRes.data ?? []) as ExpenseRow[],
+          breaks: (breaksRes.data ?? []) as BreakRow[],
+          inventoryItems: (inventoryRes.data ?? []) as InventoryItemRow[],
+          taxSettings: (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null,
+          cpaMode: reportType === 'cpa-packet',
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+
+    if (reportType === 'open-lots') {
+      const period = String(searchParams.get('period') || 'all').trim()
+      const selectedStatus = String(searchParams.get('status') || 'open').trim()
+      const staleDays = Math.max(Number(searchParams.get('staleDays') || '90'), 1)
+      const search = String(searchParams.get('q') || '').trim()
+      const startDate =
+        String(
+          searchParams.get('start') ||
+            searchParams.get('startDate') ||
+            searchParams.get('dateFrom') ||
+            ''
+        ).trim()
+      const endDate =
+        String(
+          searchParams.get('end') ||
+            searchParams.get('endDate') ||
+            searchParams.get('dateTo') ||
+            ''
+        ).trim()
+
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        return jsonError(`Could not build open lots print view: ${error.message}`)
+      }
+
+      const allInventoryItems = (data ?? []) as InventoryItemRow[]
+
+      const openLotItems = allInventoryItems.filter((item) => {
+        const status = normalizeStatus(item.status).toLowerCase()
+        const quantity = asNumber(item.available_quantity ?? item.quantity ?? 1)
+
+        if (quantity <= 0) return false
+        if (['sold', 'disposed', 'archived'].includes(status)) return false
+
+        if (
+          selectedStatus !== 'all' &&
+          selectedStatus !== 'open' &&
+          status !== selectedStatus
+        ) {
+          return false
+        }
+
+        if (!matchesSearch(item, search)) return false
+        if (!matchesDateRange(item, startDate, endDate)) return false
+
+        return true
+      })
+
+      const label =
+        startDate || endDate
+          ? `${formatReportDate(startDate || 'Beginning')} to ${formatReportDate(endDate || 'Today')}`
+          : period === 'all'
+            ? 'All dates'
+            : `${period.charAt(0).toUpperCase()}${period.slice(1)} view`
+
+      const html = buildPrintableReportHtml(
+        buildOpenLotsPrintConfig({
+          items: openLotItems,
+          reportLabel: label,
+          statusFilter: selectedStatus,
+          staleDays,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+
+
+    if (reportType === 'write-offs') {
+      const selectedStatus = String(searchParams.get('status') || 'all').trim()
+      const search = String(searchParams.get('q') || '').trim()
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Write-Offs Report')
+
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .eq('user_id', user.id)
+        .in('status', ['disposed', 'junk'])
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        return jsonError(`Could not build write-offs print view: ${error.message}`)
+      }
+
+      const allItems = (data ?? []) as InventoryItemRow[]
+
+      const items = allItems.filter((item) => {
+        const status = normalizeStatus(item.status).toLowerCase()
+
+        if (selectedStatus !== 'all' && status !== selectedStatus.toLowerCase()) return false
+        if (!matchesSearch(item, search)) return false
+        if (!matchesWriteOffPrintDateRange(item, startDate, endDate)) return false
+
+        return true
+      })
+
+      const html = buildPrintableReportHtml(
+        buildWriteOffsPrintConfig({
+          items,
+          reportLabel: label,
+          statusFilter: selectedStatus,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+    if (reportType === 'break-profitability') {
+      const selectedSource = String(searchParams.get('source') || 'all').trim()
+      const selectedStatus = String(searchParams.get('status') || 'all').trim()
+      const selectedProfitability = String(searchParams.get('profitability') || 'all').trim()
+      const search = String(searchParams.get('q') || '').trim()
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Break Profitability Report')
+
+      const [breaksRes, inventoryRes, salesRes] = await Promise.all([
+        supabase
+          .from('breaks')
+          .select('id, break_date, source_name, product_name, order_number, total_cost')
+          .eq('user_id', user.id)
+          .gte('break_date', startDate)
+          .lte('break_date', endDate)
+          .order('break_date', { ascending: false }),
+
+        supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('user_id', user.id),
+
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null),
+      ])
+
+      if (breaksRes.error) return jsonError(`Could not build break profitability print view breaks: ${breaksRes.error.message}`)
+      if (inventoryRes.error) return jsonError(`Could not build break profitability print view inventory: ${inventoryRes.error.message}`)
+      if (salesRes.error) return jsonError(`Could not build break profitability print view sales: ${salesRes.error.message}`)
+
+      const html = buildPrintableReportHtml(
+        buildBreakProfitabilityPrintConfig({
+          breaks: (breaksRes.data ?? []) as BreakRow[],
+          inventoryItems: (inventoryRes.data ?? []) as InventoryItemRow[],
+          sales: (salesRes.data ?? []) as SaleRow[],
+          reportLabel: label,
+          sourceFilter: selectedSource,
+          statusFilter: selectedStatus,
+          profitabilityFilter: selectedProfitability,
+          search,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+    if (reportType === 'platform-profitability') {
+      const selectedPlatformRaw = String(searchParams.get('platform') || '').trim()
+      const selectedPlatform =
+        selectedPlatformRaw && selectedPlatformRaw !== 'all' ? selectedPlatformRaw : ''
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Platform Profitability Report')
+
+      const salesRes = await loadSalesForPrint({
+        supabase,
+        userId: user.id,
+        startDate,
+        endDate,
+        platform: selectedPlatform,
+      })
+
+      if (salesRes.error) {
+        return jsonError(`Could not build platform profitability print view: ${salesRes.error.message}`)
+      }
+
+      const html = buildPrintableReportHtml(
+        buildPlatformProfitabilityPrintConfig({
+          sales: (salesRes.data ?? []) as SaleRow[],
+          reportLabel: label,
+          platformFilter: selectedPlatform,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+    if (reportType === 'operations') {
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Operations Report')
+
+      const [salesRes, expensesRes, breaksRes, inventoryRes] = await Promise.all([
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null)
+          .gte('sale_date', startDate)
+          .lte('sale_date', endDate)
+          .order('sale_date', { ascending: false }),
+
+        supabase
+          .from('expenses')
+          .select('id, expense_date, category, vendor, amount, notes, created_at')
+          .eq('user_id', user.id)
+          .gte('expense_date', startDate)
+          .lte('expense_date', endDate)
+          .order('expense_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+
+        supabase
+          .from('breaks')
+          .select('id, break_date, source_name, product_name, order_number, total_cost')
+          .eq('user_id', user.id)
+          .gte('break_date', startDate)
+          .lte('break_date', endDate)
+          .order('break_date', { ascending: false }),
+
+        supabase
+          .from('inventory_items')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+      ])
+
+      if (salesRes.error) return jsonError(`Could not build operations print view sales: ${salesRes.error.message}`)
+      if (expensesRes.error) return jsonError(`Could not build operations print view expenses: ${expensesRes.error.message}`)
+      if (breaksRes.error) return jsonError(`Could not build operations print view purchases: ${breaksRes.error.message}`)
+      if (inventoryRes.error) return jsonError(`Could not build operations print view inventory: ${inventoryRes.error.message}`)
+
+      const html = buildPrintableReportHtml(
+        buildOperationsPrintConfig({
+          reportLabel: label,
+          sales: (salesRes.data ?? []) as SaleRow[],
+          expenses: (expensesRes.data ?? []) as ExpenseRow[],
+          breaks: (breaksRes.data ?? []) as BreakRow[],
+          inventoryItems: (inventoryRes.data ?? []) as InventoryItemRow[],
         })
       )
 

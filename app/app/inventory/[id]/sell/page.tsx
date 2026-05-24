@@ -234,6 +234,11 @@ export default async function SellInventoryPage({
               <input type="hidden" name="other_costs" value="0" />
               <input type="hidden" name="platform" value="" />
               <input type="hidden" name="notes" value="" />
+              <input type="hidden" name="sales_tax_collected" value="0" />
+              <input type="hidden" name="sales_tax_responsibility" value="marketplace_collected" />
+              <input type="hidden" name="sales_channel_type" value="marketplace" />
+              <input type="hidden" name="tax_state" value="" />
+              <input type="hidden" name="tax_notes" value="" />
               <button
                 type="submit"
                 className="app-button-primary"
@@ -255,6 +260,11 @@ export default async function SellInventoryPage({
               <input type="hidden" name="other_costs" value="0" />
               <input type="hidden" name="platform" value="" />
               <input type="hidden" name="notes" value="" />
+              <input type="hidden" name="sales_tax_collected" value="0" />
+              <input type="hidden" name="sales_tax_responsibility" value="marketplace_collected" />
+              <input type="hidden" name="sales_channel_type" value="marketplace" />
+              <input type="hidden" name="tax_state" value="" />
+              <input type="hidden" name="tax_notes" value="" />
               <button
                 type="submit"
                 className="app-button"
@@ -493,6 +503,84 @@ export default async function SellInventoryPage({
               </Field>
             </div>
 
+            <div className="app-section-tight space-y-2.5">
+              <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm font-semibold">Sales Tax Tracking</div>
+                <div className="text-xs text-zinc-400">
+                  Tracked separately from income and profit.
+                </div>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                <Field label="Sales Channel">
+                  <select
+                    name="sales_channel_type"
+                    defaultValue="marketplace"
+                    className="app-select"
+                    disabled={availableQty <= 0}
+                  >
+                    <option value="marketplace">Marketplace</option>
+                    <option value="local_sale">Local Sale</option>
+                    <option value="card_show">Card Show</option>
+                    <option value="direct_private">Direct / Private Sale</option>
+                  </select>
+                </Field>
+
+                <Field label="Tax Responsibility">
+                  <select
+                    name="sales_tax_responsibility"
+                    defaultValue="marketplace_collected"
+                    className="app-select"
+                    disabled={availableQty <= 0}
+                  >
+                    <option value="marketplace_collected">Marketplace collected/remitted</option>
+                    <option value="seller_collected">Seller collected / may need to remit</option>
+                    <option value="not_collected">No tax collected</option>
+                    <option value="exempt_or_not_taxable">Exempt / not taxable</option>
+                  </select>
+                </Field>
+
+                <Field label="Sales Tax Collected">
+                  <input
+                    name="sales_tax_collected"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    defaultValue="0.00"
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+
+                <Field label="Tax State">
+                  <input
+                    name="tax_state"
+                    type="text"
+                    placeholder="Optional, example: SD"
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+
+                <div className="md:col-span-2">
+                  <Field label="Tax Notes">
+                    <input
+                      name="tax_notes"
+                      type="text"
+                      placeholder="Optional: marketplace handled, local sale, exempt buyer, etc."
+                      className="app-input"
+                      disabled={availableQty <= 0}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="text-xs leading-snug text-zinc-400">
+                Use marketplace collected/remitted for eBay, Whatnot, and similar platforms when they handle tax.
+                Use seller collected when you directly collect tax at a local sale, card show, or private sale and may need to remit it.
+              </div>
+            </div>
+
             <div>
               <label className="mb-1 block text-xs uppercase tracking-wide text-zinc-400">
                 Notes
@@ -552,6 +640,21 @@ export default async function SellInventoryPage({
                 </p>
                 <p>
                   If available quantity stays above 0, the item remains active in inventory.
+                </p>
+              </div>
+            </div>
+
+            <div className="app-section-tight">
+              <div className="text-sm font-semibold">Sales Tax Status</div>
+              <div className="mt-2 space-y-1.5 text-sm leading-snug text-zinc-300">
+                <p>
+                  Marketplace collected/remitted usually means there is nothing for you to remit for that sale.
+                </p>
+                <p>
+                  Seller collected means you directly collected tax and may need to remit it.
+                </p>
+                <p>
+                  No tax collected or exempt/not taxable keeps the record clear for monthly review.
                 </p>
               </div>
             </div>

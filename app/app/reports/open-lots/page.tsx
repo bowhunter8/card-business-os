@@ -26,6 +26,8 @@ type OpenLotRow = {
   realizedCost: number
   remainingCost: number
   estimatedValue: number
+  unrealizedGainLoss: number
+  suggestedAction: string
   notes: string
 }
 
@@ -125,6 +127,65 @@ function formatDate(value: string) {
     month: 'short',
     day: 'numeric',
   }).format(date)
+}
+
+function getLotSuggestedAction({
+  status,
+  remainingQuantity,
+  soldQuantity,
+  ageDays,
+  remainingCost,
+  estimatedValue,
+}: {
+  status: string
+  remainingQuantity: number
+  soldQuantity: number
+  ageDays: number | null
+  remainingCost: number
+  estimatedValue: number
+}) {
+  const cleanStatus = status.toLowerCase()
+  const spread = estimatedValue - remainingCost
+
+  if (cleanStatus === 'personal') return 'PC review'
+  if (cleanStatus === 'junk') return 'Disposal / write-off review'
+  if (remainingQuantity <= 0) return 'Close lot'
+  if (soldQuantity > 0 && remainingQuantity > 0) return 'Partial lot review'
+  if (ageDays !== null && ageDays >= 180) return 'Reprice / bundle candidate'
+  if (ageDays !== null && ageDays >= 90) return 'Stale lot review'
+  if (estimatedValue > 0 && spread < 0) return 'Value below cost'
+  if (cleanStatus === 'listed') return 'Monitor listing'
+
+  return 'Ready to list / sell'
+}
+
+function actionBadgeClass(action: string) {
+  const clean = action.toLowerCase()
+
+  if (clean.includes('write-off') || clean.includes('disposal')) {
+    return 'border-red-900 bg-red-950/40 text-red-200'
+  }
+
+  if (clean.includes('stale') || clean.includes('reprice') || clean.includes('below cost')) {
+    return 'border-amber-900 bg-amber-950/40 text-amber-200'
+  }
+
+  if (clean.includes('partial')) {
+    return 'border-blue-900 bg-blue-950/40 text-blue-200'
+  }
+
+  if (clean.includes('ready')) {
+    return 'border-emerald-900 bg-emerald-950/40 text-emerald-200'
+  }
+
+  return 'border-zinc-700 bg-zinc-950 text-zinc-300'
+}
+
+function rowToneClass(row: OpenLotRow, staleDays: number) {
+  if (row.status === 'junk') return 'bg-red-950/10 hover:bg-red-950/20'
+  if ((row.ageDays ?? 0) >= staleDays) return 'bg-amber-950/10 hover:bg-amber-950/20'
+  if (row.soldQuantity > 0) return 'bg-blue-950/10 hover:bg-blue-950/20'
+  return 'bg-black/10 hover:bg-zinc-900/40'
 }
 
 function buildDateRange(period: string, start: string, end: string) {
@@ -316,6 +377,13 @@ function buildOpenLotRows(inventoryRows: InventoryRow[], saleRows: SaleRow[]) {
           )
         : null
 
+      const estimatedValue = getFirstNumber(
+        item,
+        ['estimated_value', 'estimated_value_total', 'market_value', 'current_value', 'opg_value'],
+        0,
+      )
+      const unrealizedGainLoss = estimatedValue - remainingCost
+
       return {
         id,
         itemName: getFirstText(
@@ -341,11 +409,16 @@ function buildOpenLotRows(inventoryRows: InventoryRow[], saleRows: SaleRow[]) {
         originalCost,
         realizedCost,
         remainingCost,
-        estimatedValue: getFirstNumber(
-          item,
-          ['estimated_value', 'market_value', 'current_value', 'opg_value'],
-          0,
-        ),
+        estimatedValue,
+        unrealizedGainLoss,
+        suggestedAction: getLotSuggestedAction({
+          status,
+          remainingQuantity,
+          soldQuantity,
+          ageDays,
+          remainingCost,
+          estimatedValue,
+        }),
         notes: getFirstText(item, ['notes', 'note'], ''),
       }
     })
@@ -503,6 +576,11 @@ export default async function OpenLotsReportPage({
     (total, row) => total + row.estimatedValue,
     0,
   )
+  const totalUnrealizedGainLoss = rows.reduce(
+    (total, row) => total + row.unrealizedGainLoss,
+    0,
+  )
+  const belowCostRows = rows.filter((row) => row.estimatedValue > 0 && row.unrealizedGainLoss < 0)
 
   const currentQuery = buildQueryString({
     period,
@@ -513,8 +591,9 @@ export default async function OpenLotsReportPage({
     staleDays: String(staleDays),
   })
 
-  const csvHref = `/api/reports/open-lots/csv${currentQuery}`
-  const pdfHref = `/api/reports/open-lots/pdf${currentQuery}`
+  const csvHref = `/api/reports/open-lots${currentQuery}`
+  const pdfHref = `/api/reports/open-lots/PDF${currentQuery}`
+  const printHref = `/api/reports/open-lots/print${currentQuery}`
 
   return (
     <div className="app-page-wide space-y-4">
@@ -535,6 +614,10 @@ export default async function OpenLotsReportPage({
 
           <Link href="/app/reports/inventory" className="app-button">
             Inventory Reports
+          </Link>
+
+          <Link href="/app/reports/operations" className="app-button">
+            Daily Operations
           </Link>
         </div>
       </div>
@@ -640,7 +723,7 @@ export default async function OpenLotsReportPage({
         </div>
       </form>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
         <SummaryCard
           label="Open Lots"
           value={String(rows.length)}
@@ -666,6 +749,21 @@ export default async function OpenLotsReportPage({
           value={String(staleRows.length)}
           helper={`${staleDays}+ days old`}
         />
+        <SummaryCard
+          label="Estimated Value"
+          value={money(totalEstimatedValue)}
+          helper="Remaining lot value"
+        />
+        <SummaryCard
+          label="Unrealized Spread"
+          value={money(totalUnrealizedGainLoss)}
+          helper="Value less remaining cost"
+        />
+        <SummaryCard
+          label="Below Cost"
+          value={String(belowCostRows.length)}
+          helper="Estimated value below basis"
+        />
       </div>
 
       <div className="app-section p-4">
@@ -687,7 +785,7 @@ export default async function OpenLotsReportPage({
             <a href={pdfHref} className="app-button">
               Export PDF
             </a>
-            <a href={pdfHref} className="app-button">
+            <a href={printHref} className="app-button">
               Printable
             </a>
           </div>
@@ -718,7 +816,14 @@ export default async function OpenLotsReportPage({
                 <th className="px-3 py-3 text-right font-semibold">
                   Remaining Cost
                 </th>
+                <th className="px-3 py-3 text-right font-semibold">
+                  Est. Value
+                </th>
+                <th className="px-3 py-3 text-right font-semibold">
+                  Spread
+                </th>
                 <th className="px-3 py-3 font-semibold">Age</th>
+                <th className="px-3 py-3 font-semibold">Action</th>
                 <th className="px-3 py-3 font-semibold">Location</th>
               </tr>
             </thead>
@@ -727,7 +832,7 @@ export default async function OpenLotsReportPage({
               {rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={12}
                     className="px-3 py-8 text-center text-sm text-zinc-400"
                   >
                     No open lots found for the selected filters.
@@ -735,50 +840,94 @@ export default async function OpenLotsReportPage({
                 </tr>
               ) : (
                 rows.map((row) => (
-                  <tr key={row.id} className="bg-black/10">
+                  <tr
+                    key={row.id}
+                    className={`${rowToneClass(row, staleDays)} transition`}
+                  >
                     <td className="max-w-[320px] px-3 py-3 align-top">
-                      <div className="font-semibold text-zinc-100">
-                        {row.itemName}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-400">
-                        {row.player}
-                      </div>
-                      {row.notes ? (
-                        <div className="mt-1 text-xs leading-5 text-zinc-500">
-                          {row.notes}
+                      <Link
+                        href={`/app/inventory/${row.id}`}
+                        className="block"
+                        prefetch={false}
+                      >
+                        <div className="font-semibold text-zinc-100 underline-offset-2 hover:underline">
+                          {row.itemName}
                         </div>
-                      ) : null}
+                        <div className="mt-1 text-xs text-zinc-400">
+                          {row.player}
+                        </div>
+                        {row.notes ? (
+                          <div className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">
+                            {row.notes}
+                          </div>
+                        ) : null}
+                      </Link>
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-300">
-                      <div>{row.year}</div>
-                      <div className="text-xs text-zinc-500">{row.brand}</div>
-                      <div className="text-xs text-zinc-500">{row.setName}</div>
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        <div>{row.year}</div>
+                        <div className="text-xs text-zinc-500">{row.brand}</div>
+                        <div className="text-xs text-zinc-500">{row.setName}</div>
+                      </Link>
                     </td>
                     <td className="px-3 py-3 align-top">
-                      <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs font-semibold capitalize text-zinc-300">
-                        {row.status}
-                      </span>
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        <span className="rounded-full border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs font-semibold capitalize text-zinc-300">
+                          {row.status}
+                        </span>
+                      </Link>
                     </td>
                     <td className="px-3 py-3 text-right align-top text-zinc-300">
-                      {row.originalQuantity}
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {row.originalQuantity}
+                      </Link>
                     </td>
                     <td className="px-3 py-3 text-right align-top text-zinc-300">
-                      {row.soldQuantity}
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {row.soldQuantity}
+                      </Link>
                     </td>
                     <td className="px-3 py-3 text-right align-top font-semibold text-zinc-100">
-                      {row.remainingQuantity}
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {row.remainingQuantity}
+                      </Link>
                     </td>
                     <td className="px-3 py-3 text-right align-top text-zinc-300">
-                      {money(row.remainingCost)}
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {money(row.remainingCost)}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-3 text-right align-top text-zinc-300">
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {money(row.estimatedValue)}
+                      </Link>
+                    </td>
+                    <td className={`px-3 py-3 text-right align-top ${
+                      row.unrealizedGainLoss < 0 ? 'text-red-300' : 'text-emerald-300'
+                    }`}>
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {money(row.unrealizedGainLoss)}
+                      </Link>
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-300">
-                      {row.ageDays === null ? '—' : `${row.ageDays} days`}
-                      <div className="text-xs text-zinc-500">
-                        {formatDate(row.acquiredDate)}
-                      </div>
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {row.ageDays === null ? '—' : `${row.ageDays} days`}
+                        <div className="text-xs text-zinc-500">
+                          {formatDate(row.acquiredDate)}
+                        </div>
+                      </Link>
+                    </td>
+                    <td className="px-3 py-3 align-top">
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${actionBadgeClass(row.suggestedAction)}`}>
+                          {row.suggestedAction}
+                        </span>
+                      </Link>
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-300">
-                      {row.storageLocation}
+                      <Link href={`/app/inventory/${row.id}`} className="block" prefetch={false}>
+                        {row.storageLocation}
+                      </Link>
                     </td>
                   </tr>
                 ))
@@ -793,7 +942,7 @@ export default async function OpenLotsReportPage({
             Open lots are still inventory. The remaining cost basis should stay
             attached to the unsold quantity until the items are sold, disposed,
             donated, used as a documented giveaway, or otherwise finalized
-            through the proper workflow.
+            through the proper workflow. Click any row to open the underlying inventory item and make updates from the inventory page.
           </p>
         </div>
       </div>
