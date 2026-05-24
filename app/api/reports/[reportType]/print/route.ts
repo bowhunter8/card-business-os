@@ -67,6 +67,11 @@ type SaleRow = {
   platform: string | null
   notes: string | null
   inventory_item_id: string | null
+  sales_tax_collected?: number | string | null
+  sales_tax_responsibility?: string | null
+  sales_channel_type?: string | null
+  tax_state?: string | null
+  tax_notes?: string | null
 }
 
 type SaleInventoryRow = {
@@ -165,6 +170,58 @@ function normalizeStatus(status: string | null | undefined) {
 
 function platformKey(value: string | null | undefined) {
   return String(value || 'Unknown').trim() || 'Unknown'
+}
+
+function normalizeSalesTaxResponsibility(value: string | null | undefined) {
+  const clean = String(value || '').trim()
+
+  if (
+    clean === 'marketplace_collected' ||
+    clean === 'seller_collected' ||
+    clean === 'not_collected' ||
+    clean === 'exempt_or_not_taxable'
+  ) {
+    return clean
+  }
+
+  return 'marketplace_collected'
+}
+
+function normalizeSalesChannelType(value: string | null | undefined) {
+  const clean = String(value || '').trim()
+
+  if (
+    clean === 'marketplace' ||
+    clean === 'local_sale' ||
+    clean === 'card_show' ||
+    clean === 'direct_private'
+  ) {
+    return clean
+  }
+
+  return 'marketplace'
+}
+
+function formatSalesTaxResponsibility(value: string | null | undefined) {
+  const clean = normalizeSalesTaxResponsibility(value)
+
+  if (clean === 'marketplace_collected') return 'Marketplace handled'
+  if (clean === 'seller_collected') return 'Seller remit'
+  if (clean === 'not_collected') return 'No tax'
+  if (clean === 'exempt_or_not_taxable') return 'Exempt'
+
+  return 'Marketplace handled'
+}
+
+function formatSalesChannelType(value: string | null | undefined) {
+  const clean = normalizeSalesChannelType(value)
+
+  if (clean === 'marketplace') return 'Marketplace'
+  if (clean === 'local_sale') return 'Local sale'
+  if (clean === 'card_show') return 'Card show'
+  if (clean === 'direct_private') return 'Direct/private'
+
+  return 'Marketplace'
 }
 
 function clampYear(raw?: string | null) {
@@ -1035,70 +1092,96 @@ function buildSalesTaxPrintConfig({
   sales,
   reportLabel,
   platformFilter,
+  responsibilityFilter,
+  channelFilter,
+  taxStateFilter,
 }: {
   sales: SaleRow[]
   reportLabel: string
   platformFilter: string
+  responsibilityFilter: string
+  channelFilter: string
+  taxStateFilter: string
 }): ReportConfig {
   const totalGrossSales = roundMoney(
-    sales.reduce((sum, sale) => sum + Number(sale.gross_sale ?? 0), 0)
+    sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0)
   )
   const totalNetProceeds = roundMoney(
-    sales.reduce((sum, sale) => sum + Number(sale.net_proceeds ?? 0), 0)
+    sales.reduce((sum, sale) => sum + asNumber(sale.net_proceeds), 0)
   )
-
-  const rows: PrintableReportRow[] = Array.from(
-    sales.reduce((map, sale) => {
-      const platform = platformKey(sale.platform)
-      const current = map.get(platform) ?? { count: 0, gross: 0, net: 0 }
-
-      map.set(platform, {
-        count: current.count + 1,
-        gross: current.gross + Number(sale.gross_sale ?? 0),
-        net: current.net + Number(sale.net_proceeds ?? 0),
-      })
-
-      return map
-    }, new Map<string, { count: number; gross: number; net: number }>()),
+  const totalSalesTaxCollected = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.sales_tax_collected), 0)
   )
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([platform, values], index) => ({
-      number: index + 1,
-      platform,
-      sales: values.count,
-      gross: currency(roundMoney(values.gross)),
-      trackedTax: currency(0),
-      marketplaceTax: currency(0),
-      taxable: currency(0),
-      net: currency(roundMoney(values.net)),
-      notes: 'Dedicated sales-tax fields are not stored yet.',
-    }))
+  const marketplaceHandledTax = roundMoney(
+    sales
+      .filter(
+        (sale) =>
+          normalizeSalesTaxResponsibility(sale.sales_tax_responsibility) ===
+          'marketplace_collected'
+      )
+      .reduce((sum, sale) => sum + asNumber(sale.sales_tax_collected), 0)
+  )
+  const sellerReviewTax = roundMoney(
+    sales
+      .filter(
+        (sale) =>
+          normalizeSalesTaxResponsibility(sale.sales_tax_responsibility) ===
+          'seller_collected'
+      )
+      .reduce((sum, sale) => sum + asNumber(sale.sales_tax_collected), 0)
+  )
+  const noTaxCount = sales.filter(
+    (sale) =>
+      normalizeSalesTaxResponsibility(sale.sales_tax_responsibility) ===
+      'not_collected'
+  ).length
+  const exemptCount = sales.filter(
+    (sale) =>
+      normalizeSalesTaxResponsibility(sale.sales_tax_responsibility) ===
+      'exempt_or_not_taxable'
+  ).length
+
+  const rows: PrintableReportRow[] = sales.map((sale, index) => ({
+    number: index + 1,
+    date: formatDateForPrint(sale.sale_date),
+    platform: platformKey(sale.platform),
+    channel: formatSalesChannelType(sale.sales_channel_type),
+    responsibility: formatSalesTaxResponsibility(sale.sales_tax_responsibility),
+    state: asString(sale.tax_state) || '—',
+    tax: currency(asNumber(sale.sales_tax_collected)),
+    gross: currency(asNumber(sale.gross_sale)),
+    net: currency(asNumber(sale.net_proceeds)),
+    notes: asString(sale.tax_notes || sale.notes),
+  }))
 
   return {
     title: reportLabel,
     subtitle:
-      `Printable sales tax report. Platform filter: ${platformFilter || 'All platforms'}. Marketplace tax fields are placeholders until dedicated tax fields are added.`,
+      `Printable sales tax report. Platform: ${platformFilter || 'All platforms'}. Responsibility: ${responsibilityFilter || 'All'}. Channel: ${channelFilter || 'All'}. State: ${taxStateFilter || 'All'}. Marketplace handled tax is separated from seller-collected tax that may need remittance review.`,
     summary: [
       { label: 'Sales count', value: sales.length },
       { label: 'Gross sales', value: currency(totalGrossSales) },
-      { label: 'Tracked sales tax', value: currency(0) },
-      { label: 'Marketplace tax', value: currency(0) },
-      { label: 'Taxable tracked', value: currency(0) },
+      { label: 'Total sales tax', value: currency(totalSalesTaxCollected) },
+      { label: 'Marketplace handled', value: currency(marketplaceHandledTax) },
+      { label: 'Seller review / possible remit', value: currency(sellerReviewTax) },
+      { label: 'No tax collected', value: noTaxCount },
+      { label: 'Exempt / not taxable', value: exemptCount },
       { label: 'Net proceeds', value: currency(totalNetProceeds) },
     ],
     columns: [
       { key: 'number', label: '#', align: 'right', width: '4%' },
-      { key: 'platform', label: 'Platform', width: '17%' },
-      { key: 'sales', label: 'Sales', align: 'right', width: '8%' },
-      { key: 'gross', label: 'Gross', align: 'right', width: '10%' },
-      { key: 'trackedTax', label: 'Tax', align: 'right', width: '10%' },
-      { key: 'marketplaceTax', label: 'Mkt Tax', align: 'right', width: '10%' },
-      { key: 'taxable', label: 'Taxable', align: 'right', width: '10%' },
-      { key: 'net', label: 'Net', align: 'right', width: '10%' },
-      { key: 'notes', label: 'Notes', width: '21%' },
+      { key: 'date', label: 'Date', width: '8%' },
+      { key: 'platform', label: 'Platform', width: '11%' },
+      { key: 'channel', label: 'Channel', width: '11%' },
+      { key: 'responsibility', label: 'Responsibility', width: '13%' },
+      { key: 'state', label: 'State', width: '5%' },
+      { key: 'tax', label: 'Tax', align: 'right', width: '8%' },
+      { key: 'gross', label: 'Gross', align: 'right', width: '9%' },
+      { key: 'net', label: 'Net', align: 'right', width: '9%' },
+      { key: 'notes', label: 'Notes', width: '22%' },
     ],
     rows,
-    emptyMessage: 'No sales found for this sales-tax report range.',
+    emptyMessage: 'No sales tax records found for this report range.',
   }
 }
 
@@ -1584,7 +1667,12 @@ async function loadSalesForPrint({
       profit,
       platform,
       notes,
-      inventory_item_id
+      inventory_item_id,
+      sales_tax_collected,
+      sales_tax_responsibility,
+      sales_channel_type,
+      tax_state,
+      tax_notes
     `)
     .eq('user_id', userId)
     .is('reversed_at', null)
@@ -1593,7 +1681,7 @@ async function loadSalesForPrint({
     .order('sale_date', { ascending: false })
 
   if (platform) {
-    salesQuery = salesQuery.eq('platform', platform)
+    salesQuery = salesQuery.ilike('platform', `%${platform}%`)
   }
 
   return salesQuery
@@ -1662,6 +1750,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
       const selectedPlatformRaw = String(searchParams.get('platform') || '').trim()
       const selectedPlatform =
         selectedPlatformRaw && selectedPlatformRaw !== 'all' ? selectedPlatformRaw : ''
+      const selectedResponsibility = String(searchParams.get('responsibility') || '').trim()
+      const selectedChannel = String(searchParams.get('channel') || '').trim()
+      const selectedTaxState = String(searchParams.get('taxState') || '')
+        .trim()
+        .toUpperCase()
+      const search = String(searchParams.get('q') || '').trim()
       const labelPrefix =
         reportType === 'cogs'
           ? 'Realized COGS Report'
@@ -1685,7 +1779,46 @@ export async function GET(request: NextRequest, context: RouteContext) {
         return jsonError(`Could not build ${labelPrefix.toLowerCase()} print view: ${salesRes.error.message}`)
       }
 
-      const sales = (salesRes.data ?? []) as SaleRow[]
+      const loadedSales = (salesRes.data ?? []) as SaleRow[]
+      const sales =
+        reportType === 'sales-tax'
+          ? loadedSales.filter((sale) => {
+              if (
+                selectedResponsibility &&
+                sale.sales_tax_responsibility !== selectedResponsibility
+              ) {
+                return false
+              }
+
+              if (selectedChannel && sale.sales_channel_type !== selectedChannel) {
+                return false
+              }
+
+              if (selectedTaxState && sale.tax_state !== selectedTaxState) {
+                return false
+              }
+
+              if (!search) return true
+
+              const haystack = [
+                sale.sale_date,
+                sale.platform,
+                sale.gross_sale,
+                sale.net_proceeds,
+                sale.sales_tax_collected,
+                sale.sales_tax_responsibility,
+                sale.sales_channel_type,
+                sale.tax_state,
+                sale.tax_notes,
+                sale.notes,
+              ]
+                .map(asString)
+                .join(' ')
+                .toLowerCase()
+
+              return haystack.includes(search.toLowerCase())
+            })
+          : loadedSales
 
       if (reportType === 'shipping') {
         const html = buildPrintableReportHtml(
@@ -1705,6 +1838,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
             sales,
             reportLabel: label,
             platformFilter: selectedPlatform,
+            responsibilityFilter: selectedResponsibility,
+            channelFilter: selectedChannel,
+            taxStateFilter: selectedTaxState,
           })
         )
 

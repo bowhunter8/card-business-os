@@ -40,6 +40,11 @@ type SalesRow = {
   shipping_supplies_cost?: number | string | null;
   packaging_cost?: number | string | null;
   shipping_profile_name?: string | null;
+  sales_tax_collected?: number | string | null;
+  sales_tax_responsibility?: string | null;
+  sales_channel_type?: string | null;
+  tax_state?: string | null;
+  tax_notes?: string | null;
 };
 
 type SalesInventoryRow = {
@@ -399,6 +404,58 @@ function getReportDateRange({
 
 function platformKey(value: string | null | undefined) {
   return String(value || "Unknown").trim() || "Unknown";
+}
+
+function normalizeSalesTaxResponsibility(value: string | null | undefined) {
+  const clean = String(value || "").trim();
+
+  if (
+    clean === "marketplace_collected" ||
+    clean === "seller_collected" ||
+    clean === "not_collected" ||
+    clean === "exempt_or_not_taxable"
+  ) {
+    return clean;
+  }
+
+  return "marketplace_collected";
+}
+
+function normalizeSalesChannelType(value: string | null | undefined) {
+  const clean = String(value || "").trim();
+
+  if (
+    clean === "marketplace" ||
+    clean === "local_sale" ||
+    clean === "card_show" ||
+    clean === "direct_private"
+  ) {
+    return clean;
+  }
+
+  return "marketplace";
+}
+
+function formatSalesTaxResponsibility(value: string | null | undefined) {
+  const clean = normalizeSalesTaxResponsibility(value);
+
+  if (clean === "marketplace_collected") return "Marketplace collected/remitted";
+  if (clean === "seller_collected") return "Seller collected / possible remit";
+  if (clean === "not_collected") return "No tax collected";
+  if (clean === "exempt_or_not_taxable") return "Exempt / not taxable";
+
+  return "Marketplace collected/remitted";
+}
+
+function formatSalesChannelType(value: string | null | undefined) {
+  const clean = normalizeSalesChannelType(value);
+
+  if (clean === "marketplace") return "Marketplace";
+  if (clean === "local_sale") return "Local sale";
+  if (clean === "card_show") return "Card show";
+  if (clean === "direct_private") return "Direct/private";
+
+  return "Marketplace";
 }
 
 function getFirstNumber(row: SalesRow, keys: (keyof SalesRow)[]) {
@@ -928,6 +985,332 @@ async function exportSalesReport(request: Request) {
     filename,
   });
 }
+
+
+async function exportSalesTaxReport(request: Request) {
+  const { searchParams } = new URL(request.url);
+
+  const selectedYear = clampYear(searchParams.get("year"));
+  const selectedPeriod = normalizePeriod(searchParams.get("period"));
+  const selectedMonth = clampMonth(searchParams.get("month"));
+  const selectedQuarter = clampQuarter(searchParams.get("quarter"));
+  const selectedPlatformRaw = String(searchParams.get("platform") || "").trim();
+  const selectedPlatform =
+    selectedPlatformRaw && selectedPlatformRaw !== "all"
+      ? selectedPlatformRaw
+      : "";
+  const selectedResponsibility = String(
+    searchParams.get("responsibility") || "",
+  ).trim();
+  const selectedChannel = String(searchParams.get("channel") || "").trim();
+  const selectedTaxState = String(searchParams.get("taxState") || "")
+    .trim()
+    .toUpperCase();
+  const search = String(searchParams.get("q") || "").trim();
+  const selectedStart =
+    searchParams.get("start") ||
+    searchParams.get("startDate") ||
+    searchParams.get("dateFrom") ||
+    searchParams.get("date");
+  const selectedEnd =
+    searchParams.get("end") ||
+    searchParams.get("endDate") ||
+    searchParams.get("dateTo");
+
+  const { startDate, endDate, label } = getReportDateRange({
+    selectedYear,
+    period: selectedPeriod,
+    start: selectedStart,
+    end: selectedEnd,
+    month: selectedMonth,
+    quarter: selectedQuarter,
+    reportLabel: "Sales Tax",
+  });
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return unauthorizedError();
+  }
+
+  let salesQuery = supabase
+    .from("sales")
+    .select(
+      `
+      id,
+      sale_date,
+      gross_sale,
+      platform_fees,
+      shipping_cost,
+      other_costs,
+      net_proceeds,
+      cost_of_goods_sold,
+      profit,
+      platform,
+      notes,
+      inventory_item_id,
+      sales_tax_collected,
+      sales_tax_responsibility,
+      sales_channel_type,
+      tax_state,
+      tax_notes
+    `,
+    )
+    .eq("user_id", user.id)
+    .is("reversed_at", null)
+    .gte("sale_date", startDate)
+    .lte("sale_date", endDate)
+    .order("sale_date", { ascending: false });
+
+  if (selectedPlatform) {
+    salesQuery = salesQuery.ilike("platform", `%${selectedPlatform}%`);
+  }
+
+  if (selectedResponsibility) {
+    salesQuery = salesQuery.eq(
+      "sales_tax_responsibility",
+      selectedResponsibility,
+    );
+  }
+
+  if (selectedChannel) {
+    salesQuery = salesQuery.eq("sales_channel_type", selectedChannel);
+  }
+
+  if (selectedTaxState) {
+    salesQuery = salesQuery.eq("tax_state", selectedTaxState);
+  }
+
+  const { data, error } = await salesQuery;
+
+  if (error) {
+    return jsonError(`Could not export sales tax report: ${error.message}`);
+  }
+
+  const sales = ((data ?? []) as SalesRow[]).filter((sale) =>
+    matchesCsvSearch(
+      [
+        sale.sale_date,
+        sale.platform,
+        sale.gross_sale,
+        sale.net_proceeds,
+        sale.sales_tax_collected,
+        sale.sales_tax_responsibility,
+        sale.sales_channel_type,
+        sale.tax_state,
+        sale.tax_notes,
+        sale.notes,
+      ],
+      search,
+    ),
+  );
+
+  const totalGrossSales = roundMoney(
+    sales.reduce((sum, row) => sum + asNumber(row.gross_sale), 0),
+  );
+  const totalNetProceeds = roundMoney(
+    sales.reduce((sum, row) => sum + asNumber(row.net_proceeds), 0),
+  );
+  const totalSalesTaxCollected = roundMoney(
+    sales.reduce((sum, row) => sum + asNumber(row.sales_tax_collected), 0),
+  );
+  const marketplaceCollectedTax = roundMoney(
+    sales
+      .filter(
+        (row) =>
+          normalizeSalesTaxResponsibility(row.sales_tax_responsibility) ===
+          "marketplace_collected",
+      )
+      .reduce((sum, row) => sum + asNumber(row.sales_tax_collected), 0),
+  );
+  const sellerCollectedTax = roundMoney(
+    sales
+      .filter(
+        (row) =>
+          normalizeSalesTaxResponsibility(row.sales_tax_responsibility) ===
+          "seller_collected",
+      )
+      .reduce((sum, row) => sum + asNumber(row.sales_tax_collected), 0),
+  );
+  const noTaxCollectedCount = sales.filter(
+    (row) =>
+      normalizeSalesTaxResponsibility(row.sales_tax_responsibility) ===
+      "not_collected",
+  ).length;
+  const exemptOrNotTaxableCount = sales.filter(
+    (row) =>
+      normalizeSalesTaxResponsibility(row.sales_tax_responsibility) ===
+      "exempt_or_not_taxable",
+  ).length;
+
+  const baseRow = {
+    report: label,
+    section: "",
+    range_start: startDate,
+    range_end: endDate,
+    platform_filter: selectedPlatform || "All platforms",
+    responsibility_filter: selectedResponsibility
+      ? formatSalesTaxResponsibility(selectedResponsibility)
+      : "All tax responsibility",
+    channel_filter: selectedChannel
+      ? formatSalesChannelType(selectedChannel)
+      : "All channels",
+    state_filter: selectedTaxState || "All states",
+    search_filter: search || "None",
+    metric: "",
+    value: "",
+    sale_date: "",
+    platform: "",
+    sales_channel_type: "",
+    sales_tax_responsibility: "",
+    tax_state: "",
+    sales_tax_collected: "",
+    gross_sale: "",
+    net_proceeds: "",
+    tax_notes: "",
+    notes: "",
+    sale_id: "",
+    inventory_item_id: "",
+  };
+
+  const summaryRows = [
+    ["sales_count", String(sales.length)],
+    ["gross_sales", moneyString(totalGrossSales)],
+    ["net_proceeds", moneyString(totalNetProceeds)],
+    ["total_sales_tax_collected", moneyString(totalSalesTaxCollected)],
+    ["marketplace_collected_or_remitted", moneyString(marketplaceCollectedTax)],
+    ["seller_collected_possible_remit", moneyString(sellerCollectedTax)],
+    ["no_tax_collected_sales", String(noTaxCollectedCount)],
+    ["exempt_or_not_taxable_sales", String(exemptOrNotTaxableCount)],
+  ].map(([metric, value]) => ({
+    ...baseRow,
+    section: "summary",
+    metric,
+    value,
+  }));
+
+  const responsibilityRows = Array.from(
+    sales.reduce((map, sale) => {
+      const responsibility = normalizeSalesTaxResponsibility(
+        sale.sales_tax_responsibility,
+      );
+      const current = map.get(responsibility) ?? {
+        count: 0,
+        gross: 0,
+        tax: 0,
+        net: 0,
+      };
+
+      map.set(responsibility, {
+        count: current.count + 1,
+        gross: current.gross + asNumber(sale.gross_sale),
+        tax: current.tax + asNumber(sale.sales_tax_collected),
+        net: current.net + asNumber(sale.net_proceeds),
+      });
+
+      return map;
+    }, new Map<string, { count: number; gross: number; tax: number; net: number }>()),
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([responsibility, values]) => ({
+      ...baseRow,
+      section: "responsibility_summary",
+      sales_tax_responsibility: formatSalesTaxResponsibility(responsibility),
+      metric: "responsibility_totals",
+      value: String(values.count),
+      gross_sale: moneyString(roundMoney(values.gross)),
+      sales_tax_collected: moneyString(roundMoney(values.tax)),
+      net_proceeds: moneyString(roundMoney(values.net)),
+    }));
+
+  const channelRows = Array.from(
+    sales.reduce((map, sale) => {
+      const channel = normalizeSalesChannelType(sale.sales_channel_type);
+      const current = map.get(channel) ?? {
+        count: 0,
+        gross: 0,
+        tax: 0,
+        sellerTax: 0,
+      };
+
+      const responsibility = normalizeSalesTaxResponsibility(
+        sale.sales_tax_responsibility,
+      );
+
+      map.set(channel, {
+        count: current.count + 1,
+        gross: current.gross + asNumber(sale.gross_sale),
+        tax: current.tax + asNumber(sale.sales_tax_collected),
+        sellerTax:
+          current.sellerTax +
+          (responsibility === "seller_collected"
+            ? asNumber(sale.sales_tax_collected)
+            : 0),
+      });
+
+      return map;
+    }, new Map<string, { count: number; gross: number; tax: number; sellerTax: number }>()),
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([channel, values]) => ({
+      ...baseRow,
+      section: "channel_summary",
+      sales_channel_type: formatSalesChannelType(channel),
+      metric: "channel_totals",
+      value: String(values.count),
+      gross_sale: moneyString(roundMoney(values.gross)),
+      sales_tax_collected: moneyString(roundMoney(values.tax)),
+      notes:
+        values.sellerTax > 0
+          ? `Seller review / possible remit: ${moneyString(
+              roundMoney(values.sellerTax),
+            )}`
+          : "",
+    }));
+
+  const detailRows = sales.map((sale) => ({
+    ...baseRow,
+    section: "detail",
+    sale_date: sale.sale_date || "",
+    platform: platformKey(sale.platform),
+    sales_channel_type: formatSalesChannelType(sale.sales_channel_type),
+    sales_tax_responsibility: formatSalesTaxResponsibility(
+      sale.sales_tax_responsibility,
+    ),
+    tax_state: asString(sale.tax_state),
+    sales_tax_collected: moneyString(sale.sales_tax_collected),
+    gross_sale: moneyString(sale.gross_sale),
+    net_proceeds: moneyString(sale.net_proceeds),
+    tax_notes: asString(sale.tax_notes),
+    notes: asString(sale.notes),
+    sale_id: sale.id,
+    inventory_item_id: sale.inventory_item_id || "",
+  }));
+
+  const csv = excelSafeCsv(
+    buildCsv(
+      [...summaryRows, ...responsibilityRows, ...channelRows, ...detailRows],
+      "No sales tax records found for this report range.",
+    ),
+  );
+
+  const filename = buildReportFilename({
+    reportName: "sales-tax-report",
+    startDate,
+    endDate,
+    extension: "csv",
+  });
+
+  return csvDownloadResponse({
+    csv,
+    filename,
+  });
+}
+
 
 async function exportExpensesReport(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -3591,7 +3974,7 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   if (reportType === "sales-tax") {
-    return exportSalesReport(request);
+    return exportSalesTaxReport(request);
   }
 
   if (reportType === "expenses") {
