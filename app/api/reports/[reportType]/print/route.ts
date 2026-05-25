@@ -137,6 +137,7 @@ const REPORT_LABELS: Record<string, string> = {
   'write-offs': 'Write-Offs Report',
   'break-profitability': 'Break Profitability Report',
   'platform-profitability': 'Platform Profitability Report',
+  'marketplace-fees': 'Marketplace Fees Report',
   operations: 'Operations Report',
 }
 
@@ -2414,11 +2415,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return htmlResponse(withPrintScript(html))
     }
 
-    if (reportType === 'platform-profitability') {
+    if (reportType === 'platform-profitability' || reportType === 'marketplace-fees') {
       const selectedPlatformRaw = String(searchParams.get('platform') || '').trim()
       const selectedPlatform =
         selectedPlatformRaw && selectedPlatformRaw !== 'all' ? selectedPlatformRaw : ''
-      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Platform Profitability Report')
+      const { startDate, endDate, label } = getSelectedRange(
+        searchParams,
+        reportType === 'marketplace-fees'
+          ? 'Marketplace Fees Report'
+          : 'Platform Profitability Report'
+      )
 
       const salesRes = await loadSalesForPrint({
         supabase,

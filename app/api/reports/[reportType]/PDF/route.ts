@@ -234,6 +234,7 @@ const REPORT_LABELS: Record<string, string> = {
   "write-offs": "Write-Offs Report",
   "break-profitability": "Break Profitability Report",
   "platform-profitability": "Platform Profitability Report",
+  "marketplace-fees": "Marketplace Fee Report",
   operations: "Operations Report",
 };
 
@@ -3110,6 +3111,189 @@ function matchesBreakProfitabilityBucket(row: Record<string, unknown>, profitabi
 }
 
 
+
+function buildMarketplaceFeesLines({
+  sales,
+  reportLabel,
+  platformFilter,
+  search,
+}: {
+  sales: SaleRow[];
+  reportLabel: string;
+  platformFilter: string;
+  search: string;
+}): PdfElement[] {
+  const filteredSales = sales.filter((sale) => {
+    if (platformFilter && platformFilter !== "all" && platformKey(sale.platform) !== platformFilter) {
+      return false;
+    }
+
+    if (!search) return true;
+
+    const haystack = [
+      sale.sale_date,
+      sale.platform,
+      sale.gross_sale,
+      sale.platform_fees,
+      sale.net_proceeds,
+      sale.profit,
+      sale.notes,
+    ]
+      .map(asString)
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(search.toLowerCase());
+  });
+
+  const totalGrossSales = roundMoney(
+    filteredSales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0),
+  );
+  const totalPlatformFees = roundMoney(
+    filteredSales.reduce((sum, sale) => sum + asNumber(sale.platform_fees), 0),
+  );
+  const totalNetProceeds = roundMoney(
+    filteredSales.reduce((sum, sale) => sum + asNumber(sale.net_proceeds), 0),
+  );
+  const totalProfit = roundMoney(
+    filteredSales.reduce((sum, sale) => sum + asNumber(sale.profit), 0),
+  );
+  const averageFeeRate =
+    totalGrossSales > 0 ? roundMoney((totalPlatformFees / totalGrossSales) * 100) : 0;
+
+  const platformRows = Array.from(
+    filteredSales.reduce((map, sale) => {
+      const platform = platformKey(sale.platform);
+      const current = map.get(platform) ?? {
+        count: 0,
+        gross: 0,
+        fees: 0,
+        net: 0,
+        profit: 0,
+      };
+
+      map.set(platform, {
+        count: current.count + 1,
+        gross: current.gross + asNumber(sale.gross_sale),
+        fees: current.fees + asNumber(sale.platform_fees),
+        net: current.net + asNumber(sale.net_proceeds),
+        profit: current.profit + asNumber(sale.profit),
+      });
+
+      return map;
+    }, new Map<string, { count: number; gross: number; fees: number; net: number; profit: number }>()),
+  )
+    .map(([platform, values]) => {
+      const feeRate = values.gross > 0 ? roundMoney((values.fees / values.gross) * 100) : 0;
+
+      return {
+        platform,
+        sales: String(values.count),
+        gross: currency(roundMoney(values.gross)),
+        fees: currency(roundMoney(values.fees)),
+        feeRate: `${feeRate.toFixed(1)}%`,
+        net: currency(roundMoney(values.net)),
+        profit: currency(roundMoney(values.profit)),
+        review:
+          feeRate > 20
+            ? "High fee rate review"
+            : values.fees <= 0 && values.gross > 0
+              ? "No fee recorded"
+              : "OK",
+      };
+    })
+    .sort((a, b) => asNumber(b.fees) - asNumber(a.fees));
+
+  const detailRows = filteredSales.slice(0, 250).map((sale, index) => {
+    const gross = asNumber(sale.gross_sale);
+    const fees = asNumber(sale.platform_fees);
+    const feeRate = gross > 0 ? roundMoney((fees / gross) * 100) : 0;
+
+    return {
+      number: String(index + 1),
+      date: formatDateForPdf(sale.sale_date),
+      platform: platformKey(sale.platform),
+      gross: currency(gross),
+      fees: currency(fees),
+      feeRate: `${feeRate.toFixed(1)}%`,
+      net: currency(asNumber(sale.net_proceeds)),
+      profit: currency(asNumber(sale.profit)),
+      notes: asString(sale.notes),
+    };
+  });
+
+  const elements: PdfElement[] = [
+    { label: `Marketplace Fee Report - ${reportLabel}`, type: "title" },
+    { label: "SUMMARY", type: "section" },
+    {
+      type: "summaryGrid",
+      cards: [
+        { label: "Sales", value: String(filteredSales.length) },
+        { label: "Gross sales", value: currency(totalGrossSales) },
+        { label: "Platform fees", value: currency(totalPlatformFees) },
+        { label: "Fee rate", value: `${averageFeeRate.toFixed(1)}%` },
+      ],
+    },
+    {
+      type: "summaryGrid",
+      cards: [
+        { label: "Net proceeds", value: currency(totalNetProceeds) },
+        { label: "Profit", value: currency(totalProfit) },
+        { label: "Platform filter", value: platformFilter || "All platforms" },
+        { label: "Search", value: search || "None" },
+      ],
+    },
+    {
+      label:
+        "Marketplace fee note: platform fees are selling costs. Use this report to compare fee burden by marketplace and spot missing or unusually high fee records.",
+      type: "note",
+    },
+    { label: "PLATFORM FEE SUMMARY", type: "section" },
+    {
+      type: "table",
+      emptyMessage: "No marketplace fee records found for this report range.",
+      columns: [
+        { key: "platform", label: "Platform", width: 170 },
+        { key: "sales", label: "Sales", width: 55, align: "right" },
+        { key: "gross", label: "Gross Sales", width: 105, align: "right" },
+        { key: "fees", label: "Fees", width: 100, align: "right" },
+        { key: "feeRate", label: "Fee Rate", width: 75, align: "right" },
+        { key: "net", label: "Net", width: 100, align: "right" },
+        { key: "profit", label: "Profit", width: 100, align: "right" },
+        { key: "review", label: "Review", width: 119 },
+      ],
+      rows: platformRows,
+    },
+    { label: "SALE FEE DETAIL", type: "section" },
+    {
+      type: "table",
+      emptyMessage: "No sale fee records found for this report range.",
+      columns: [
+        { key: "number", label: "#", width: 22, align: "right" },
+        { key: "date", label: "Date", width: 58 },
+        { key: "platform", label: "Platform", width: 88 },
+        { key: "gross", label: "Gross", width: 76, align: "right" },
+        { key: "fees", label: "Fees", width: 72, align: "right" },
+        { key: "feeRate", label: "Rate", width: 58, align: "right" },
+        { key: "net", label: "Net", width: 76, align: "right" },
+        { key: "profit", label: "Profit", width: 76, align: "right" },
+        { key: "notes", label: "Notes", width: 198 },
+      ],
+      rows: detailRows,
+    },
+  ];
+
+  if (filteredSales.length > 250) {
+    elements.push({
+      label: `${filteredSales.length - 250} additional sale(s) not shown in this PDF. Use CSV export for the full detail.`,
+      type: "note",
+    });
+  }
+
+  return elements;
+}
+
+
 function buildPlatformProfitabilityLines({
   sales,
   reportLabel,
@@ -5296,6 +5480,107 @@ export async function GET(request: NextRequest, context: RouteContext) {
       });
     }
 
+
+
+    if (reportType === "marketplace-fees") {
+      const selectedYear = clampYear(searchParams.get("year"));
+      const selectedPeriod = normalizePeriod(searchParams.get("period"));
+      const selectedMonth = clampMonth(searchParams.get("month"));
+      const selectedQuarter = clampQuarter(searchParams.get("quarter"));
+      const selectedPlatformRaw = String(searchParams.get("platform") || "").trim();
+      const selectedPlatform =
+        selectedPlatformRaw && selectedPlatformRaw !== "all"
+          ? selectedPlatformRaw
+          : "";
+      const search = String(searchParams.get("q") || "").trim();
+
+      const explicitStartDate =
+        searchParams.get("startDate") || searchParams.get("dateFrom") || "";
+      const explicitEndDate =
+        searchParams.get("endDate") || searchParams.get("dateTo") || "";
+      const selectedStart =
+        searchParams.get("start") ||
+        explicitStartDate ||
+        searchParams.get("date");
+      const selectedEnd = searchParams.get("end") || explicitEndDate;
+
+      const calculatedRange = getSalesReportDateRange({
+        selectedYear,
+        period: selectedPeriod,
+        start: selectedStart,
+        end: selectedEnd,
+        month: selectedMonth,
+        quarter: selectedQuarter,
+      });
+
+      const startDate = explicitStartDate || calculatedRange.startDate;
+      const endDate = explicitEndDate || calculatedRange.endDate;
+      const label =
+        explicitStartDate || explicitEndDate
+          ? `${formatReportDate(startDate)} to ${formatReportDate(endDate)}`
+          : calculatedRange.label.replace("Sales Report", "Marketplace Fee Report");
+
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        return unauthorizedError();
+      }
+
+      let salesQuery = supabase
+        .from("sales")
+        .select(`
+          id,
+          sale_date,
+          gross_sale,
+          platform_fees,
+          shipping_cost,
+          other_costs,
+          net_proceeds,
+          cost_of_goods_sold,
+          profit,
+          platform,
+          notes,
+          inventory_item_id
+        `)
+        .eq("user_id", user.id)
+        .is("reversed_at", null)
+        .gte("sale_date", startDate)
+        .lte("sale_date", endDate)
+        .order("sale_date", { ascending: false });
+
+      if (selectedPlatform) {
+        salesQuery = salesQuery.ilike("platform", `%${selectedPlatform}%`);
+      }
+
+      const { data, error } = await salesQuery;
+
+      if (error) {
+        return jsonError(`Could not export marketplace fee PDF: ${error.message}`);
+      }
+
+      const pdfBuffer = buildPdf(
+        buildMarketplaceFeesLines({
+          sales: (data ?? []) as SaleRow[],
+          reportLabel: label,
+          platformFilter: selectedPlatform,
+          search,
+        }),
+      );
+
+      return pdfDownloadResponse({
+        pdf: pdfBuffer,
+        filename: buildReportFilename({
+          reportName: "marketplace-fees-report",
+          startDate,
+          endDate,
+          extension: "pdf",
+        }),
+      });
+    }
 
     if (reportType === "platform-profitability") {
       const selectedYear = clampYear(searchParams.get("year"));

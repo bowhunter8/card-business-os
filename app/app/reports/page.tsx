@@ -220,6 +220,12 @@ export default function ReportsPage() {
                   'Compare Whatnot, eBay, direct sales, fees, shipping impact, margins, and platform profitability.',
               },
               {
+                href: '/app/reports/marketplace-fees',
+                title: 'Marketplace Fees',
+                description:
+                  'Review marketplace fee totals, fee percentages, platform selling costs, and fee trends by selling platform.',
+              },
+              {
                 href: '/app/reports/break-profitability',
                 title: 'Break Profitability',
                 description:
