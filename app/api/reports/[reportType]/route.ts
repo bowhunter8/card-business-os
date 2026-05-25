@@ -2851,6 +2851,332 @@ async function exportPlatformProfitabilityReport(request: Request) {
   })
 }
 
+
+async function exportProfitLossReport(request: Request) {
+  const { searchParams } = new URL(request.url)
+
+  const selectedYear = clampYear(searchParams.get("year"))
+  const selectedPeriod = normalizePeriod(searchParams.get("period"))
+  const selectedMonth = clampMonth(searchParams.get("month"))
+  const selectedQuarter = clampQuarter(searchParams.get("quarter"))
+  const search = String(searchParams.get("q") || "").trim()
+  const selectedStart =
+    searchParams.get("start") ||
+    searchParams.get("startDate") ||
+    searchParams.get("dateFrom") ||
+    searchParams.get("date")
+  const selectedEnd =
+    searchParams.get("end") ||
+    searchParams.get("endDate") ||
+    searchParams.get("dateTo")
+
+  const { startDate, endDate, label } = getReportDateRange({
+    selectedYear,
+    period: selectedPeriod,
+    start: selectedStart,
+    end: selectedEnd,
+    month: selectedMonth,
+    quarter: selectedQuarter,
+    reportLabel: "Profit & Loss",
+  })
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    return unauthorizedError()
+  }
+
+  const [salesRes, expensesRes] = await Promise.all([
+    supabase
+      .from("sales")
+      .select(`
+        id,
+        sale_date,
+        gross_sale,
+        platform_fees,
+        shipping_cost,
+        other_costs,
+        net_proceeds,
+        cost_of_goods_sold,
+        profit,
+        platform,
+        notes,
+        inventory_item_id
+      `)
+      .eq("user_id", user.id)
+      .is("reversed_at", null)
+      .gte("sale_date", startDate)
+      .lte("sale_date", endDate)
+      .order("sale_date", { ascending: false }),
+
+    supabase
+      .from("expenses")
+      .select(`
+        id,
+        expense_date,
+        category,
+        vendor,
+        amount,
+        notes,
+        created_at
+      `)
+      .eq("user_id", user.id)
+      .gte("expense_date", startDate)
+      .lte("expense_date", endDate)
+      .order("expense_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ])
+
+  if (salesRes.error) {
+    return jsonError(`Could not export profit & loss sales: ${salesRes.error.message}`)
+  }
+
+  if (expensesRes.error) {
+    return jsonError(`Could not export profit & loss expenses: ${expensesRes.error.message}`)
+  }
+
+  const sales = ((salesRes.data ?? []) as SalesRow[]).filter((sale) =>
+    matchesCsvSearch(
+      [
+        sale.sale_date,
+        sale.platform,
+        sale.gross_sale,
+        sale.platform_fees,
+        sale.shipping_cost,
+        sale.other_costs,
+        sale.net_proceeds,
+        sale.cost_of_goods_sold,
+        sale.profit,
+        sale.notes,
+      ],
+      search,
+    ),
+  )
+
+  const expenses = ((expensesRes.data ?? []) as ExpenseRow[]).filter((expense) =>
+    matchesCsvSearch(
+      [
+        expense.expense_date,
+        expense.category,
+        expense.vendor,
+        expense.amount,
+        expense.notes,
+      ],
+      search,
+    ),
+  )
+
+  const grossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0),
+  )
+  const platformFees = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.platform_fees), 0),
+  )
+  const shippingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.shipping_cost), 0),
+  )
+  const otherSellingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.other_costs), 0),
+  )
+  const totalSellingCosts = roundMoney(platformFees + shippingCosts + otherSellingCosts)
+  const cogs = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.cost_of_goods_sold), 0),
+  )
+  const grossProfit = roundMoney(grossSales - cogs)
+  const manualExpenses = roundMoney(
+    expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0),
+  )
+  const netProfit = roundMoney(grossProfit - totalSellingCosts - manualExpenses)
+  const netMargin = grossSales > 0 ? roundMoney((netProfit / grossSales) * 100) : 0
+
+  const baseRow = {
+    report: label,
+    section: "",
+    range_start: startDate,
+    range_end: endDate,
+    search_filter: search || "None",
+    metric: "",
+    value: "",
+    line_item: "",
+    amount: "",
+    notes: "",
+    record_date: "",
+    platform: "",
+    category: "",
+    vendor: "",
+    gross_sale: "",
+    platform_fees: "",
+    shipping_cost: "",
+    other_costs: "",
+    net_proceeds: "",
+    cost_of_goods_sold: "",
+    profit: "",
+    sale_id: "",
+    expense_id: "",
+  }
+
+  const summaryRows = [
+    ["sales_count", String(sales.length)],
+    ["expense_count", String(expenses.length)],
+    ["gross_sales", moneyString(grossSales)],
+    ["cost_of_goods_sold", moneyString(cogs)],
+    ["gross_profit", moneyString(grossProfit)],
+    ["platform_fees", moneyString(platformFees)],
+    ["shipping_costs", moneyString(shippingCosts)],
+    ["other_selling_costs", moneyString(otherSellingCosts)],
+    ["total_selling_costs", moneyString(totalSellingCosts)],
+    ["manual_expenses", moneyString(manualExpenses)],
+    ["net_profit_loss", moneyString(netProfit)],
+    ["net_margin_percent", `${netMargin}%`],
+  ].map(([metric, value]) => ({
+    ...baseRow,
+    section: "summary",
+    metric,
+    value,
+  }))
+
+  const statementRows = [
+    {
+      section: "statement",
+      line_item: "Gross sales / receipts",
+      amount: moneyString(grossSales),
+      notes: "Completed, non-reversed sales in the selected range.",
+    },
+    {
+      section: "statement",
+      line_item: "Cost of goods sold",
+      amount: moneyString(-cogs),
+      notes: "Realized cost basis from sold items only.",
+    },
+    {
+      section: "statement",
+      line_item: "Gross profit after COGS",
+      amount: moneyString(grossProfit),
+      notes: "Gross sales minus realized COGS.",
+    },
+    {
+      section: "statement",
+      line_item: "Platform fees",
+      amount: moneyString(-platformFees),
+      notes: "Marketplace/platform fee fields from sales records.",
+    },
+    {
+      section: "statement",
+      line_item: "Shipping / postage costs",
+      amount: moneyString(-shippingCosts),
+      notes: "Sale-level shipping_cost values.",
+    },
+    {
+      section: "statement",
+      line_item: "Other direct selling costs",
+      amount: moneyString(-otherSellingCosts),
+      notes: "Sale-level other_costs values, commonly supplies/packing costs.",
+    },
+    {
+      section: "statement",
+      line_item: "Manual expenses",
+      amount: moneyString(-manualExpenses),
+      notes: "Expense tracker entries in the selected range.",
+    },
+    {
+      section: "statement",
+      line_item: "Net profit / loss",
+      amount: moneyString(netProfit),
+      notes: "Gross profit minus selling costs and manual expenses.",
+    },
+  ].map((row) => ({
+    ...baseRow,
+    ...row,
+  }))
+
+  const expenseCategoryRows = Array.from(
+    expenses.reduce((map, expense) => {
+      const category =
+        String(expense.category || "Uncategorized").trim() || "Uncategorized"
+      const current = map.get(category) ?? { count: 0, amount: 0 }
+
+      map.set(category, {
+        count: current.count + 1,
+        amount: current.amount + asNumber(expense.amount),
+      })
+
+      return map
+    }, new Map<string, { count: number; amount: number }>()),
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, values]) => ({
+      ...baseRow,
+      section: "expense_category_summary",
+      category,
+      metric: "expense_category_total",
+      value: String(values.count),
+      amount: moneyString(roundMoney(values.amount)),
+      notes: getExpenseScheduleCArea(category),
+    }))
+
+  const saleDetailRows = sales.map((sale) => ({
+    ...baseRow,
+    section: "sales_detail",
+    record_date: sale.sale_date || "",
+    platform: platformKey(sale.platform),
+    gross_sale: moneyString(sale.gross_sale),
+    platform_fees: moneyString(sale.platform_fees),
+    shipping_cost: moneyString(sale.shipping_cost),
+    other_costs: moneyString(sale.other_costs),
+    net_proceeds: moneyString(sale.net_proceeds),
+    cost_of_goods_sold: moneyString(sale.cost_of_goods_sold),
+    profit: moneyString(sale.profit),
+    notes: sale.notes || "",
+    sale_id: sale.id,
+  }))
+
+  const expenseDetailRows = expenses.map((expense) => {
+    const category =
+      String(expense.category || "Uncategorized").trim() || "Uncategorized"
+
+    return {
+      ...baseRow,
+      section: "expense_detail",
+      record_date: expense.expense_date || "",
+      category,
+      vendor: expense.vendor || "",
+      amount: moneyString(expense.amount),
+      notes: expense.notes || "",
+      expense_id: expense.id,
+    }
+  })
+
+  const csv = excelSafeCsv(
+    buildCsv(
+      [
+        ...summaryRows,
+        ...statementRows,
+        ...expenseCategoryRows,
+        ...saleDetailRows,
+        ...expenseDetailRows,
+      ],
+      "No profit & loss data found for this report range.",
+    ),
+  )
+
+  const filename = buildReportFilename({
+    reportName: "profit-loss-report",
+    startDate,
+    endDate,
+    extension: "csv",
+  })
+
+  return csvDownloadResponse({
+    csv,
+    filename,
+  })
+}
+
+
 async function exportOperationsReport(request: Request) {
   const { searchParams } = new URL(request.url)
 
@@ -4007,6 +4333,10 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (reportType === "platform-profitability") {
     return exportPlatformProfitabilityReport(request);
+  }
+
+  if (reportType === "profit-loss") {
+    return exportProfitLossReport(request);
   }
 
   if (reportType === "operations") {

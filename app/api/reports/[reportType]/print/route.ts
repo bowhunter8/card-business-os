@@ -129,6 +129,7 @@ const REPORT_LABELS: Record<string, string> = {
   cogs: 'Realized COGS Report',
   expenses: 'Expenses Report',
   financial: 'Financial Report',
+  'profit-loss': 'Profit & Loss Statement',
   'sales-tax': 'Sales Tax Report',
   shipping: 'Shipping Report',
   'cpa-packet': 'CPA Export Packet',
@@ -1291,6 +1292,138 @@ function buildFinancialPrintConfig({
   }
 }
 
+function buildProfitLossPrintConfig({
+  reportLabel,
+  sales,
+  expenses,
+}: {
+  reportLabel: string
+  sales: SaleRow[]
+  expenses: ExpenseRow[]
+}): ReportConfig {
+  const grossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0)
+  )
+  const platformFees = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.platform_fees), 0)
+  )
+  const shippingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.shipping_cost), 0)
+  )
+  const otherSellingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.other_costs), 0)
+  )
+  const sellingCosts = roundMoney(platformFees + shippingCosts + otherSellingCosts)
+  const cogs = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.cost_of_goods_sold), 0)
+  )
+  const manualExpenses = roundMoney(
+    expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0)
+  )
+  const grossProfit = roundMoney(grossSales - cogs)
+  const netProfit = roundMoney(grossProfit - sellingCosts - manualExpenses)
+  const netMargin = grossSales > 0 ? roundMoney((netProfit / grossSales) * 100) : 0
+
+  const expenseCategoryRows: PrintableReportRow[] = Array.from(
+    expenses.reduce((map, expense) => {
+      const category =
+        String(expense.category || 'Uncategorized').trim() || 'Uncategorized'
+      const current = map.get(category) ?? { count: 0, amount: 0 }
+
+      map.set(category, {
+        count: current.count + 1,
+        amount: current.amount + asNumber(expense.amount),
+      })
+
+      return map
+    }, new Map<string, { count: number; amount: number }>())
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, values]) => ({
+      section: 'Expense Detail',
+      line: category,
+      amount: currency(roundMoney(-values.amount)),
+      notes: `${values.count} expense record(s). Schedule C area: ${getExpenseScheduleCArea(category)}.`,
+    }))
+
+  const rows: PrintableReportRow[] = [
+    {
+      section: 'Income',
+      line: 'Gross sales / receipts',
+      amount: currency(grossSales),
+      notes: 'Completed, non-reversed sales in the selected range.',
+    },
+    {
+      section: 'COGS',
+      line: 'Cost of goods sold',
+      amount: currency(-cogs),
+      notes: 'Realized cost basis from sold items only.',
+    },
+    {
+      section: 'Gross Profit',
+      line: 'Gross profit after COGS',
+      amount: currency(grossProfit),
+      notes: 'Gross sales minus realized COGS.',
+    },
+    {
+      section: 'Selling Costs',
+      line: 'Platform fees',
+      amount: currency(-platformFees),
+      notes: 'Marketplace/platform fee fields from sales records.',
+    },
+    {
+      section: 'Selling Costs',
+      line: 'Shipping / postage costs',
+      amount: currency(-shippingCosts),
+      notes: 'Sale-level shipping_cost values.',
+    },
+    {
+      section: 'Selling Costs',
+      line: 'Other direct selling costs',
+      amount: currency(-otherSellingCosts),
+      notes: 'Sale-level other_costs values, commonly supplies/packing costs.',
+    },
+    {
+      section: 'Expenses',
+      line: 'Manual expenses',
+      amount: currency(-manualExpenses),
+      notes: 'Expense tracker entries in the selected range.',
+    },
+    ...expenseCategoryRows,
+    {
+      section: 'Net Profit',
+      line: 'Net profit / loss',
+      amount: currency(netProfit),
+      notes: 'Gross profit minus selling costs and manual expenses.',
+    },
+  ]
+
+  return {
+    title: `Profit & Loss Statement - ${reportLabel}`,
+    subtitle:
+      'Printable read-only Profit & Loss statement. This separates gross sales, realized COGS, selling costs, manual expenses, and net profit/loss for business review and CPA support.',
+    summary: [
+      { label: 'Gross sales', value: currency(grossSales) },
+      { label: 'Realized COGS', value: currency(cogs) },
+      { label: 'Gross profit', value: currency(grossProfit) },
+      { label: 'Selling costs', value: currency(sellingCosts) },
+      { label: 'Manual expenses', value: currency(manualExpenses) },
+      { label: 'Net profit / loss', value: currency(netProfit) },
+      { label: 'Sales records', value: sales.length },
+      { label: 'Expense records', value: expenses.length },
+      { label: 'Net margin', value: `${netMargin.toFixed(1)}%` },
+    ],
+    columns: [
+      { key: 'section', label: 'Section', width: '16%' },
+      { key: 'line', label: 'Line', width: '30%' },
+      { key: 'amount', label: 'Amount', align: 'right', width: '14%' },
+      { key: 'notes', label: 'Notes', width: '40%' },
+    ],
+    rows,
+    emptyMessage: 'No profit and loss rows found for this report range.',
+  }
+}
+
 function getInventoryBreakId(item: InventoryItemRow) {
   const row = item as Record<string, unknown>
 
@@ -1910,6 +2043,97 @@ export async function GET(request: NextRequest, context: RouteContext) {
           expenses,
           reportLabel: label,
           categoryFilter: selectedCategory,
+        })
+      )
+
+      return htmlResponse(withPrintScript(html))
+    }
+
+
+    if (reportType === 'profit-loss') {
+      const { startDate, endDate, label } = getSelectedRange(searchParams, 'Profit & Loss Statement')
+      const search = String(searchParams.get('q') || '').trim()
+
+      const [salesRes, expensesRes] = await Promise.all([
+        supabase
+          .from('sales')
+          .select(`
+            id,
+            sale_date,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            inventory_item_id
+          `)
+          .eq('user_id', user.id)
+          .is('reversed_at', null)
+          .gte('sale_date', startDate)
+          .lte('sale_date', endDate)
+          .order('sale_date', { ascending: false }),
+
+        supabase
+          .from('expenses')
+          .select('id, expense_date, category, vendor, amount, notes, created_at')
+          .eq('user_id', user.id)
+          .gte('expense_date', startDate)
+          .lte('expense_date', endDate)
+          .order('expense_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+      ])
+
+      if (salesRes.error) return jsonError(`Could not build Profit & Loss print view sales: ${salesRes.error.message}`)
+      if (expensesRes.error) return jsonError(`Could not build Profit & Loss print view expenses: ${expensesRes.error.message}`)
+
+      const sales = ((salesRes.data ?? []) as SaleRow[]).filter((sale) => {
+        if (!search) return true
+
+        const haystack = [
+          sale.sale_date,
+          sale.platform,
+          sale.gross_sale,
+          sale.platform_fees,
+          sale.shipping_cost,
+          sale.other_costs,
+          sale.net_proceeds,
+          sale.cost_of_goods_sold,
+          sale.profit,
+          sale.notes,
+        ]
+          .map(asString)
+          .join(' ')
+          .toLowerCase()
+
+        return haystack.includes(search.toLowerCase())
+      })
+
+      const expenses = ((expensesRes.data ?? []) as ExpenseRow[]).filter((expense) => {
+        if (!search) return true
+
+        const haystack = [
+          expense.expense_date,
+          expense.category,
+          expense.vendor,
+          expense.amount,
+          expense.notes,
+        ]
+          .map(asString)
+          .join(' ')
+          .toLowerCase()
+
+        return haystack.includes(search.toLowerCase())
+      })
+
+      const html = buildPrintableReportHtml(
+        buildProfitLossPrintConfig({
+          reportLabel: label,
+          sales,
+          expenses,
         })
       )
 

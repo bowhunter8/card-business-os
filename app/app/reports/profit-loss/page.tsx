@@ -456,18 +456,9 @@ export default async function ProfitLossReportPage({
           </Link>
 
           <ReportExportButtons
-            csvHref={buildReportCsvHref('financial', {
-              ...exportParams,
-              account: 'all',
-            })}
-            pdfHref={buildReportPdfHref('financial', {
-              ...exportParams,
-              account: 'all',
-            })}
-            printHref={buildReportPrintHref('financial', {
-              ...exportParams,
-              account: 'all',
-            })}
+            csvHref={buildReportCsvHref('profit-loss', exportParams)}
+            pdfHref={buildReportPdfHref('profit-loss', exportParams)}
+            printHref={buildReportPrintHref('profit-loss', exportParams)}
           />
         </div>
       </div>

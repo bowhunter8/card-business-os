@@ -226,6 +226,7 @@ const REPORT_LABELS: Record<string, string> = {
   expenses: "Expenses Report",
   cogs: "Realized COGS Report",
   financial: "Financial Report",
+  "profit-loss": "Profit & Loss Statement",
   "sales-tax": "Sales Tax Report",
   shipping: "Shipping Report",
   "cpa-packet": "CPA Export Packet",
@@ -2505,6 +2506,177 @@ function buildFinancialInventoryItemName(item: FinancialInventoryRow) {
   return parts.length ? `${title} - ${parts.join(" ")}` : title;
 }
 
+
+function buildProfitLossLines({
+  reportLabel,
+  startDate,
+  endDate,
+  sales,
+  expenses,
+}: {
+  reportLabel: string;
+  startDate: string;
+  endDate: string;
+  sales: SaleRow[];
+  expenses: ExpenseRow[];
+}): PdfElement[] {
+  const grossSales = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.gross_sale), 0),
+  );
+  const platformFees = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.platform_fees), 0),
+  );
+  const shippingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.shipping_cost), 0),
+  );
+  const otherSellingCosts = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.other_costs), 0),
+  );
+  const sellingCosts = roundMoney(
+    platformFees + shippingCosts + otherSellingCosts,
+  );
+  const cogs = roundMoney(
+    sales.reduce((sum, sale) => sum + asNumber(sale.cost_of_goods_sold), 0),
+  );
+  const manualExpenses = roundMoney(
+    expenses.reduce((sum, expense) => sum + asNumber(expense.amount), 0),
+  );
+  const grossProfit = roundMoney(grossSales - cogs);
+  const netProfit = roundMoney(grossProfit - sellingCosts - manualExpenses);
+  const netMargin = grossSales > 0 ? (netProfit / grossSales) * 100 : 0;
+
+  const expenseSummaryRows = Array.from(
+    expenses.reduce((map, expense) => {
+      const category =
+        String(expense.category || "Uncategorized").trim() || "Uncategorized";
+      const current = map.get(category) ?? { count: 0, amount: 0 };
+
+      map.set(category, {
+        count: current.count + 1,
+        amount: roundMoney(current.amount + asNumber(expense.amount)),
+      });
+
+      return map;
+    }, new Map<string, { count: number; amount: number }>()),
+  )
+    .map(([category, values]) => ({
+      category,
+      scheduleCArea: getExpenseScheduleCArea(category),
+      count: String(values.count),
+      amount: currency(values.amount),
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
+
+  const profitLossRows: PdfTableRow[] = [
+    {
+      section: "Income",
+      line: "Gross sales / receipts",
+      amount: currency(grossSales),
+      notes: "Completed, non-reversed sales in the selected range.",
+    },
+    {
+      section: "COGS",
+      line: "Cost of goods sold",
+      amount: currency(-cogs),
+      notes: "Realized cost basis from sold items only.",
+    },
+    {
+      section: "Gross Profit",
+      line: "Gross profit after COGS",
+      amount: currency(grossProfit),
+      notes: "Gross sales minus realized COGS.",
+    },
+    {
+      section: "Selling Costs",
+      line: "Platform fees",
+      amount: currency(-platformFees),
+      notes: "Marketplace/platform fee fields from sales records.",
+    },
+    {
+      section: "Selling Costs",
+      line: "Shipping / postage costs",
+      amount: currency(-shippingCosts),
+      notes: "Sale-level shipping_cost values.",
+    },
+    {
+      section: "Selling Costs",
+      line: "Other direct selling costs",
+      amount: currency(-otherSellingCosts),
+      notes: "Sale-level other_costs values, commonly supplies/packing costs.",
+    },
+    {
+      section: "Expenses",
+      line: "Manual expenses",
+      amount: currency(-manualExpenses),
+      notes: "Expense tracker entries in the selected range.",
+    },
+    {
+      section: "Net Profit",
+      line: "Net profit / loss",
+      amount: currency(netProfit),
+      notes: "Gross profit minus selling costs and manual expenses.",
+    },
+  ];
+
+  return [
+    { label: reportLabel, type: "title" },
+    { label: `Range: ${formatReportDate(startDate)} to ${formatReportDate(endDate)}`, type: "note" },
+    {
+      label:
+        "Profit & Loss note: this is a read-only management statement based on completed non-reversed sales, realized COGS, selling costs, and tracked manual expenses.",
+      type: "note",
+    },
+    { label: "SUMMARY", type: "section" },
+    {
+      type: "summaryGrid",
+      cards: [
+        { label: "Gross sales", value: currency(grossSales) },
+        { label: "Realized COGS", value: currency(cogs) },
+        { label: "Gross profit", value: currency(grossProfit) },
+        { label: "Net profit", value: currency(netProfit) },
+      ],
+    },
+    {
+      type: "summaryGrid",
+      cards: [
+        { label: "Selling costs", value: currency(sellingCosts) },
+        { label: "Manual expenses", value: currency(manualExpenses) },
+        { label: "Sales records", value: String(sales.length) },
+        { label: "Net margin", value: `${netMargin.toFixed(1)}%` },
+      ],
+    },
+    { label: "PROFIT & LOSS STATEMENT", type: "section" },
+    {
+      type: "table",
+      emptyMessage: "No profit and loss rows found for this report range.",
+      columns: [
+        { key: "section", label: "Section", width: 145 },
+        { key: "line", label: "Line", width: 235 },
+        { key: "amount", label: "Amount", width: 115, align: "right" },
+        { key: "notes", label: "Notes", width: 229 },
+      ],
+      rows: profitLossRows,
+    },
+    { label: "EXPENSE CATEGORY SUPPORT", type: "section" },
+    {
+      type: "table",
+      emptyMessage: "No manual expenses found for this P&L report range.",
+      columns: [
+        { key: "category", label: "Category", width: 190 },
+        { key: "scheduleCArea", label: "Schedule C Area", width: 360 },
+        { key: "count", label: "Count", width: 70, align: "right" },
+        { key: "amount", label: "Amount", width: 104, align: "right" },
+      ],
+      rows: expenseSummaryRows,
+    },
+    {
+      label:
+        "CPA note: this P&L is for bookkeeping/business review. Final tax filing should still be reviewed with the Year-End Tax Center and CPA-ready tax reports.",
+      type: "note",
+    },
+  ];
+}
+
 function buildFinancialLines({
   account,
   reportLabel,
@@ -4371,6 +4543,143 @@ export async function GET(request: NextRequest, context: RouteContext) {
         pdf: pdfBuffer,
         filename: buildReportFilename({
           reportName: "sales-tax-report",
+          startDate,
+          endDate,
+          extension: "pdf",
+        }),
+      });
+    }
+
+    if (reportType === "profit-loss") {
+      const selectedYear = clampYear(searchParams.get("year"));
+      const selectedPeriod = normalizePeriod(searchParams.get("period"));
+      const selectedMonth = clampMonth(searchParams.get("month"));
+      const selectedQuarter = clampQuarter(searchParams.get("quarter"));
+      const search = String(searchParams.get("q") || "").trim();
+      const explicitStartDate =
+        searchParams.get("startDate") || searchParams.get("dateFrom") || "";
+      const explicitEndDate =
+        searchParams.get("endDate") || searchParams.get("dateTo") || "";
+      const selectedStart =
+        searchParams.get("start") ||
+        explicitStartDate ||
+        searchParams.get("date");
+      const selectedEnd = searchParams.get("end") || explicitEndDate;
+
+      const calculatedRange = getFinancialReportDateRange({
+        selectedYear,
+        period: selectedPeriod,
+        start: selectedStart,
+        end: selectedEnd,
+        month: selectedMonth,
+        quarter: selectedQuarter,
+      });
+
+      const startDate = explicitStartDate || calculatedRange.startDate;
+      const endDate = explicitEndDate || calculatedRange.endDate;
+      const label =
+        explicitStartDate || explicitEndDate
+          ? `Profit & Loss Statement: ${formatReportDate(startDate)} to ${formatReportDate(endDate)}`
+          : calculatedRange.label.replace("Financial Report", "Profit & Loss Statement");
+
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        return unauthorizedError();
+      }
+
+      const [salesRes, expensesRes] = await Promise.all([
+        supabase
+          .from("sales")
+          .select(`
+            id,
+            sale_date,
+            gross_sale,
+            platform_fees,
+            shipping_cost,
+            other_costs,
+            net_proceeds,
+            cost_of_goods_sold,
+            profit,
+            platform,
+            notes,
+            inventory_item_id
+          `)
+          .eq("user_id", user.id)
+          .is("reversed_at", null)
+          .gte("sale_date", startDate)
+          .lte("sale_date", endDate)
+          .order("sale_date", { ascending: false }),
+
+        supabase
+          .from("expenses")
+          .select(`
+            id,
+            expense_date,
+            category,
+            vendor,
+            amount,
+            notes,
+            created_at
+          `)
+          .eq("user_id", user.id)
+          .gte("expense_date", startDate)
+          .lte("expense_date", endDate)
+          .order("expense_date", { ascending: false })
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (salesRes.error) {
+        return jsonError(`Could not load sales for profit & loss PDF: ${salesRes.error.message}`);
+      }
+
+      if (expensesRes.error) {
+        return jsonError(`Could not load expenses for profit & loss PDF: ${expensesRes.error.message}`);
+      }
+
+      const sales = ((salesRes.data ?? []) as SaleRow[]).filter((row) =>
+        financialMatchesSearch(
+          [
+            row.sale_date,
+            row.gross_sale,
+            row.platform_fees,
+            row.shipping_cost,
+            row.other_costs,
+            row.net_proceeds,
+            row.cost_of_goods_sold,
+            row.profit,
+            row.platform,
+            row.notes,
+          ],
+          search,
+        ),
+      );
+
+      const expenses = ((expensesRes.data ?? []) as ExpenseRow[]).filter((row) =>
+        financialMatchesSearch(
+          [row.expense_date, row.category, row.vendor, row.amount, row.notes],
+          search,
+        ),
+      );
+
+      const pdfBuffer = buildPdf(
+        buildProfitLossLines({
+          reportLabel: label,
+          startDate,
+          endDate,
+          sales,
+          expenses,
+        }),
+      );
+
+      return pdfDownloadResponse({
+        pdf: pdfBuffer,
+        filename: buildReportFilename({
+          reportName: "profit-loss-statement",
           startDate,
           endDate,
           extension: "pdf",
