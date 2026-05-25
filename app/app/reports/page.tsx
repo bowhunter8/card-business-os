@@ -258,6 +258,12 @@ export default function ReportsPage() {
                   'Review realized cost of goods sold by date range, reporting period, and future accounting filters.',
               },
               {
+                href: '/app/reports/cogs-audit',
+                title: 'COGS Audit & Reconciliation',
+                description:
+                  'Audit-style COGS reconciliation for beginning inventory, purchases, ending inventory, missing COGS, unlinked sales, and inventory review warnings.',
+              },
+              {
                 href: '/app/reports/write-offs',
                 title: 'Write-Off / Disposal Review',
                 description:
