@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
 
 const INVENTORY_TABLE = "inventory_items";
 
@@ -20,7 +20,6 @@ type BulkLotItemInput = {
 type CreateInventoryPayload = {
   entryMode?: EntryMode;
   status?: string;
-
   title?: string;
   player?: string;
   year?: string;
@@ -35,7 +34,6 @@ type CreateInventoryPayload = {
   relic?: boolean;
   serialNumber?: string;
   grade?: string;
-
   quantity?: number;
   unitCost?: number;
   totalCost?: number;
@@ -44,7 +42,6 @@ type CreateInventoryPayload = {
   breakId?: string;
   acquiredDate?: string;
   notes?: string;
-
   bulkLot?: {
     lotName?: string;
     lotDescription?: string;
@@ -55,52 +52,25 @@ type CreateInventoryPayload = {
 };
 
 type InventoryRowInsert = {
-  status: string;
-  entry_mode: EntryMode;
+  user_id: string;
   title: string;
-  player: string;
-  year: string;
-  brand: string;
-  set_name: string;
-  card_number: string;
-  team: string;
-  parallel: string;
-  variation: string;
-  rookie: boolean;
-  autograph: boolean;
-  relic: boolean;
-  serial_number: string;
-  grade: string;
+  player_name: string | null;
+  year: number | null;
+  brand: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  parallel_name: string | null;
+  team: string | null;
+  notes: string | null;
+  status: string;
+  item_type: string;
   quantity: number;
-  unit_cost: number;
-  cost: number;
-  estimated_value: number;
-  source: string;
-  break_id: string | null;
-  acquired_date: string | null;
-  notes: string;
+  available_quantity: number;
+  cost_basis_unit: number;
+  cost_basis_total: number;
+  source_type: string;
+  source_break_id: string | null;
 };
-
-function getSupabaseAdmin(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRole =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !serviceRole) {
-    throw new Error(
-      "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
-    );
-  }
-
-  return createClient(url, serviceRole, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
 
 function toSafeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -115,16 +85,51 @@ function toSafeBool(value: unknown): boolean {
   return value === true;
 }
 
-function toDateOnlyString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+function toSafeYear(value: unknown): number | null {
+  const text = toSafeString(value);
+  if (!text) return null;
+  const year = Number(text);
+  return Number.isInteger(year) ? year : null;
+}
+
+function toSafeUuid(value: unknown): string | null {
+  const text = toSafeString(value);
+  if (!text) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ? text
+    : null;
 }
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unknown error";
+}
+
+function userFriendlyCreateError(message: string) {
+  if (
+    message.includes("row-level security") ||
+    message.includes("violates row-level security")
+  ) {
+    return (
+      "Inventory could not be saved because your signed-in user could not be attached to the new inventory row. " +
+      "This is not caused by your entry. Please refresh the page and try again. Technical detail: " +
+      message
+    );
+  }
+
+  if (
+    message.includes("schema cache") ||
+    message.includes("Could not find") ||
+    message.includes("column")
+  ) {
+    return (
+      "Inventory could not be saved because the manual inventory form and database fields are out of sync. " +
+      "This is not caused by your entry. Technical detail: " +
+      message
+    );
+  }
+
+  return message;
 }
 
 function isFilledBulkItem(item: BulkLotItemInput | null | undefined): boolean {
@@ -178,50 +183,78 @@ function buildBulkChildTitle(
   return built || `${fallbackLotName} Item ${index + 1}`;
 }
 
-function buildBaseRow(
-  body: CreateInventoryPayload,
-  overrides?: Partial<InventoryRowInsert>
-): InventoryRowInsert {
-  const quantity = Math.max(1, Math.floor(toSafeNumber(body.quantity, 1)));
-  const unitCost = Math.max(0, toSafeNumber(body.unitCost, 0));
-  const totalCost = Math.max(
-    0,
-    toSafeNumber(body.totalCost, unitCost * quantity)
-  );
-  const estimatedValue = Math.max(0, toSafeNumber(body.estimatedValue, 0));
+function buildNotes(parts: Array<string | null | undefined>) {
+  const text = parts
+    .map((part) => toSafeString(part))
+    .filter(Boolean)
+    .join("\n");
+
+  return text || null;
+}
+
+function buildBaseRow({
+  body,
+  userId,
+  title,
+  quantity,
+  unitCost,
+  totalCost,
+  itemType,
+  status,
+  notes,
+  playerName,
+  year,
+  brand,
+  setName,
+  cardNumber,
+  parallelName,
+  team,
+}: {
+  body: CreateInventoryPayload;
+  userId: string;
+  title: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  itemType: string;
+  status: string;
+  notes: string | null;
+  playerName?: string | null;
+  year?: number | null;
+  brand?: string | null;
+  setName?: string | null;
+  cardNumber?: string | null;
+  parallelName?: string | null;
+  team?: string | null;
+}): InventoryRowInsert {
+  const sourceText = toSafeString(body.source);
+  const breakUuid = toSafeUuid(body.breakId);
 
   return {
-    status: toSafeString(body.status) || "inventory",
-    entry_mode: body.entryMode === "bulk_lot" ? "bulk_lot" : "single_card",
-    title: buildSingleTitle(body),
-    player: toSafeString(body.player),
-    year: toSafeString(body.year),
-    brand: toSafeString(body.brand),
-    set_name: toSafeString(body.setName),
-    card_number: toSafeString(body.cardNumber),
-    team: toSafeString(body.team),
-    parallel: toSafeString(body.parallel),
-    variation: toSafeString(body.variation),
-    rookie: toSafeBool(body.rookie),
-    autograph: toSafeBool(body.autograph),
-    relic: toSafeBool(body.relic),
-    serial_number: toSafeString(body.serialNumber),
-    grade: toSafeString(body.grade),
+    user_id: userId,
+    title,
+    player_name: playerName ?? (toSafeString(body.player) || null),
+    year: year ?? toSafeYear(body.year),
+    brand: brand ?? (toSafeString(body.brand) || null),
+    set_name: setName ?? (toSafeString(body.setName) || null),
+    card_number: cardNumber ?? (toSafeString(body.cardNumber) || null),
+    parallel_name: parallelName ?? (toSafeString(body.parallel) || null),
+    team: team ?? (toSafeString(body.team) || null),
+    notes,
+    status,
+    item_type: itemType,
     quantity,
-    unit_cost: unitCost,
-    cost: totalCost,
-    estimated_value: estimatedValue,
-    source: toSafeString(body.source),
-    break_id: toSafeString(body.breakId) || null,
-    acquired_date: toDateOnlyString(body.acquiredDate),
-    notes: toSafeString(body.notes),
-    ...overrides,
+    available_quantity: quantity,
+    cost_basis_unit: unitCost,
+    cost_basis_total: totalCost,
+    source_type: breakUuid ? "break" : "manual",
+    source_break_id: breakUuid,
   };
 }
 
 export async function GET() {
   try {
-    const supabase = getSupabaseAdmin();
+    const supabase = await createClient();
 
     const { data, error } = await supabase
       .from(INVENTORY_TABLE)
@@ -246,9 +279,20 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
-    const body = (await req.json()) as CreateInventoryPayload;
+    const supabase = await createClient();
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "You must be signed in to create inventory." },
+        { status: 401 }
+      );
+    }
+
+    const body = (await req.json()) as CreateInventoryPayload;
     const entryMode: EntryMode =
       body.entryMode === "bulk_lot" ? "bulk_lot" : "single_card";
 
@@ -281,36 +325,29 @@ export async function POST(req: NextRequest) {
         0,
         toSafeNumber(body.totalCost, unitCost * quantity)
       );
-      const parentEstimatedValue = Math.max(
-        0,
-        toSafeNumber(
-          body.estimatedValue,
-          cleanItems.reduce((sum: number, item: BulkLotItemInput) => {
-            return sum + Math.max(0, toSafeNumber(item.estimatedValue, 0));
-          }, 0)
-        )
-      );
 
-      const parentNotes = [
+      const parentNotes = buildNotes([
         toSafeString(body.notes),
         toSafeString(body.bulkLot?.lotDescription),
         "Entry Mode: bulk_lot",
         `Bulk Lot Name: ${lotName}`,
         `Bulk Lot Item Count: ${cleanItems.length}`,
-      ]
-        .filter(Boolean)
-        .join("\n");
+        toSafeString(body.acquiredDate)
+          ? `Manual acquired date: ${toSafeString(body.acquiredDate)}`
+          : "",
+      ]);
 
-      const parentRow = buildBaseRow(body, {
-        status: "bulk_lot",
-        entry_mode: "bulk_lot",
+      const parentRow = buildBaseRow({
+        body,
+        userId: user.id,
         title: toSafeString(body.title) || lotName,
-        player: toSafeString(body.player) || lotName,
         quantity,
-        unit_cost: unitCost,
-        cost: totalCost,
-        estimated_value: parentEstimatedValue,
+        unitCost,
+        totalCost,
+        itemType: "single_card",
+        status: "available",
         notes: parentNotes,
+        playerName: lotName,
       });
 
       const { data: parentInsert, error: parentError } = await supabase
@@ -321,7 +358,11 @@ export async function POST(req: NextRequest) {
 
       if (parentError) {
         return NextResponse.json(
-          { error: `Failed to create bulk lot: ${parentError.message}` },
+          {
+            error: `Failed to create bulk lot: ${userFriendlyCreateError(
+              parentError.message
+            )}`,
+          },
           { status: 500 }
         );
       }
@@ -350,41 +391,31 @@ export async function POST(req: NextRequest) {
         (item: BulkLotItemInput, index: number) => {
           const childCost = Number(allocatedCosts[index].toFixed(2));
 
-          const childNotes = [
+          const childNotes = buildNotes([
             toSafeString(item.notes),
             "Entry Mode: bulk_lot_item",
             parentId ? `Parent Bulk Lot ID: ${parentId}` : "",
             `Parent Bulk Lot Name: ${lotName}`,
-          ]
-            .filter(Boolean)
-            .join("\n");
+          ]);
 
-          return {
-            status: "bulk_lot_item",
-            entry_mode: "bulk_lot",
+          return buildBaseRow({
+            body,
+            userId: user.id,
             title: buildBulkChildTitle(item, lotName, index),
-            player: toSafeString(item.player),
-            year: toSafeString(item.year) || toSafeString(body.year),
-            brand: toSafeString(item.brand) || toSafeString(body.brand),
-            set_name: toSafeString(item.setName) || toSafeString(body.setName),
-            card_number: toSafeString(item.cardNumber),
-            team: "",
-            parallel: toSafeString(item.parallel),
-            variation: "",
-            rookie: toSafeBool(item.rookie),
-            autograph: false,
-            relic: false,
-            serial_number: "",
-            grade: "",
             quantity: 1,
-            unit_cost: childCost,
-            cost: childCost,
-            estimated_value: Math.max(0, toSafeNumber(item.estimatedValue, 0)),
-            source: toSafeString(body.source),
-            break_id: toSafeString(body.breakId) || null,
-            acquired_date: toDateOnlyString(body.acquiredDate),
+            unitCost: childCost,
+            totalCost: childCost,
+            itemType: "single_card",
+            status: "available",
             notes: childNotes,
-          };
+            playerName: toSafeString(item.player) || null,
+            year: toSafeYear(item.year) || toSafeYear(body.year),
+            brand: toSafeString(item.brand) || toSafeString(body.brand) || null,
+            setName: toSafeString(item.setName) || toSafeString(body.setName) || null,
+            cardNumber: toSafeString(item.cardNumber) || null,
+            parallelName: toSafeString(item.parallel) || null,
+            team: null,
+          });
         }
       );
 
@@ -395,7 +426,11 @@ export async function POST(req: NextRequest) {
 
       if (childError) {
         return NextResponse.json(
-          { error: `Parent created, but child items failed: ${childError.message}` },
+          {
+            error: `Parent created, but child items failed: ${userFriendlyCreateError(
+              childError.message
+            )}`,
+          },
           { status: 500 }
         );
       }
@@ -417,13 +452,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const row = buildBaseRow(body, {
-      status: toSafeString(body.status) || "inventory",
-      entry_mode: "single_card",
+    const quantity = Math.max(1, Math.floor(toSafeNumber(body.quantity, 1)));
+    const unitCost = Math.max(0, toSafeNumber(body.unitCost, 0));
+    const totalCost = Math.max(0, toSafeNumber(body.totalCost, unitCost * quantity));
+
+    const notes = buildNotes([
+      toSafeString(body.notes),
+      toSafeString(body.variation) ? `Variation: ${toSafeString(body.variation)}` : "",
+      toSafeString(body.serialNumber)
+        ? `Serial Number: ${toSafeString(body.serialNumber)}`
+        : "",
+      toSafeString(body.grade) ? `Grade: ${toSafeString(body.grade)}` : "",
+      toSafeBool(body.rookie) ? "Rookie" : "",
+      toSafeBool(body.autograph) ? "Autograph" : "",
+      toSafeBool(body.relic) ? "Relic" : "",
+      toSafeString(body.acquiredDate)
+        ? `Manual acquired date: ${toSafeString(body.acquiredDate)}`
+        : "",
+      toSafeNumber(body.estimatedValue, 0)
+        ? `Estimated Value: ${toSafeNumber(body.estimatedValue, 0).toFixed(2)}`
+        : "",
+      "Entry Mode: single_card",
+    ]);
+
+    const row = buildBaseRow({
+      body,
+      userId: user.id,
       title,
-      notes: [toSafeString(body.notes), "Entry Mode: single_card"]
-        .filter(Boolean)
-        .join("\n"),
+      quantity,
+      unitCost,
+      totalCost,
+      itemType: "single_card",
+      status: "available",
+      notes,
     });
 
     const { data, error } = await supabase
@@ -434,7 +495,11 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       return NextResponse.json(
-        { error: `Failed to create inventory item: ${error.message}` },
+        {
+          error: `Failed to create inventory item: ${userFriendlyCreateError(
+            error.message
+          )}`,
+        },
         { status: 500 }
       );
     }

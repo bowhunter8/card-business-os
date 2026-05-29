@@ -357,7 +357,7 @@ export default function NewInventoryPage() {
 
       setSuccess(isBulkLot ? "Bulk lot created." : "Inventory item created.");
 
-      router.push("/inventory");
+      router.push("/app/inventory");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -976,7 +976,7 @@ export default function NewInventoryPage() {
 
             <button
               type="button"
-              onClick={() => router.push("/inventory")}
+              onClick={() => router.push("/app/inventory")}
               className="app-button"
             >
               Cancel

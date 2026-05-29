@@ -89,6 +89,70 @@ const PLATFORM_OPTIONS = [
   'Custom',
 ]
 
+const PULSE_CATEGORY_OPTIONS = [
+  'Sports Cards',
+  'TCG / Other Cards',
+  'Memorabilia',
+  'Comics',
+  'Coins / Currency / Jewelry / Watches',
+  'LEGO / Toys',
+  'Other',
+]
+
+const PULSE_SUBCATEGORY_OPTIONS_BY_CATEGORY: Record<string, string[]> = {
+  'Sports Cards': [
+    'Baseball',
+    'Football',
+    'Basketball',
+    'Hockey',
+    'Soccer',
+    'Racing',
+    'UFC / Wrestling',
+    'Other Sports',
+  ],
+  'TCG / Other Cards': [
+    'Pokémon',
+    'Magic',
+    'Yu-Gi-Oh!',
+    'Lorcana',
+    'One Piece',
+    'Other TCG',
+  ],
+  Memorabilia: [
+    'Autographs',
+    'Jerseys',
+    'Photos',
+    'Game Used',
+    'Programs',
+    'Other Memorabilia',
+  ],
+  Comics: [
+    'Marvel',
+    'DC',
+    'Image',
+    'Indie',
+    'Golden / Silver / Bronze Age',
+    'Modern',
+  ],
+  'Coins / Currency / Jewelry / Watches': [
+    'Coins',
+    'Currency',
+    'Jewelry',
+    'Watches',
+    'Bullion',
+    'Other',
+  ],
+  'LEGO / Toys': [
+    'LEGO',
+    'Action Figures',
+    'Hot Wheels',
+    'Funko',
+    'Vintage Toys',
+    'Other Toys',
+  ],
+  Other: ['Other'],
+}
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -185,18 +249,27 @@ export default async function SellInventoryPage({
   const unitCost = Number(item.cost_basis_unit ?? 0)
   const totalQuantity = Number(item.quantity ?? 0)
   const isLotLike = availableQty > 1 || totalQuantity > 1
+  const shippingProfileDefaultsById = Object.fromEntries(
+    shippingProfiles.map((profile) => [
+      profile.id,
+      {
+        shippingCharged: Number(profile.shipping_charged_default ?? 0).toFixed(2),
+        suppliesCost: Number(profile.supplies_cost_default ?? 0).toFixed(2),
+      },
+    ])
+  )
 
   return (
-    <div className="app-page-wide space-y-3">
-      <div className="app-page-header gap-3">
+    <div className="app-page-wide space-y-2">
+      <div className="app-page-header gap-2">
         <div className="min-w-0">
           <div className="mb-1">
             <Link href={`/app/inventory/${item.id}`} className="text-xs text-zinc-400 hover:underline">
               ← Back to Item
             </Link>
           </div>
-          <h1 className="app-title">Sell Item</h1>
-          <p className="app-subtitle mt-1 break-words">{itemLabel}</p>
+          <h1 className="app-title leading-tight">Sell Item</h1>
+          <p className="app-subtitle mt-0.5 break-words">{itemLabel}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -239,6 +312,8 @@ export default async function SellInventoryPage({
               <input type="hidden" name="sales_channel_type" value="marketplace" />
               <input type="hidden" name="tax_state" value="" />
               <input type="hidden" name="tax_notes" value="" />
+              <input type="hidden" name="pulse_category" value="Sports Cards" />
+              <input type="hidden" name="pulse_subcategory" value="Baseball" />
               <button
                 type="submit"
                 className="app-button-primary"
@@ -265,6 +340,8 @@ export default async function SellInventoryPage({
               <input type="hidden" name="sales_channel_type" value="marketplace" />
               <input type="hidden" name="tax_state" value="" />
               <input type="hidden" name="tax_notes" value="" />
+              <input type="hidden" name="pulse_category" value="Sports Cards" />
+              <input type="hidden" name="pulse_subcategory" value="Baseball" />
               <button
                 type="submit"
                 className="app-button"
@@ -277,25 +354,47 @@ export default async function SellInventoryPage({
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-5">
-        <Detail label="Status" value={item.status || '—'} />
-        <Detail label="Item Type" value={item.item_type || '—'} />
-        <Detail label="Available" value={String(availableQty)} />
-        <Detail label="Unit Cost" value={money(unitCost)} />
-        <Detail label="Total Cost" value={money(item.cost_basis_total)} />
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-300">
+        <div className="min-w-0">
+          <span className="font-semibold text-zinc-100">
+            {item.status || '—'}
+          </span>
+          <span className="mx-2 text-zinc-600">•</span>
+          <span>{(item.item_type || '—').replaceAll('_', ' ')}</span>
+          <span className="mx-2 text-zinc-600">•</span>
+          <span>Available: {availableQty}</span>
+          <span className="mx-2 text-zinc-600">•</span>
+          <span>Unit Cost: {money(unitCost)}</span>
+          <span className="mx-2 text-zinc-600">•</span>
+          <span>Total Cost: {money(item.cost_basis_total)}</span>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Link href={`/app/inventory/${item.id}`} className="app-button">
+            Cancel
+          </Link>
+          <button
+            type="submit"
+            form="sell-item-form"
+            className="app-button-primary"
+            disabled={availableQty <= 0}
+          >
+            Record Sale
+          </button>
+        </div>
       </div>
 
       <form
         action={safeCreateSaleAction}
-        className="app-section mt-0"
+        className="app-section mt-0 p-2.5"
         id="sell-item-form"
       >
         <input type="hidden" name="inventory_item_id" value={item.id} />
         <input type="hidden" id="platform" name="platform" value="" />
 
-        <div className="grid gap-3 lg:grid-cols-[1.35fr_0.9fr]">
-          <div className="space-y-3">
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-2">
+          <div className="space-y-2">
+            <div className="grid gap-2 md:grid-cols-3">
               <Field label="Sale Date">
                 <input
                   name="sale_date"
@@ -330,33 +429,12 @@ export default async function SellInventoryPage({
                 />
               </Field>
 
-              <div className="app-card-tight p-3">
-                <div className="text-xs uppercase tracking-wide text-zinc-400">Quick Qty</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="app-button"
-                    data-set-qty="1"
-                    disabled={availableQty <= 0}
-                  >
-                    Sell 1
-                  </button>
-                  <button
-                    type="button"
-                    className="app-button"
-                    data-set-qty={String(availableQty > 0 ? availableQty : 1)}
-                    disabled={availableQty <= 0}
-                  >
-                    Sell All
-                  </button>
-                </div>
-              </div>
             </div>
 
-            <div className="app-section-tight space-y-2.5">
+            <div className="app-section-tight space-y-1.5">
               <div className="text-sm font-semibold">Sale Amounts</div>
 
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 md:grid-cols-3">
                 <Field label="Item Sale Price">
                   <input
                     id="gross_sale"
@@ -401,7 +479,7 @@ export default async function SellInventoryPage({
               </div>
             </div>
 
-            <div className="app-section-tight space-y-2.5">
+            <div className="app-section-tight space-y-1.5">
               <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm font-semibold">Shipping</div>
                 <div className="text-xs text-zinc-400">
@@ -409,7 +487,7 @@ export default async function SellInventoryPage({
                 </div>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 md:grid-cols-4">
                 <Field label="Shipping Profile">
                   <select
                     id="shipping_profile_id"
@@ -503,15 +581,59 @@ export default async function SellInventoryPage({
               </Field>
             </div>
 
-            <div className="app-section-tight space-y-2.5">
+            <div className="app-section-tight space-y-1.5">
               <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                <div className="text-sm font-semibold">Sales Tax Tracking</div>
-                <div className="text-xs text-zinc-400">
-                  Tracked separately from income and profit.
+                <div className="text-sm font-semibold">HITS Pulse™ Category</div>
+                <div className="text-[11px] leading-snug text-zinc-400">
+                  Used only for anonymous app-wide trend reporting. This does not add usernames, buyer details, notes, order IDs, sale IDs, or inventory IDs to HITS Pulse™.
                 </div>
               </div>
 
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <div className="grid gap-2 md:grid-cols-2">
+                <Field label="Category">
+                  <select
+                    id="pulse_category"
+                    name="pulse_category"
+                    defaultValue="Sports Cards"
+                    className="app-select"
+                    disabled={availableQty <= 0}
+                  >
+                    {PULSE_CATEGORY_OPTIONS.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Subcategory">
+                  <select
+                    id="pulse_subcategory"
+                    name="pulse_subcategory"
+                    defaultValue="Baseball"
+                    className="app-select"
+                    disabled={availableQty <= 0}
+                  >
+                    {(PULSE_SUBCATEGORY_OPTIONS_BY_CATEGORY['Sports Cards'] ?? []).map((subcategory) => (
+                      <option key={subcategory} value={subcategory}>
+                        {subcategory}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+
+            </div>
+
+            <details className="app-section-tight space-y-1.5">
+              <summary className="cursor-pointer text-sm font-semibold text-zinc-100">
+                Sales Tax Tracking
+                <span className="ml-2 text-xs font-normal text-zinc-400">
+                  Marketplace defaults are already selected. Open only if tax details need changes.
+                </span>
+              </summary>
+
+              <div className="grid gap-2 pt-2 md:grid-cols-3">
                 <Field label="Sales Channel">
                   <select
                     name="sales_channel_type"
@@ -579,35 +701,28 @@ export default async function SellInventoryPage({
                 Use marketplace collected/remitted for eBay, Whatnot, and similar platforms when they handle tax.
                 Use seller collected when you directly collect tax at a local sale, card show, or private sale and may need to remit it.
               </div>
-            </div>
+            </details>
 
             <div>
-              <label className="mb-1 block text-xs uppercase tracking-wide text-zinc-400">
+              <label className="mb-0.5 block text-xs uppercase tracking-wide text-zinc-400">
                 Notes
               </label>
               <textarea
                 name="notes"
-                rows={3}
+                rows={2}
                 className="app-textarea"
                 disabled={availableQty <= 0}
               />
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
-              <Link href={`/app/inventory/${item.id}`} className="app-button">
-                Cancel
-              </Link>
-              <button
-                type="submit"
-                className="app-button-primary"
-                disabled={availableQty <= 0}
-              >
-                Record Sale
-              </button>
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] leading-snug text-zinc-400">
+              <span className="font-semibold text-zinc-300">Quick reminders:</span>{' '}
+              Item Sale Price + Shipping Charged = gross sale. Platform fees + postage + supplies + other costs = selling costs. Sales tax is tracked separately from income and profit.
             </div>
+
           </div>
 
-          <div className="space-y-3">
+          <div className="hidden">
             <div className="app-section-tight">
               <div className="text-sm font-semibold">Sale Preview</div>
 
@@ -680,6 +795,8 @@ export default async function SellInventoryPage({
 
             const maxAvailable = ${JSON.stringify(availableQty)};
             const unitCost = ${JSON.stringify(unitCost)};
+            const shippingProfileDefaultsById = ${JSON.stringify(shippingProfileDefaultsById)};
+            const pulseSubcategoryOptionsByCategory = ${JSON.stringify(PULSE_SUBCATEGORY_OPTIONS_BY_CATEGORY)};
 
             const qtyInput = form.querySelector('#quantity_sold');
             const grossSaleInput = form.querySelector('#gross_sale');
@@ -693,6 +810,8 @@ export default async function SellInventoryPage({
             const platformSelect = form.querySelector('#platform_select');
             const customPlatformInput = form.querySelector('#custom_platform');
             const remainingField = form.querySelector('#remaining_after_sale');
+            const pulseCategorySelect = form.querySelector('#pulse_category');
+            const pulseSubcategorySelect = form.querySelector('#pulse_subcategory');
 
             const previewQty = document.getElementById('preview_qty_sold');
             const previewRemaining = document.getElementById('preview_remaining');
@@ -701,8 +820,6 @@ export default async function SellInventoryPage({
             const previewNet = document.getElementById('preview_net');
             const previewCogs = document.getElementById('preview_cogs');
             const previewProfit = document.getElementById('preview_profit');
-
-            const quickQtyButtons = form.querySelectorAll('[data-set-qty]');
 
             const asNumber = (value) => {
               const num = Number(value ?? 0);
@@ -767,28 +884,68 @@ export default async function SellInventoryPage({
               if (previewProfit) previewProfit.textContent = money(profit);
             };
 
+            let lastPulseCategory = '';
+
+            const updatePulseSubcategoryOptions = () => {
+              if (!pulseCategorySelect || !pulseSubcategorySelect) return;
+
+              const category = String(pulseCategorySelect.value || '').trim();
+              const categoryChanged = category !== lastPulseCategory;
+              const currentValue = String(pulseSubcategorySelect.value || '').trim();
+              const options = pulseSubcategoryOptionsByCategory[category] || ['Other'];
+
+              pulseSubcategorySelect.innerHTML = '';
+
+              options.forEach((optionValue) => {
+                const option = document.createElement('option');
+                option.value = optionValue;
+                option.textContent = optionValue;
+                pulseSubcategorySelect.appendChild(option);
+              });
+
+              if (!categoryChanged && options.includes(currentValue)) {
+                pulseSubcategorySelect.value = currentValue;
+              } else {
+                pulseSubcategorySelect.value = options[0] || 'Other';
+              }
+
+              lastPulseCategory = category;
+            };
+
             const applyShippingProfileDefaults = () => {
               if (!shippingProfileSelect) {
                 updatePreview();
                 return;
               }
 
-              const option = shippingProfileSelect.options[shippingProfileSelect.selectedIndex];
+              const selectedProfileId = String(shippingProfileSelect.value || '').trim();
 
-              if (!option || !option.value) {
+              if (!selectedProfileId) {
                 updatePreview();
                 return;
               }
 
-              const shippingCharged = option.getAttribute('data-shipping-charged');
-              const suppliesCost = option.getAttribute('data-supplies-cost');
+              const option =
+                shippingProfileSelect.selectedOptions && shippingProfileSelect.selectedOptions.length > 0
+                  ? shippingProfileSelect.selectedOptions[0]
+                  : shippingProfileSelect.options[shippingProfileSelect.selectedIndex];
+
+              const defaults = shippingProfileDefaultsById[selectedProfileId] || {};
+              const shippingCharged =
+                defaults.shippingCharged ??
+                option?.getAttribute('data-shipping-charged') ??
+                null;
+              const suppliesCost =
+                defaults.suppliesCost ??
+                option?.getAttribute('data-supplies-cost') ??
+                null;
 
               if (shippingChargedInput && shippingCharged !== null) {
-                shippingChargedInput.value = String(Number(shippingCharged).toFixed(2));
+                shippingChargedInput.value = Number(shippingCharged).toFixed(2);
               }
 
               if (suppliesCostInput && suppliesCost !== null) {
-                suppliesCostInput.value = String(Number(suppliesCost).toFixed(2));
+                suppliesCostInput.value = Number(suppliesCost).toFixed(2);
               }
 
               updatePreview();
@@ -796,6 +953,16 @@ export default async function SellInventoryPage({
 
             if (shippingProfileSelect) {
               shippingProfileSelect.addEventListener('change', applyShippingProfileDefaults);
+              shippingProfileSelect.addEventListener('input', applyShippingProfileDefaults);
+              window.setTimeout(applyShippingProfileDefaults, 50);
+              window.setTimeout(applyShippingProfileDefaults, 250);
+            }
+
+            if (pulseCategorySelect) {
+              pulseCategorySelect.addEventListener('change', () => {
+                updatePulseSubcategoryOptions();
+                updatePreview();
+              });
             }
 
             if (platformSelect) {
@@ -806,15 +973,6 @@ export default async function SellInventoryPage({
               customPlatformInput.addEventListener('input', updatePreview);
               customPlatformInput.addEventListener('change', updatePreview);
             }
-
-            quickQtyButtons.forEach((button) => {
-              button.addEventListener('click', () => {
-                if (!qtyInput) return;
-                const nextQty = button.getAttribute('data-set-qty') || '1';
-                qtyInput.value = nextQty;
-                updatePreview();
-              });
-            });
 
             [
               qtyInput,
@@ -830,6 +988,7 @@ export default async function SellInventoryPage({
               input.addEventListener('change', updatePreview);
             });
 
+            updatePulseSubcategoryOptions();
             applyShippingProfileDefaults();
             updatePreview();
           })();
@@ -848,7 +1007,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-xs uppercase tracking-wide text-zinc-400">
+      <label className="mb-0.5 block text-xs uppercase tracking-wide text-zinc-400">
         {label}
       </label>
       {children}
@@ -858,7 +1017,7 @@ function Field({
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="app-metric-card p-3">
+    <div className="app-metric-card p-2.5">
       <div className="text-xs uppercase tracking-wide text-zinc-400">{label}</div>
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
     </div>

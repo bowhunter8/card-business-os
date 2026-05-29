@@ -203,7 +203,10 @@ async function getInventoryItemForSale({
       cost_basis_unit,
       cost_basis_total,
       source_type,
-      source_break_id
+      source_break_id,
+      created_at,
+      team,
+      brand
     `)
     .eq('id', inventoryItemId)
     .eq('user_id', userId)
@@ -214,6 +217,111 @@ async function getInventoryItemForSale({
   }
 
   return itemResponse.data
+}
+
+function dateOnly(value: string | null | undefined) {
+  if (!value) return null
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    const trimmed = String(value).trim()
+    return trimmed ? trimmed.slice(0, 10) : null
+  }
+
+  return date.toISOString().slice(0, 10)
+}
+
+function soldAtFromSaleDate(value: string) {
+  const safeDate = dateOnly(value)
+
+  if (!safeDate) return new Date().toISOString()
+
+  return `${safeDate}T00:00:00.000Z`
+}
+
+function calculateDaysToSell({
+  listedAt,
+  soldAt,
+}: {
+  listedAt?: string | null
+  soldAt?: string | null
+}) {
+  if (!listedAt || !soldAt) return null
+
+  const listedTime = new Date(listedAt).getTime()
+  const soldTime = new Date(soldAt).getTime()
+
+  if (!Number.isFinite(listedTime) || !Number.isFinite(soldTime)) {
+    return null
+  }
+
+  return Math.max(
+    0,
+    Math.round((soldTime - listedTime) / (1000 * 60 * 60 * 24))
+  )
+}
+
+async function recordHitsPulseSaleEvents({
+  supabase,
+  inventoryItem,
+  saleDate,
+  quantitySold,
+  grossSale,
+  platform,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  inventoryItem: {
+    title?: string | null
+    player_name?: string | null
+    year?: number | null
+    set_name?: string | null
+    team?: string | null
+    brand?: string | null
+    created_at?: string | null
+  }
+  saleDate: string
+  quantitySold: number
+  grossSale: number
+  platform: string
+}) {
+  try {
+    const safeQuantity = Math.max(1, Math.floor(Number(quantitySold || 1)))
+    const soldAt = soldAtFromSaleDate(saleDate)
+    const saleDateOnly = dateOnly(saleDate)
+    const listDateOnly = dateOnly(inventoryItem.created_at)
+    const daysToSell = calculateDaysToSell({
+      listedAt: inventoryItem.created_at,
+      soldAt,
+    })
+    const saleAmountPerUnit = roundMoney(Number(grossSale || 0) / safeQuantity)
+
+    const pulseRows = Array.from({ length: safeQuantity }).map(() => ({
+      list_date: listDateOnly,
+      sale_date: saleDateOnly,
+      sold_at: soldAt,
+      player_name: inventoryItem.player_name || null,
+      card_title: inventoryItem.title || inventoryItem.player_name || null,
+      sport: null,
+      team: inventoryItem.team || null,
+      set_name: inventoryItem.set_name || inventoryItem.brand || null,
+      card_year: inventoryItem.year ?? null,
+      category: 'Sports Cards',
+      sale_amount: saleAmountPerUnit,
+      days_to_sell: daysToSell,
+      source_platform: platform || null,
+    }))
+
+    const { error: pulseError } = await supabase
+      .from('hits_pulse_sales_events')
+      .insert(pulseRows)
+
+    if (pulseError) {
+      console.error('HITS Pulse event insert skipped:', pulseError.message)
+    }
+  } catch (error) {
+    console.error('HITS Pulse event insert skipped:', error)
+  }
 }
 
 async function insertSaleAndUpdateInventory({
@@ -328,6 +436,23 @@ async function insertSaleAndUpdateInventory({
       notes ||
       `Recorded sale. Unit cost ${unitCost.toFixed(2)}, quantity ${quantitySold}, COGS ${cogs.toFixed(2)}. Shipping charged ${shippingCharged.toFixed(2)}, postage ${shippingCost.toFixed(2)}, supplies ${suppliesCost.toFixed(2)}. Sales tax collected ${salesTaxCollected.toFixed(2)} (${salesTaxResponsibility}, ${salesChannelType}). Do not also enter sale-level supplies as a separate manual expense.`,
   })
+
+  const pulseItem = await getInventoryItemForSale({
+    supabase,
+    userId,
+    inventoryItemId,
+  })
+
+  if (pulseItem) {
+    await recordHitsPulseSaleEvents({
+      supabase,
+      inventoryItem: pulseItem,
+      saleDate,
+      quantitySold,
+      grossSale,
+      platform,
+    })
+  }
 
   return {
     ok: true as const,
@@ -465,7 +590,7 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  redirect(`/app/inventory/${inventoryItemId}?savedSale=1`)
+  redirect('/app/dashboard?saleRecorded=1')
 }
 
 export async function quickSellAction(formData: FormData) {
@@ -581,7 +706,7 @@ export async function quickSellAction(formData: FormData) {
     redirect(`/app/inventory?error=${encodeURIComponent(result.error)}`)
   }
 
-  redirect(`/app/inventory/${inventoryItemId}?savedSale=1`)
+  redirect('/app/dashboard?saleRecorded=1')
 }
 
 export async function updateSaleAction(formData: FormData) {
