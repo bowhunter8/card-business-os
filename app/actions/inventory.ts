@@ -159,6 +159,7 @@ export async function updateInventoryItemAction(formData: FormData) {
   const quantityRaw = String(formData.get('quantity') ?? '').trim()
   const statusRaw = String(formData.get('status') ?? '').trim()
   const storageLocation = String(formData.get('storage_location') ?? '').trim()
+  const costBasisUnitInput = Number(formData.get('cost_basis_unit') ?? 0)
   const estimatedValueUnit = Number(formData.get('estimated_value_unit') ?? 0)
   const notes = String(formData.get('notes') ?? '').trim()
 
@@ -238,7 +239,9 @@ export async function updateInventoryItemAction(formData: FormData) {
     ? Math.max(0, newQuantity - soldQuantity)
     : 0
 
-  const costBasisUnit = Number(item.cost_basis_unit ?? 0)
+  const costBasisUnit = Number.isFinite(costBasisUnitInput) && costBasisUnitInput >= 0
+    ? costBasisUnitInput
+    : Number(item.cost_basis_unit ?? 0)
   const year = yearRaw ? Number(yearRaw) : null
   const safeYear = year && !Number.isNaN(year) ? year : null
   const title = buildInventoryTitle({
@@ -269,6 +272,7 @@ export async function updateInventoryItemAction(formData: FormData) {
       storage_location: storageLocation || null,
       estimated_value_unit: estimatedValueUnit,
       estimated_value_total: estimatedValueTotal,
+      cost_basis_unit: costBasisUnit,
       cost_basis_total: costBasisTotal,
       notes: notes || null,
     })

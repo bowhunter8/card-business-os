@@ -130,9 +130,8 @@ export default function NewInventoryPage() {
   const isBulkLot = form.entryMode === "bulk_lot";
 
   const quantityNumber = useMemo(() => {
-    if (isBulkLot) return bulkItems.length;
     return Math.max(1, Math.floor(asNumber(form.quantity) || 1));
-  }, [isBulkLot, form.quantity, bulkItems.length]);
+  }, [form.quantity]);
 
   const totalCost = useMemo(() => {
     return asNumber(form.unitCost) * quantityNumber;
@@ -151,9 +150,9 @@ export default function NewInventoryPage() {
   }, [isBulkLot, form.estimatedValue, quantityNumber, bulkItems]);
 
   const bulkEstimatedPerCard = useMemo(() => {
-    if (!isBulkLot || bulkItems.length === 0) return 0;
-    return totalEstimatedValue / bulkItems.length;
-  }, [isBulkLot, totalEstimatedValue, bulkItems.length]);
+    if (!isBulkLot || quantityNumber <= 0) return 0;
+    return totalEstimatedValue / quantityNumber;
+  }, [isBulkLot, totalEstimatedValue, quantityNumber]);
 
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -312,7 +311,8 @@ export default function NewInventoryPage() {
           ? {
               lotName: form.lotName.trim(),
               lotDescription: form.lotDescription.trim(),
-              itemCount: bulkItems.length,
+              itemCount: quantityNumber,
+              childItemRows: bulkItems.length,
               estimatedTotalValue: totalEstimatedValue,
               items: bulkItems
                 .filter(
@@ -440,30 +440,19 @@ export default function NewInventoryPage() {
               />
             </div>
 
-            {!isBulkLot ? (
-              <div>
-                <label className="mb-1 block text-sm text-zinc-400">Quantity</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  className="app-input"
-                  value={form.quantity}
-                  onChange={(e) => updateForm("quantity", e.target.value)}
-                />
-              </div>
-            ) : (
-              <div>
-                <label className="mb-1 block text-sm text-zinc-400">
-                  Lot Quantity
-                </label>
-                <input
-                  className="app-input opacity-75"
-                  value={bulkItems.length}
-                  readOnly
-                />
-              </div>
-            )}
+            <div>
+              <label className="mb-1 block text-sm text-zinc-400">
+                {isBulkLot ? "Lot Quantity" : "Quantity"}
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                className="app-input"
+                value={form.quantity}
+                onChange={(e) => updateForm("quantity", e.target.value)}
+              />
+            </div>
           </div>
         </section>
 
@@ -934,10 +923,13 @@ export default function NewInventoryPage() {
           {isBulkLot && (
             <div className="app-card-tight mt-4 text-sm">
               <div>
-                Child items: <span className="font-semibold">{bulkItems.length}</span>
+                Lot quantity: <span className="font-semibold">{quantityNumber}</span>
               </div>
               <div className="mt-1">
-                Avg est. value per item: {" "}
+                Child detail rows: <span className="font-semibold">{bulkItems.length}</span>
+              </div>
+              <div className="mt-1">
+                Avg est. value per lot item: {" "}
                 <span className="font-semibold">
                   ${money(bulkEstimatedPerCard)}
                 </span>

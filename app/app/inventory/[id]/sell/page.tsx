@@ -434,8 +434,22 @@ export default async function SellInventoryPage({
             <div className="app-section-tight space-y-1.5">
               <div className="text-sm font-semibold">Sale Amounts</div>
 
-              <div className="grid gap-2 md:grid-cols-3">
-                <Field label="Item Sale Price">
+              <div className="grid gap-2 md:grid-cols-4">
+                <Field label="Unit Cost *">
+                  <input
+                    id="sale_unit_cost"
+                    name="sale_unit_cost"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    defaultValue={Number(item.cost_basis_unit ?? 0).toFixed(2)}
+                    required
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+
+                <Field label="Item Sale Price *">
                   <input
                     id="gross_sale"
                     name="gross_sale"
@@ -449,7 +463,7 @@ export default async function SellInventoryPage({
                   />
                 </Field>
 
-                <Field label="Platform Fees">
+                <Field label="Platform Fees *">
                   <input
                     id="platform_fees"
                     name="platform_fees"
@@ -717,7 +731,7 @@ export default async function SellInventoryPage({
 
             <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] leading-snug text-zinc-400">
               <span className="font-semibold text-zinc-300">Quick reminders:</span>{' '}
-              Item Sale Price + Shipping Charged = gross sale. Platform fees + postage + supplies + other costs = selling costs. Sales tax is tracked separately from income and profit.
+              Unit Cost is required for tax-safe COGS. Item Sale Price + Shipping Charged = gross sale. Platform fees + postage + supplies + other costs = selling costs. Sales tax is tracked separately from income and profit.
             </div>
 
           </div>
@@ -787,18 +801,19 @@ export default async function SellInventoryPage({
         </div>
       </form>
 
-      <Script id="sell-item-form-live-preview" strategy="afterInteractive">
+      <Script id={`sell-item-form-live-preview-${item.id}`} strategy="afterInteractive">
         {`
           (() => {
             const form = document.getElementById('sell-item-form');
             if (!form) return;
 
             const maxAvailable = ${JSON.stringify(availableQty)};
-            const unitCost = ${JSON.stringify(unitCost)};
+            const startingUnitCost = ${JSON.stringify(unitCost)};
             const shippingProfileDefaultsById = ${JSON.stringify(shippingProfileDefaultsById)};
             const pulseSubcategoryOptionsByCategory = ${JSON.stringify(PULSE_SUBCATEGORY_OPTIONS_BY_CATEGORY)};
 
             const qtyInput = form.querySelector('#quantity_sold');
+            const saleUnitCostInput = form.querySelector('#sale_unit_cost');
             const grossSaleInput = form.querySelector('#gross_sale');
             const shippingChargedInput = form.querySelector('#shipping_charged');
             const platformFeesInput = form.querySelector('#platform_fees');
@@ -860,6 +875,7 @@ export default async function SellInventoryPage({
               updatePlatformValue();
 
               const qty = clampQty();
+              const saleUnitCost = asNumber(saleUnitCostInput?.value) || startingUnitCost;
               const itemSalePrice = asNumber(grossSaleInput?.value);
               const shippingCharged = asNumber(shippingChargedInput?.value);
               const platformFees = asNumber(platformFeesInput?.value);
@@ -871,7 +887,7 @@ export default async function SellInventoryPage({
               const gross = Number((itemSalePrice + shippingCharged).toFixed(2));
               const sellingCosts = Number((platformFees + shippingCost + suppliesCost + otherCosts).toFixed(2));
               const net = Number((gross - sellingCosts).toFixed(2));
-              const cogs = Number((unitCost * qty).toFixed(2));
+              const cogs = Number((saleUnitCost * qty).toFixed(2));
               const profit = Number((net - cogs).toFixed(2));
 
               if (remainingField) remainingField.value = String(remaining);
@@ -932,20 +948,22 @@ export default async function SellInventoryPage({
 
               const defaults = shippingProfileDefaultsById[selectedProfileId] || {};
               const shippingCharged =
-                defaults.shippingCharged ??
-                option?.getAttribute('data-shipping-charged') ??
-                null;
+                defaults.shippingCharged ||
+                option?.getAttribute('data-shipping-charged') ||
+                '';
               const suppliesCost =
-                defaults.suppliesCost ??
-                option?.getAttribute('data-supplies-cost') ??
-                null;
+                defaults.suppliesCost ||
+                option?.getAttribute('data-supplies-cost') ||
+                '';
 
-              if (shippingChargedInput && shippingCharged !== null) {
+              if (shippingChargedInput && shippingCharged !== '') {
                 shippingChargedInput.value = Number(shippingCharged).toFixed(2);
+                shippingChargedInput.dispatchEvent(new Event('input', { bubbles: true }));
               }
 
-              if (suppliesCostInput && suppliesCost !== null) {
+              if (suppliesCostInput && suppliesCost !== '') {
                 suppliesCostInput.value = Number(suppliesCost).toFixed(2);
+                suppliesCostInput.dispatchEvent(new Event('input', { bubbles: true }));
               }
 
               updatePreview();
@@ -954,6 +972,13 @@ export default async function SellInventoryPage({
             if (shippingProfileSelect) {
               shippingProfileSelect.addEventListener('change', applyShippingProfileDefaults);
               shippingProfileSelect.addEventListener('input', applyShippingProfileDefaults);
+
+              document.addEventListener('change', (event) => {
+                if (event.target === shippingProfileSelect) {
+                  applyShippingProfileDefaults();
+                }
+              });
+
               window.setTimeout(applyShippingProfileDefaults, 50);
               window.setTimeout(applyShippingProfileDefaults, 250);
             }
@@ -976,6 +1001,7 @@ export default async function SellInventoryPage({
 
             [
               qtyInput,
+              saleUnitCostInput,
               grossSaleInput,
               shippingChargedInput,
               platformFeesInput,

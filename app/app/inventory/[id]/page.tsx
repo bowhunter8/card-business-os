@@ -69,6 +69,11 @@ function money(value: number | null | undefined) {
   }).format(Number(value ?? 0))
 }
 
+function moneyInput(value: number | null | undefined) {
+  const amount = Number(value ?? 0)
+  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00'
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return '—'
   const d = new Date(value)
@@ -272,15 +277,15 @@ export default async function InventoryDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string; success?: string; savedSale?: string; updatedSale?: string; deletedSale?: string }>
+  searchParams?: Promise<{ error?: string; success?: string; saleRecorded?: string; savedSale?: string; updatedSale?: string; deletedSale?: string }>
 }) {
   const { id } = await params
   const query = searchParams ? await searchParams : undefined
   const errorMessage = query?.error
 
   const successMessage =
-    query?.savedSale === '1'
-      ? 'Sale recorded successfully.'
+    query?.saleRecorded === '1' || query?.savedSale === '1'
+      ? 'Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated.'
       : query?.updatedSale === '1'
         ? 'Sale updated successfully.'
         : query?.deletedSale === '1'
@@ -562,7 +567,15 @@ export default async function InventoryDetailPage({
       </div>
 
       <div className="grid gap-2 md:grid-cols-4">
-        <ReadonlyMetric label="Unit Cost" value={money(item.cost_basis_unit)} />
+        <EditableField
+          label="Unit Cost"
+          name="cost_basis_unit"
+          type="number"
+          step="0.01"
+          min={0}
+          defaultValue={moneyInput(item.cost_basis_unit)}
+          formId={itemFormId}
+        />
         <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
         <EstimateValueMetric item={item} formId={itemFormId} />
       </div>

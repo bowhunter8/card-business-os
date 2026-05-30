@@ -74,7 +74,7 @@ function getSafeUnitCost(item: {
 
 function buildCostBasisErrorRedirect(inventoryItemId: string, fallbackPath = '/app/inventory') {
   const message =
-    'Missing cost basis. Cannot safely calculate COGS for tax reporting until this item has a valid unit cost or total cost.'
+    'Missing cost basis. Enter Unit Cost on the sell page before recording the sale. This protects accurate COGS and tax reporting.'
 
   if (!inventoryItemId) {
     return `${fallbackPath}?error=${encodeURIComponent(message)}`
@@ -269,6 +269,8 @@ async function recordHitsPulseSaleEvents({
   quantitySold,
   grossSale,
   platform,
+  pulseCategory,
+  pulseSubcategory,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>
   inventoryItem: {
@@ -284,6 +286,8 @@ async function recordHitsPulseSaleEvents({
   quantitySold: number
   grossSale: number
   platform: string
+  pulseCategory: string
+  pulseSubcategory: string
 }) {
   try {
     const safeQuantity = Math.max(1, Math.floor(Number(quantitySold || 1)))
@@ -302,11 +306,11 @@ async function recordHitsPulseSaleEvents({
       sold_at: soldAt,
       player_name: inventoryItem.player_name || null,
       card_title: inventoryItem.title || inventoryItem.player_name || null,
-      sport: null,
+      sport: pulseSubcategory || null,
       team: inventoryItem.team || null,
       set_name: inventoryItem.set_name || inventoryItem.brand || null,
       card_year: inventoryItem.year ?? null,
-      category: 'Sports Cards',
+      category: pulseCategory || 'Sports Cards',
       sale_amount: saleAmountPerUnit,
       days_to_sell: daysToSell,
       source_platform: platform || null,
@@ -345,11 +349,14 @@ async function insertSaleAndUpdateInventory({
   shippingCost,
   suppliesCost,
   unitCost,
+  itemQuantity,
   salesTaxCollected,
   salesTaxResponsibility,
   salesChannelType,
   taxState,
   taxNotes,
+  pulseCategory,
+  pulseSubcategory,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>
   userId: string
@@ -371,6 +378,9 @@ async function insertSaleAndUpdateInventory({
   shippingCost: number
   suppliesCost: number
   unitCost: number
+  itemQuantity: number
+  pulseCategory: string
+  pulseSubcategory: string
 } & SalesTaxTrackingInput) {
   const saleInsert = await supabase
     .from('sales')
@@ -411,6 +421,8 @@ async function insertSaleAndUpdateInventory({
     .update({
       available_quantity: newAvailableQty,
       status: nextStatus,
+      cost_basis_unit: unitCost,
+      cost_basis_total: roundMoney(unitCost * itemQuantity),
     })
     .eq('id', inventoryItemId)
     .eq('user_id', userId)
@@ -451,6 +463,8 @@ async function insertSaleAndUpdateInventory({
       quantitySold,
       grossSale,
       platform,
+      pulseCategory,
+      pulseSubcategory,
     })
   }
 
@@ -467,6 +481,7 @@ export async function createSaleAction(formData: FormData) {
   const saleDate = safeText(formData.get('sale_date'))
   const quantitySold = safeNumber(formData.get('quantity_sold'))
 
+  const enteredUnitCost = safeOptionalNumber(formData.get('sale_unit_cost'))
   const itemSalePrice = safeNumber(formData.get('gross_sale'))
   const shippingChargedInput = safeNumber(formData.get('shipping_charged'))
   const platformFees = safeNumber(formData.get('platform_fees'))
@@ -480,6 +495,8 @@ export async function createSaleAction(formData: FormData) {
   const platform = safeText(formData.get('platform'))
   const notes = safeText(formData.get('notes'))
   const shippingProfileId = safeText(formData.get('shipping_profile_id'))
+  const pulseCategory = safeText(formData.get('pulse_category')) || 'Sports Cards'
+  const pulseSubcategory = safeText(formData.get('pulse_subcategory')) || 'Baseball'
 
   const salesTaxCollected = roundMoney(safeNumber(formData.get('sales_tax_collected')))
   const salesTaxResponsibility = normalizeSalesTaxResponsibility(
@@ -530,10 +547,17 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  const unitCost = getSafeUnitCost(item)
+  const unitCost =
+    enteredUnitCost && enteredUnitCost > 0
+      ? enteredUnitCost
+      : getSafeUnitCost(item)
 
   if (unitCost <= 0) {
-    redirect(buildCostBasisErrorRedirect(inventoryItemId))
+    redirect(
+      `/app/inventory/${inventoryItemId}/sell?error=${encodeURIComponent(
+        'Unit Cost is required before recording sale.'
+      )}`
+    )
   }
 
   const {
@@ -577,6 +601,9 @@ export async function createSaleAction(formData: FormData) {
     shippingCost,
     suppliesCost,
     unitCost,
+    itemQuantity: Number(item.quantity ?? quantitySold),
+    pulseCategory,
+    pulseSubcategory,
     salesTaxCollected,
     salesTaxResponsibility,
     salesChannelType,
@@ -590,7 +617,7 @@ export async function createSaleAction(formData: FormData) {
     )
   }
 
-  redirect('/app/dashboard?saleRecorded=1')
+  redirect(`/app/inventory/${inventoryItemId}?saleRecorded=1`)
 }
 
 export async function quickSellAction(formData: FormData) {
@@ -612,6 +639,8 @@ export async function quickSellAction(formData: FormData) {
 
   const platform = safeText(formData.get('platform'))
   const notes = safeText(formData.get('notes'))
+  const pulseCategory = safeText(formData.get('pulse_category')) || 'Sports Cards'
+  const pulseSubcategory = safeText(formData.get('pulse_subcategory')) || 'Baseball'
 
   const salesTaxCollected = roundMoney(safeNumber(formData.get('sales_tax_collected')))
   const salesTaxResponsibility = normalizeSalesTaxResponsibility(
@@ -695,6 +724,9 @@ export async function quickSellAction(formData: FormData) {
     shippingCost,
     suppliesCost,
     unitCost,
+    itemQuantity: Number(item.quantity ?? quantitySold),
+    pulseCategory,
+    pulseSubcategory,
     salesTaxCollected,
     salesTaxResponsibility,
     salesChannelType,
@@ -706,7 +738,7 @@ export async function quickSellAction(formData: FormData) {
     redirect(`/app/inventory?error=${encodeURIComponent(result.error)}`)
   }
 
-  redirect('/app/dashboard?saleRecorded=1')
+  redirect(`/app/inventory/${inventoryItemId}?saleRecorded=1`)
 }
 
 export async function updateSaleAction(formData: FormData) {
