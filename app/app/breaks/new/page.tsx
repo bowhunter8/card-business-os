@@ -117,14 +117,18 @@ export default async function NewBreakPage({
     new Date().toISOString().slice(0, 10)
 
   const defaultSourceName =
-    distinctSellers.length === 1 ? distinctSellers[0] : ''
+    distinctSellers.length === 1
+      ? distinctSellers[0]
+      : prefillFromWhatnot
+      ? 'Multiple sellers'
+      : 'Manual Entry'
 
   const defaultProductName =
     distinctProducts.length === 1
       ? distinctProducts[0]
       : prefillFromWhatnot
       ? `Combined Whatnot Orders (${selectedOrders.length} orders)`
-      : ''
+      : 'Manual Order'
 
   const defaultOrderNumber =
     selectedOrders.length === 1

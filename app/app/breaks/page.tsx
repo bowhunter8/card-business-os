@@ -1440,6 +1440,22 @@ function BulkSelectionScript({ formId }: { formId: string }) {
 
       let selectedIdsSet = loadStoredSelection();
 
+      function visiblePageIdSet() {
+        return new Set(pageIds());
+      }
+
+      function pruneSelectionToVisibleRows() {
+        const visibleIds = visiblePageIdSet();
+        const prunedSelection = new Set(
+          Array.from(selectedIdsSet).filter((id) => visibleIds.has(id))
+        );
+
+        if (prunedSelection.size !== selectedIdsSet.size) {
+          selectedIdsSet = prunedSelection;
+          saveStoredSelection(selectedIdsSet);
+        }
+      }
+
       function setDisabled(node, disabled) {
         node.setAttribute('aria-disabled', disabled ? 'true' : 'false');
         node.classList.toggle('pointer-events-none', disabled);
@@ -1452,6 +1468,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       function selectedCount() {
+        pruneSelectionToVisibleRows();
         return selectedIdsSet.size;
       }
 
@@ -1462,6 +1479,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       function syncStoredInputs() {
         const bulkForm = form();
         if (!bulkForm) return;
+        pruneSelectionToVisibleRows();
         bulkForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
         selectedIds().forEach((id) => {
           const input = document.createElement('input');
@@ -1489,6 +1507,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
       }
 
       function updateBulkState() {
+        pruneSelectionToVisibleRows();
         syncPageCheckboxesFromStoredSelection();
         syncStoredInputs();
         const currentPageIds = pageIds();
@@ -1615,6 +1634,7 @@ function BulkSelectionScript({ formId }: { formId: string }) {
         }
         const submitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-submit="true"]') : null;
         if (submitButton) {
+          pruneSelectionToVisibleRows();
           if (selectedCount() === 0 || isBulkSubmitting) {
             event.preventDefault();
             updateBulkState();

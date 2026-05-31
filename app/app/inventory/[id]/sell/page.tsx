@@ -432,21 +432,101 @@ export default async function SellInventoryPage({
             </div>
 
             <div className="app-section-tight space-y-1.5">
+              <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm font-semibold">Sold Item Details</div>
+                <div className="text-[11px] leading-snug text-zinc-400">
+                  Required for clean sales history and HITS Pulse™ trends. This does not rename the inventory lot.
+                </div>
+              </div>
+
+              <div className="grid gap-2 md:grid-cols-[2fr_0.75fr_1.25fr]">
+                <Field label="Player / Item Name *">
+                  <input
+                    id="sale_item_name"
+                    name="sale_item_name"
+                    type="text"
+                    required
+                    placeholder="Example: Ken Griffey Jr."
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+
+                <Field label="Year">
+                  <input
+                    id="sale_item_year"
+                    name="sale_item_year"
+                    type="number"
+                    min={1800}
+                    max={2100}
+                    placeholder="2025"
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+
+                <Field label="Set / Product">
+                  <input
+                    id="sale_item_set"
+                    name="sale_item_set"
+                    type="text"
+                    placeholder="Example: Bowman Chrome"
+                    className="app-input"
+                    disabled={availableQty <= 0}
+                  />
+                </Field>
+              </div>
+
+              <div className="text-[11px] leading-snug text-zinc-500">
+                Use the main player/item name only here. Put year and set/product in the fields beside it. The inventory item remains unchanged.
+              </div>
+            </div>
+
+            <div className="app-section-tight space-y-1.5">
               <div className="text-sm font-semibold">Sale Amounts</div>
 
               <div className="grid gap-2 md:grid-cols-4">
                 <Field label="Unit Cost *">
-                  <input
-                    id="sale_unit_cost"
-                    name="sale_unit_cost"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    defaultValue={Number(item.cost_basis_unit ?? 0).toFixed(2)}
-                    required
-                    className="app-input"
-                    disabled={availableQty <= 0}
-                  />
+                  {unitCost > 0 ? (
+                    <>
+                      <input
+                        id="sale_unit_cost_display"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={unitCost.toFixed(2)}
+                        readOnly
+                        className="app-input bg-zinc-900 text-zinc-400"
+                        disabled
+                      />
+                      <input
+                        id="sale_unit_cost"
+                        name="sale_unit_cost"
+                        type="hidden"
+                        value={unitCost.toFixed(2)}
+                      />
+                      <div className="mt-1 text-[11px] leading-snug text-zinc-500">
+                        Auto-calculated from inventory cost.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        id="sale_unit_cost"
+                        name="sale_unit_cost"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        defaultValue="0.00"
+                        required
+                        className="app-input"
+                        disabled={availableQty <= 0}
+                      />
+                      <div className="mt-1 text-[11px] leading-snug text-amber-300">
+                        Required because this item has no saved cost.
+                      </div>
+                    </>
+                  )}
                 </Field>
 
                 <Field label="Item Sale Price *">

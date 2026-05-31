@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { getTopSellingPlayers } from '@/lib/analytics/market-analytics'
+import PulseFilters from './PulseFilters'
+import { createClient } from '@/lib/supabase/server'
 
 type PulsePeriod = '7' | '30' | '90' | '365'
 type PulseCategory =
@@ -11,6 +11,27 @@ type PulseCategory =
   | 'Coins / Currency / Jewelry / Watches'
   | 'LEGO / Toys'
   | 'Other'
+
+type PulseEventRow = {
+  player_name?: string | null
+  card_title?: string | null
+  item_name?: string | null
+  title?: string | null
+  category?: string | null
+  sport?: string | null
+  subcategory?: string | null
+  item_subcategory?: string | null
+  team?: string | null
+  set_name?: string | null
+  sale_amount?: number | string | null
+  gross_sale?: number | string | null
+  amount?: number | string | null
+  days_to_sell?: number | string | null
+  created_at?: string | null
+  sale_date?: string | null
+  sold_at?: string | null
+  [key: string]: unknown
+}
 
 const PERIOD_OPTIONS: { label: string; value: PulsePeriod; description: string }[] = [
   { label: '7 Days', value: '7', description: 'Last week' },
@@ -106,45 +127,192 @@ function cleanSubcategory(category: PulseCategory, value: string | undefined) {
   return options.includes(value) ? value : ''
 }
 
-function buildPulseHref({
-  period,
-  category,
-  subcategory,
-  q,
-}: {
-  period: PulsePeriod
-  category?: string
-  subcategory?: string
-  q?: string
-}) {
-  const params = new URLSearchParams()
-
-  params.set('period', period)
-
-  if (category) params.set('category', category)
-  if (subcategory) params.set('subcategory', subcategory)
-  if (q) params.set('q', q)
-
-  return `/app/hits-pulse?${params.toString()}`
+function toNumber(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
-function FilterChip({
-  href,
-  label,
-  active,
+function money(value: number) {
+  return value.toLocaleString(undefined, {
+    style: 'currency',
+    currency: 'USD',
+  })
+}
+
+function getRowCategory(row: PulseEventRow) {
+  return String(row.category ?? '').trim()
+}
+
+function getRowSubcategory(row: PulseEventRow) {
+  return String(row.sport ?? row.subcategory ?? row.item_subcategory ?? '').trim()
+}
+
+function getRowTitle(row: PulseEventRow) {
+  return String(row.player_name ?? row.card_title ?? row.item_name ?? row.title ?? '').trim()
+}
+
+function getRowSaleAmount(row: PulseEventRow) {
+  return toNumber(row.sale_amount ?? row.gross_sale ?? row.amount)
+}
+
+function getRowSetName(row: PulseEventRow) {
+  return String(row.set_name ?? '').trim()
+}
+
+function getRowProductName(row: PulseEventRow) {
+  return String(row.card_title ?? row.item_name ?? row.title ?? row.player_name ?? '').trim()
+}
+
+function getRowEventDate(row: PulseEventRow) {
+  const rawDate = row.sale_date ?? row.sold_at ?? row.created_at
+  if (!rawDate) return null
+
+  const date = new Date(String(rawDate))
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+type PulseRankedStat = {
+  name: string
+  totalSold: number
+  totalRevenue: number
+  averageSalePrice: number
+}
+
+type PulseTrendStat = PulseRankedStat & {
+  previousSold: number
+  change: number
+  changePercent: number | null
+  trendLabel: string
+}
+
+function buildRankedStats(rows: PulseEventRow[], getName: (row: PulseEventRow) => string) {
+  const map = new Map<
+    string,
+    {
+      totalSold: number
+      totalRevenue: number
+    }
+  >()
+
+  rows.forEach((row) => {
+    const name = getName(row)
+    if (!name) return
+
+    const current = map.get(name) ?? { totalSold: 0, totalRevenue: 0 }
+
+    current.totalSold += 1
+    current.totalRevenue += getRowSaleAmount(row)
+
+    map.set(name, current)
+  })
+
+  return Array.from(map.entries()).map(([name, stat]): PulseRankedStat => ({
+    name,
+    totalSold: stat.totalSold,
+    totalRevenue: stat.totalRevenue,
+    averageSalePrice: stat.totalSold > 0 ? stat.totalRevenue / stat.totalSold : 0,
+  }))
+}
+
+function buildTrendStats({
+  currentRows,
+  previousRows,
+  getName,
 }: {
-  href: string
-  label: string
-  active: boolean
+  currentRows: PulseEventRow[]
+  previousRows: PulseEventRow[]
+  getName: (row: PulseEventRow) => string
 }) {
-  return (
-    <Link
-      href={href}
-      className={`app-chip whitespace-nowrap ${active ? 'app-chip-active' : 'app-chip-idle'}`}
-    >
-      {label}
-    </Link>
-  )
+  const currentStats = buildRankedStats(currentRows, getName)
+  const previousStats = buildRankedStats(previousRows, getName)
+  const previousMap = new Map(previousStats.map((stat) => [stat.name, stat.totalSold]))
+
+  return currentStats.map((stat): PulseTrendStat => {
+    const previousSold = previousMap.get(stat.name) ?? 0
+    const change = stat.totalSold - previousSold
+    const changePercent = previousSold > 0 ? (change / previousSold) * 100 : null
+
+    let trendLabel = 'Stable'
+    if (previousSold === 0 && stat.totalSold > 0) {
+      trendLabel = 'New'
+    } else if (change > 0) {
+      trendLabel = 'Rising'
+    } else if (change < 0) {
+      trendLabel = 'Falling'
+    }
+
+    return {
+      ...stat,
+      previousSold,
+      change,
+      changePercent,
+      trendLabel,
+    }
+  })
+}
+
+function trendText(stat: PulseTrendStat) {
+  if (stat.previousSold === 0 && stat.totalSold > 0) return 'New'
+  if (stat.change === 0) return 'No change'
+
+  const sign = stat.change > 0 ? '+' : ''
+  const percent = stat.changePercent === null ? '' : ` (${sign}${stat.changePercent.toFixed(0)}%)`
+
+  return `${sign}${stat.change}${percent}`
+}
+
+type PulsePlayerStat = {
+  playerName: string
+  totalSold: number
+  totalRevenue: number
+  averageSalePrice: number
+  averageDaysToSell: number
+}
+
+function buildPlayerStats(rows: PulseEventRow[]) {
+  const map = new Map<
+    string,
+    {
+      totalSold: number
+      totalRevenue: number
+      totalDaysToSell: number
+      daysCount: number
+    }
+  >()
+
+  rows.forEach((row) => {
+    const playerName = getRowTitle(row)
+    if (!playerName) return
+
+    const current =
+      map.get(playerName) ?? {
+        totalSold: 0,
+        totalRevenue: 0,
+        totalDaysToSell: 0,
+        daysCount: 0,
+      }
+
+    const saleAmount = getRowSaleAmount(row)
+    const daysToSell = toNumber(row.days_to_sell)
+
+    current.totalSold += 1
+    current.totalRevenue += saleAmount
+
+    if (Number.isFinite(daysToSell)) {
+      current.totalDaysToSell += daysToSell
+      current.daysCount += 1
+    }
+
+    map.set(playerName, current)
+  })
+
+  return Array.from(map.entries()).map(([playerName, stat]): PulsePlayerStat => ({
+    playerName,
+    totalSold: stat.totalSold,
+    totalRevenue: stat.totalRevenue,
+    averageSalePrice: stat.totalSold > 0 ? stat.totalRevenue / stat.totalSold : 0,
+    averageDaysToSell: stat.daysCount > 0 ? stat.totalDaysToSell / stat.daysCount : 0,
+  }))
 }
 
 export default async function HitsPulsePage({
@@ -165,12 +333,145 @@ export default async function HitsPulsePage({
   const q = String(params?.q ?? '').trim()
 
   const days = Number(period)
-  const subcategoryOptions = category ? SUBCATEGORY_OPTIONS_BY_CATEGORY[category] ?? [] : []
+  const supabase = await createClient()
 
-  const topPlayers = await getTopSellingPlayers({
-    days,
-    limit: 25,
+  const { data: pulseRowsRaw, error: pulseRowsError } = await supabase.rpc(
+    'get_hits_pulse_events_filtered',
+    {
+      p_days: days,
+      p_category: category || '',
+      p_subcategory: subcategory || '',
+      p_search: q || '',
+      p_limit: 5000,
+    }
+  )
+
+  const { data: trendRowsRaw, error: trendRowsError } = await supabase.rpc(
+    'get_hits_pulse_events_filtered',
+    {
+      p_days: days * 2,
+      p_category: category || '',
+      p_subcategory: subcategory || '',
+      p_search: q || '',
+      p_limit: 10000,
+    }
+  )
+
+  const pulseRows = (pulseRowsRaw ?? []) as PulseEventRow[]
+  const trendRows = (trendRowsRaw ?? []) as PulseEventRow[]
+  const currentPeriodStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const previousPeriodStart = new Date(Date.now() - days * 2 * 24 * 60 * 60 * 1000)
+
+  const currentTrendRows = trendRows.filter((row) => {
+    const eventDate = getRowEventDate(row)
+    return eventDate ? eventDate >= currentPeriodStart : true
   })
+
+  const previousTrendRows = trendRows.filter((row) => {
+    const eventDate = getRowEventDate(row)
+    return eventDate ? eventDate >= previousPeriodStart && eventDate < currentPeriodStart : false
+  })
+
+  const topPlayers = buildPlayerStats(pulseRows)
+    .sort(
+      (a, b) =>
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.playerName.localeCompare(b.playerName)
+    )
+    .slice(0, 25)
+
+  const topCategories = Array.from(
+    pulseRows.reduce((map, row) => {
+      const name = getRowCategory(row)
+
+      if (!name) return map
+
+      map.set(name, (map.get(name) ?? 0) + 1)
+      return map
+    }, new Map<string, number>())
+  )
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 10)
+
+  const topSubcategories = Array.from(
+    pulseRows.reduce((map, row) => {
+      const name = getRowSubcategory(row)
+
+      if (!name) return map
+
+      map.set(name, (map.get(name) ?? 0) + 1)
+      return map
+    }, new Map<string, number>())
+  )
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 10)
+
+  const topSets = buildRankedStats(pulseRows, getRowSetName)
+    .sort(
+      (a, b) =>
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 10)
+
+  const topProducts = buildRankedStats(pulseRows, getRowProductName)
+    .sort(
+      (a, b) =>
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 10)
+
+  const playerTrendMovement = buildTrendStats({
+    currentRows: currentTrendRows,
+    previousRows: previousTrendRows,
+    getName: getRowTitle,
+  })
+    .sort(
+      (a, b) =>
+        b.change - a.change ||
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 10)
+
+  const setTrendMovement = buildTrendStats({
+    currentRows: currentTrendRows,
+    previousRows: previousTrendRows,
+    getName: getRowSetName,
+  })
+    .sort(
+      (a, b) =>
+        b.change - a.change ||
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 10)
+
+  const fastestSellers = [...topPlayers]
+    .filter((player) => Number.isFinite(player.averageDaysToSell))
+    .sort(
+      (a, b) =>
+        a.averageDaysToSell - b.averageDaysToSell ||
+        b.totalSold - a.totalSold ||
+        b.totalRevenue - a.totalRevenue ||
+        a.playerName.localeCompare(b.playerName)
+    )
+    .slice(0, 10)
+
+  const highestRevenuePlayers = [...topPlayers]
+    .sort(
+      (a, b) =>
+        b.totalRevenue - a.totalRevenue ||
+        b.totalSold - a.totalSold ||
+        a.playerName.localeCompare(b.playerName)
+    )
+    .slice(0, 10)
 
   const activePeriodLabel =
     PERIOD_OPTIONS.find((option) => option.value === period)?.label ?? '30 Days'
@@ -195,79 +496,31 @@ export default async function HitsPulsePage({
         and are never displayed.
       </div>
 
-      <div className="app-section space-y-4">
-        <div>
-          <div className="text-sm font-semibold text-zinc-200">Date range</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {PERIOD_OPTIONS.map((option) => (
-              <FilterChip
-                key={option.value}
-                label={option.label}
-                active={period === option.value}
-                href={buildPulseHref({
-                  period: option.value,
-                  category,
-                  subcategory,
-                  q,
-                })}
-              />
-            ))}
-          </div>
+      {pulseRowsError ? (
+        <div className="rounded-xl border border-amber-800 bg-amber-950/30 p-4 text-sm text-amber-200">
+          Pulse data could not be loaded from get_hits_pulse_events_filtered. Supabase returned:{' '}
+          {pulseRowsError.message}
         </div>
+      ) : null}
 
-        <form action="/app/hits-pulse" className="grid gap-3 xl:grid-cols-[1fr_1fr_1.25fr_auto]">
-          <input type="hidden" name="period" value={period} />
+      {trendRowsError ? (
+        <div className="rounded-xl border border-amber-800 bg-amber-950/30 p-4 text-sm text-amber-200">
+          Pulse trend movement could not be loaded. Supabase returned: {trendRowsError.message}
+        </div>
+      ) : null}
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-300">Category</span>
-            <select name="category" defaultValue={category} className="app-select w-full">
-              {CATEGORY_OPTIONS.map((option) => (
-                <option key={option || 'all'} value={option}>
-                  {option || 'All categories'}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-300">Subcategory</span>
-            <select
-              name="subcategory"
-              defaultValue={subcategory}
-              className="app-select w-full"
-              disabled={!category}
-            >
-              <option value="">
-                {category ? 'All subcategories' : 'Choose a category first'}
-              </option>
-              {subcategoryOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-300">Search</span>
-            <input
-              name="q"
-              defaultValue={q}
-              className="app-input w-full"
-              placeholder="Search player, card, set, team..."
-            />
-          </label>
-
-          <div className="flex items-end gap-2">
-            <button className="app-button-primary whitespace-nowrap" type="submit">
-              Search
-            </button>
-
-            <Link href="/app/hits-pulse" className="app-button whitespace-nowrap">
-              Reset
-            </Link>
-          </div>
-        </form>
+      <div className="app-section space-y-4">
+        <div className="[&>form>div>a]:hidden [&>form>div>button]:hidden">
+          <PulseFilters
+            period={period}
+            category={category}
+            subcategory={subcategory}
+            q={q}
+            periodOptions={PERIOD_OPTIONS}
+            categoryOptions={CATEGORY_OPTIONS}
+            subcategoryOptionsByCategory={SUBCATEGORY_OPTIONS_BY_CATEGORY}
+          />
+        </div>
 
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <div className="app-card-tight p-3">
@@ -292,9 +545,7 @@ export default async function HitsPulsePage({
         </div>
 
         <div className="text-xs leading-relaxed text-zinc-500">
-          Category, subcategory, and search controls are wired into the page state now. The next
-          step is updating the Pulse analytics RPC/helper so those filters apply directly to the
-          anonymous app-wide aggregate data.
+          HITS Pulse™ data is anonymous and grouped from completed sales events.
         </div>
       </div>
 
@@ -313,7 +564,7 @@ export default async function HitsPulsePage({
 
         {topPlayers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
-            HITS Pulse™ is ready. Trends will appear after sold items are added to the anonymous Pulse event table.
+            No matching Pulse results for the selected filters.
           </div>
         ) : (
           <div className="app-table-wrap">
@@ -342,17 +593,11 @@ export default async function HitsPulsePage({
                       <td className="app-td">{player.totalSold}</td>
 
                       <td className="app-td">
-                        {player.totalRevenue.toLocaleString(undefined, {
-                          style: 'currency',
-                          currency: 'USD',
-                        })}
+                        {money(player.totalRevenue)}
                       </td>
 
                       <td className="app-td">
-                        {player.averageSalePrice.toLocaleString(undefined, {
-                          style: 'currency',
-                          currency: 'USD',
-                        })}
+                        {money(player.averageSalePrice)}
                       </td>
 
                       <td className="app-td">
@@ -365,6 +610,336 @@ export default async function HitsPulsePage({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Fastest Sellers</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Players with the lowest average days to sell.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {fastestSellers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching fastest-seller results for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {fastestSellers.map((player, index) => (
+                <div
+                  key={`${player.playerName}-fastest`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white">
+                      {index + 1}. {player.playerName}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      {player.totalSold} sold · {money(player.totalRevenue)} revenue
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-sm font-semibold text-emerald-300">
+                    {player.averageDaysToSell.toFixed(1)} days
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Highest Revenue Players</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Players generating the most total sales revenue.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {highestRevenuePlayers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching revenue leaders for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {highestRevenuePlayers.map((player, index) => (
+                <div
+                  key={`${player.playerName}-revenue`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white">
+                      {index + 1}. {player.playerName}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      {player.totalSold} sold · avg {money(player.averageSalePrice)}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-sm font-semibold text-emerald-300">
+                    {money(player.totalRevenue)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Top Sets</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Highest-volume sets/products lines in the selected Pulse range.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {topSets.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching set trends for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {topSets.map((set, index) => (
+                <div
+                  key={`${set.name}-set`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {index + 1}. {set.name}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      avg {money(set.averageSalePrice)} · {money(set.totalRevenue)} revenue
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-sm font-semibold text-emerald-300">
+                    {set.totalSold} sold
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Top Products</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Highest-volume specific items/products in the selected Pulse range.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {topProducts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching product trends for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {topProducts.map((product, index) => (
+                <div
+                  key={`${product.name}-product`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {index + 1}. {product.name}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      avg {money(product.averageSalePrice)} · {money(product.totalRevenue)} revenue
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-sm font-semibold text-emerald-300">
+                    {product.totalSold} sold
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Player Trend Movement</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Current {activePeriodLabel} compared to the previous matching period.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {playerTrendMovement.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching player movement for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {playerTrendMovement.map((player, index) => (
+                <div
+                  key={`${player.name}-player-trend`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {index + 1}. {player.name}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      {player.totalSold} now · {player.previousSold} previous · {money(player.totalRevenue)} revenue
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold text-emerald-300">
+                      {player.trendLabel}
+                    </div>
+                    <div className="text-xs text-zinc-400">{trendText(player)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Set Trend Movement</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Sets gaining or losing sales volume against the previous matching period.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {setTrendMovement.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching set movement for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {setTrendMovement.map((set, index) => (
+                <div
+                  key={`${set.name}-set-trend`}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">
+                      {index + 1}. {set.name}
+                    </div>
+                    <div className="text-xs text-zinc-400">
+                      {set.totalSold} now · {set.previousSold} previous · {money(set.totalRevenue)} revenue
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold text-emerald-300">
+                      {set.trendLabel}
+                    </div>
+                    <div className="text-xs text-zinc-400">{trendText(set)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Top Categories</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Highest-volume market categories.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {topCategories.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching category trends for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {topCategories.map(([name, count], index) => (
+                <div
+                  key={name}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="text-sm font-semibold text-white">
+                    {index + 1}. {name}
+                  </div>
+                  <div className="text-sm font-semibold text-emerald-300">
+                    {count} sold
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="app-card">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-white">Top Subcategories</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Highest-volume subcategories within Pulse.
+              </p>
+            </div>
+
+            <div className="app-badge app-badge-info">Top 10</div>
+          </div>
+
+          {topSubcategories.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-sm text-zinc-400">
+              No matching subcategory trends for the selected filters.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {topSubcategories.map(([name, count], index) => (
+                <div
+                  key={name}
+                  className="app-card-tight flex items-center justify-between gap-3 p-3"
+                >
+                  <div className="text-sm font-semibold text-white">
+                    {index + 1}. {name}
+                  </div>
+                  <div className="text-sm font-semibold text-emerald-300">
+                    {count} sold
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
