@@ -16,6 +16,8 @@ type AppUserAccessRow = {
   trial_ends_at?: string | null
 }
 
+type PulsePeriod = '7' | '30' | '90' | '365'
+
 type PulseNavPlayerRow = {
   player_name?: string | null
   total_sold?: number | string | null
