@@ -1,10 +1,22 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 function safeCount(value: string) {
   const num = Number(String(value ?? '').replace(/,/g, '').trim() || 0)
   return Number.isFinite(num) && num > 0 ? Math.floor(num) : 0
+}
+
+function syncItemsReceived(total: number) {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[name="cards_received"]'
+  )
+
+  if (!input) return
+
+  input.value = String(total)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 export default function TeamBagTally() {
@@ -16,6 +28,11 @@ export default function TeamBagTally() {
     [counts]
   )
 
+  useEffect(() => {
+    if (!isOpen) return
+    syncItemsReceived(total)
+  }, [isOpen, total])
+
   function updateCount(index: number, value: string) {
     setCounts((current) =>
       current.map((count, countIndex) => (countIndex === index ? value : count))
@@ -26,29 +43,8 @@ export default function TeamBagTally() {
     setCounts((current) => [...current, ''])
   }
 
-  function removeBag(index: number) {
-    setCounts((current) =>
-      current.length <= 1
-        ? ['']
-        : current.filter((_, countIndex) => countIndex !== index)
-    )
-  }
-
   function clearCounts() {
     setCounts(['', '', ''])
-  }
-
-  function useTotal() {
-    const input = document.querySelector<HTMLInputElement>(
-      'input[name="cards_received"]'
-    )
-
-    if (!input) return
-
-    input.value = String(total)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-    input.dispatchEvent(new Event('change', { bubbles: true }))
-    input.focus()
   }
 
   return (
@@ -63,7 +59,7 @@ export default function TeamBagTally() {
             Virtual sorting tray
           </span>
           <span className="mt-1 block text-xs text-zinc-400">
-            Tally team bags, packs, or stacks before saving the total.
+            Tally team bags, packs, or stacks. The Items Received total updates automatically.
           </span>
         </span>
 
@@ -81,14 +77,6 @@ export default function TeamBagTally() {
                   <label className="text-xs font-semibold text-zinc-300">
                     Bag / Pack {index + 1}
                   </label>
-
-                  <button
-                    type="button"
-                    onClick={() => removeBag(index)}
-                    className="text-xs text-red-300 hover:text-red-200"
-                  >
-                    Remove
-                  </button>
                 </div>
 
                 <input
@@ -112,6 +100,9 @@ export default function TeamBagTally() {
               <div className="mt-1 text-2xl font-bold text-zinc-100">
                 {total}
               </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                Items Received updates automatically as you enter counts.
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -129,14 +120,6 @@ export default function TeamBagTally() {
                 className="app-button"
               >
                 Clear
-              </button>
-
-              <button
-                type="button"
-                onClick={useTotal}
-                className="app-button-primary"
-              >
-                Use Total
               </button>
             </div>
           </div>

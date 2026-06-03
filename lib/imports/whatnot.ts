@@ -15,6 +15,9 @@ export type WhatnotPreviewRow = {
   raw: Record<string, string>
 }
 
+export const WHATNOT_PARSER_VERSION =
+  'whatnot-parser-2026-06-03-duplicate-headers-plus-row-fallback'
+
 function cleanHeader(value: string) {
   return value.replace(/\uFEFF/g, '').trim()
 }
@@ -44,10 +47,11 @@ function decodeCandidate(value: string) {
 
 function sanitizeOrderIdLike(value: unknown) {
   const cleaned = cleanText(decodeCandidate(String(value ?? '')))
+    .replace(/\s+/g, '')
+    .trim()
 
   if (!cleaned) return null
   if (cleaned.includes(',')) return null
-  if (/\s/.test(cleaned)) return null
   if (
     /UTC|USD|direct_order|completed|imported|subtotal|shipping|tax|seller|product|quantity|category/i.test(
       cleaned
@@ -70,14 +74,28 @@ function sanitizeNumericOrderId(value: unknown) {
   return digitsOnly
 }
 
-function parseCsvLine(line: string) {
-  const result: string[] = []
+function looksLikeWhatnotOrderId(value: unknown) {
+  const cleaned = sanitizeOrderIdLike(value)
+  if (!cleaned) return null
+
+  if (cleaned.length < 12 || cleaned.length > 40) return null
+  if (!/[A-Za-z]/.test(cleaned)) return null
+  if (!/[0-9]/.test(cleaned)) return null
+  if (!/^[A-Za-z0-9_-]+$/.test(cleaned)) return null
+
+  return cleaned
+}
+
+function parseCsvRecords(text: string) {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const records: string[][] = []
+  let record: string[] = []
   let current = ''
   let inQuotes = false
 
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i]
-    const next = line[i + 1]
+  for (let i = 0; i < normalized.length; i += 1) {
+    const char = normalized[i]
+    const next = normalized[i + 1]
 
     if (char === '"') {
       if (inQuotes && next === '"') {
@@ -90,7 +108,19 @@ function parseCsvLine(line: string) {
     }
 
     if (char === ',' && !inQuotes) {
-      result.push(current)
+      record.push(current)
+      current = ''
+      continue
+    }
+
+    if (char === '\n' && !inQuotes) {
+      record.push(current)
+
+      if (record.some((value) => value.trim() !== '')) {
+        records.push(record)
+      }
+
+      record = []
       current = ''
       continue
     }
@@ -98,22 +128,43 @@ function parseCsvLine(line: string) {
     current += char
   }
 
-  result.push(current)
-  return result
+  record.push(current)
+
+  if (record.some((value) => value.trim() !== '')) {
+    records.push(record)
+  }
+
+  return records
+}
+
+function makeUniqueHeaders(headers: string[]) {
+  const seenHeaders = new Map<string, number>()
+
+  return headers.map((header, index) => {
+    const cleaned = cleanHeader(header)
+    const normalized = normalizeHeader(cleaned)
+    const seenCount = seenHeaders.get(normalized) ?? 0
+
+    seenHeaders.set(normalized, seenCount + 1)
+
+    if (seenCount === 0) {
+      return cleaned || `column_${index + 1}`
+    }
+
+    return `${cleaned || `column_${index + 1}`}__duplicate_${seenCount + 1}`
+  })
 }
 
 export function parseCsv(text: string) {
-  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = normalized.split('\n').filter((line) => line.trim() !== '')
+  const records = parseCsvRecords(text)
 
-  if (lines.length === 0) {
+  if (records.length === 0) {
     return { headers: [] as string[], rows: [] as Record<string, string>[] }
   }
 
-  const headers = parseCsvLine(lines[0]).map(cleanHeader)
+  const headers = makeUniqueHeaders(records[0])
 
-  const rows = lines.slice(1).map((line) => {
-    const values = parseCsvLine(line)
+  const rows = records.slice(1).map((values) => {
     const row: Record<string, string> = {}
 
     headers.forEach((header, index) => {
@@ -134,13 +185,45 @@ function getValue(row: Record<string, string>, candidates: string[]) {
   })
 
   for (const candidate of candidates) {
-    const value = normalizedMap.get(normalizeHeader(candidate))
-    if (value != null && value !== '') {
-      return value
+    const candidateKey = normalizeHeader(candidate)
+
+    for (const [normalizedKey, value] of normalizedMap.entries()) {
+      if (
+        normalizedKey === candidateKey ||
+        normalizedKey.startsWith(`${candidateKey} duplicate`)
+      ) {
+        if (value != null && value !== '') {
+          return value
+        }
+      }
     }
   }
 
   return ''
+}
+
+function getFallbackOrderId(row: Record<string, string>) {
+  for (const value of Object.values(row)) {
+    const candidate = looksLikeWhatnotOrderId(value)
+    if (candidate) return candidate
+  }
+
+  return null
+}
+
+function getFallbackNumericOrderId(row: Record<string, string>, orderId: string | null) {
+  for (const value of Object.values(row)) {
+    const cleaned = cleanText(value)
+
+    if (!cleaned) continue
+    if (orderId && cleaned === orderId) continue
+    if (/[A-Za-z]/.test(cleaned)) continue
+
+    const candidate = sanitizeNumericOrderId(cleaned)
+    if (candidate) return candidate
+  }
+
+  return null
 }
 
 function parseMoney(value: string) {
@@ -194,13 +277,47 @@ export function buildWhatnotPreviewRows(text: string) {
 
   const previewRows: WhatnotPreviewRow[] = rows
     .map((row, index) => {
-      const orderId = sanitizeOrderIdLike(getValue(row, ['order id']))
+      const headerOrderId = sanitizeOrderIdLike(
+        getValue(row, [
+          'order id',
+          'order',
+          'whatnot order id',
+          'transaction id',
+          'id',
+          'orderid',
+          'order_id',
+          'order identifier',
+          'transaction',
+          'purchase id',
+          'purchase identifier',
+        ])
+      )
+
+      const orderId = headerOrderId || getFallbackOrderId(row)
+
       if (!orderId) return null
+
+      const headerNumericOrderId = sanitizeNumericOrderId(
+        getValue(row, [
+          'order numeric id',
+          'order number',
+          'numeric order id',
+          'order #',
+          'order no',
+          'order id numeric',
+          'number',
+          'numeric id',
+          'purchase number',
+          'purchase id',
+          'id number',
+          'order_number',
+        ])
+      )
 
       return {
         rowNumber: index + 2,
         orderId,
-        orderNumericId: sanitizeNumericOrderId(getValue(row, ['order numeric id'])),
+        orderNumericId: headerNumericOrderId || getFallbackNumericOrderId(row, orderId),
         processedDate: toIsoDate(getValue(row, ['processed date'])),
         processedDateDisplay: toDisplayDate(getValue(row, ['processed date'])),
         seller: cleanText(getValue(row, ['seller'])) || null,
@@ -220,5 +337,6 @@ export function buildWhatnotPreviewRows(text: string) {
   return {
     headers,
     rows: previewRows,
+    parserVersion: WHATNOT_PARSER_VERSION,
   }
 }

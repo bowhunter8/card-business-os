@@ -11,12 +11,14 @@ export default function WhatnotImportPage() {
   const [success, setSuccess] = useState('')
   const [lastImportedCount, setLastImportedCount] = useState<number | null>(null)
   const [lastDuplicateCount, setLastDuplicateCount] = useState<number | null>(null)
+  const [skippedExamples, setSkippedExamples] = useState<string[]>([])
 
   function onFileChange(file: File | null) {
     setError('')
     setSuccess('')
     setLastImportedCount(null)
     setLastDuplicateCount(null)
+    setSkippedExamples([])
 
     if (!file) {
       setFileName('')
@@ -29,6 +31,8 @@ export default function WhatnotImportPage() {
   }
 
   async function runImport() {
+    if (importing) return
+
     if (!selectedFile) {
       setError('Upload an order CSV file first.')
       return
@@ -38,6 +42,7 @@ export default function WhatnotImportPage() {
       setImporting(true)
       setError('')
       setSuccess('')
+      setSkippedExamples([])
 
       const csvText = await selectedFile.text()
 
@@ -61,6 +66,7 @@ export default function WhatnotImportPage() {
 
       setLastImportedCount(Number(json.imported ?? 0))
       setLastDuplicateCount(Number(json.skippedDuplicates ?? 0))
+      setSkippedExamples(Array.isArray(json.skippedExamples) ? json.skippedExamples : [])
       setSuccess(
         `Imported ${json.imported} order stub(s). Skipped ${json.skippedDuplicates} duplicate(s).`
       )
@@ -70,6 +76,8 @@ export default function WhatnotImportPage() {
       setImporting(false)
     }
   }
+
+  const importButtonDisabled = importing || !selectedFile
 
   return (
     <div className="app-page max-w-5xl">
@@ -119,8 +127,10 @@ export default function WhatnotImportPage() {
             <button
               type="button"
               onClick={runImport}
-              disabled={importing || !selectedFile}
-              className="app-button-primary disabled:opacity-50"
+              aria-disabled={importButtonDisabled}
+              className={`app-button-primary ${
+                importButtonDisabled ? 'cursor-not-allowed opacity-50' : ''
+              }`}
             >
               {importing ? 'Importing...' : 'Import Orders'}
             </button>
@@ -181,6 +191,19 @@ export default function WhatnotImportPage() {
                   </span>
                 </div>
               </div>
+
+              {skippedExamples.length ? (
+                <div className="mt-3 rounded-xl border border-amber-900 bg-amber-950/20 p-3">
+                  <div className="text-sm font-medium text-amber-200">
+                    Sample skipped duplicates
+                  </div>
+                  <div className="mt-2 max-h-40 space-y-1 overflow-auto text-xs text-zinc-300">
+                    {skippedExamples.map((item) => (
+                      <div key={item}>{item}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
