@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/utilities/backup/process-change-flags",
-      "schedule": "0 * * * *"
+      "schedule": "/30 * * * *"
     }
   ]
 }
