@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { buildUserBackup } from '@/app/api/utilities/backup/export/route'
+import { buildUserBackup } from '@/lib/restore-points/buildUserBackup'
 
 function safeText(value: FormDataEntryValue | null) {
   return String(value ?? '').trim()

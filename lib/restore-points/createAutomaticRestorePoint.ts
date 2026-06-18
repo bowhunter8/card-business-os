@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { buildUserBackup } from '@/app/api/utilities/backup/export/route'
+import { buildUserBackup } from '@/lib/restore-points/buildUserBackup'
 
 export type RestorePointType =
   | 'manual'

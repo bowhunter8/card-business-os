@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { buildUserBackup } from '../export/route'
+import { buildUserBackup } from '@/lib/restore-points/buildUserBackup'
 
 type BackupType =
   | 'manual'

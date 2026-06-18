@@ -17,7 +17,7 @@ type ImportResult = {
   duplicates: number
   warnings?: number
   skippedRows?: SkippedRow[]
-  warningRows?: WarningRow[]
+  
 }
 
 const MAX_FILE_SIZE_MB = 10
