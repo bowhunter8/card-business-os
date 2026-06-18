@@ -1089,6 +1089,7 @@ export default async function InventoryReportPage({
         <ReportTable
           rows={inventoryItems}
           emptyMessage="No inventory items matched those filters."
+          rowHref={(item) => `/app/inventory/${item.id}`}
           columns={[
             {
               key: 'item',

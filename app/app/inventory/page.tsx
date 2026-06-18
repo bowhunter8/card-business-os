@@ -3,6 +3,7 @@ import Script from 'next/script'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { buildUserBackup } from '@/app/api/utilities/backup/export/route'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import DeleteInventoryItemButton from './DeleteInventoryItemButton'
 import CancelDetailsButton from '../search/CancelDetailsButton'
@@ -66,7 +67,7 @@ type SortKey =
   | 'storage_location'
 
 type SortDir = 'asc' | 'desc'
-type BulkStatus = 'available' | 'listed' | 'personal' | 'junk' | 'disposed'
+type BulkStatus = 'available' | 'listed' | 'personal' | 'junk' | 'giveaway'
 
 const DEFAULT_LIMIT = 5
 const LIMIT_OPTIONS = [5, 10, 50, 100] as const
@@ -83,7 +84,7 @@ const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
   listed: 'Listed',
   junk: 'Junk',
-  disposed: 'Disposed',
+  disposed: 'Written Off',
   sold: 'Sold',
   personal: 'Personal',
   giveaway: 'Giveaway',
@@ -194,7 +195,7 @@ function renderStatusPill(status: string | null) {
   }
 
   if (status === 'disposed') {
-    return <span className="app-badge app-badge-danger">Disposed</span>
+    return <span className="app-badge app-badge-danger">Written Off</span>
   }
 
   if (status === 'listed') {
@@ -243,11 +244,11 @@ function inventoryTaxSafetyNote(status: InventoryStatusFilter | null) {
   }
 
   if (status === 'junk') {
-    return 'Junk keeps the item visible for recordkeeping. Do not deduct it as a loss, donation, or disposal until a final documented disposition exists. Use Disposed only when the item actually leaves the business.'
+    return 'Junk keeps the item visible for recordkeeping. Do not deduct it as a loss, donation, or write-off until a final documented disposition exists. Use Write Off Selected when the item leaves the business with no sale proceeds.'
   }
 
   if (status === 'disposed') {
-    return 'Disposed means the item physically left business inventory with no sale proceeds. Keep notes and date records so the disposal is documented and the same item is not also deducted somewhere else.'
+    return 'Written Off means the item physically left business inventory with no sale proceeds and was locked for tax review. Keep notes so the same item is not also deducted somewhere else.'
   }
 
   return null
@@ -259,8 +260,19 @@ function bulkStatusLabel(status: BulkStatus) {
   if (status === 'listed') return 'Listed'
   if (status === 'personal') return 'Personal'
   if (status === 'junk') return 'Junk'
-  if (status === 'disposed') return 'Disposed'
+  if (status === 'giveaway') return 'Giveaway'
+  if (status === 'disposed') return 'Written Off'
   return status
+}
+
+function labelFromBulkGiveawayValue(value: string) {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function buildBulkGiveawayExpenseCategory(giveawayTypeLabel: string) {
+  return `Advertising / Marketing - Giveaway - ${giveawayTypeLabel || 'Giveaway'}`
 }
 
 function buildInventoryHref({
@@ -377,6 +389,80 @@ function readInventoryListFormState(formData: FormData) {
   }
 }
 
+async function findFinalizedWriteOffItemIds({
+  supabase,
+  userId,
+  itemIds,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  itemIds: string[]
+}) {
+  if (itemIds.length === 0) {
+    return {
+      error: null,
+      lockedItemIds: [] as string[],
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('inventory_transactions')
+    .select('inventory_item_id')
+    .eq('user_id', userId)
+    .eq('transaction_type', 'disposal_writeoff_review')
+    .eq('finalized_for_tax', true)
+    .in('inventory_item_id', itemIds)
+
+  if (error) {
+    return {
+      error: error.message,
+      lockedItemIds: [] as string[],
+    }
+  }
+
+  return {
+    error: null,
+    lockedItemIds: Array.from(
+      new Set(
+        (data ?? [])
+          .map((row) => String(row.inventory_item_id ?? '').trim())
+          .filter(Boolean)
+      )
+    ),
+  }
+}
+
+async function createAutomaticInventoryRestorePoint({
+  supabase,
+  userId,
+  backupName,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  backupName: string
+}) {
+  try {
+    const backup = await buildUserBackup(userId)
+
+    const { error } = await supabase.from('backup_restore_points').insert({
+      user_id: userId,
+      backup_name: backupName,
+      backup_type: 'automatic',
+      backup_json: backup,
+    })
+
+    if (error) {
+      console.error('Automatic inventory restore point failed:', error.message)
+    }
+  } catch (error) {
+    console.error(
+      'Automatic inventory restore point failed:',
+      error instanceof Error ? error.message : error
+    )
+  }
+}
+
+
 async function bulkDeleteInventoryItemsAction(formData: FormData) {
   'use server'
 
@@ -449,6 +535,43 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
     )
   }
 
+  const finalizedWriteOffCheck = await findFinalizedWriteOffItemIds({
+    supabase,
+    userId: user.id,
+    itemIds,
+  })
+
+  if (finalizedWriteOffCheck.error) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue: finalizedWriteOffCheck.error,
+        scrollY,
+      })
+    )
+  }
+
+  if (finalizedWriteOffCheck.lockedItemIds.length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'delete_error',
+        statusValue:
+          'One or more selected items are written off and locked for tax review. Undo the write-off before deleting.',
+        scrollY,
+      })
+    )
+  }
+
   const deletedAt = new Date().toISOString()
 
   const { data: itemsBeforeDelete, error: itemsBeforeDeleteError } = await supabase
@@ -489,6 +612,13 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
       })
     )
   }
+
+
+  await createAutomaticInventoryRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Inventory Delete ${new Date().toLocaleString()}`,
+  })
 
   const { error } = await supabase
     .from('inventory_items')
@@ -551,7 +681,7 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
   const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
   const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
 
-  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk', 'disposed']
+  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
 
   if (!allowedStatuses.includes(requestedStatus)) {
     redirect(
@@ -593,6 +723,43 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
     redirect('/login')
   }
 
+  const finalizedWriteOffCheck = await findFinalizedWriteOffItemIds({
+    supabase,
+    userId: user.id,
+    itemIds,
+  })
+
+  if (finalizedWriteOffCheck.error) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: finalizedWriteOffCheck.error,
+        scrollY,
+      })
+    )
+  }
+
+  if (finalizedWriteOffCheck.lockedItemIds.length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue:
+          'One or more selected items are written off and locked for tax review. Undo the write-off before changing status.',
+        scrollY,
+      })
+    )
+  }
+
   const { data: existingItems } = await supabase
     .from('inventory_items')
     .select('id, title, status, quantity, available_quantity, cost_basis_total')
@@ -600,9 +767,28 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
     .is('deleted_at', null)
     .in('id', itemIds)
 
+
+  await createAutomaticInventoryRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Bulk Inventory Status Update ${new Date().toLocaleString()}`,
+  })
+
+  const inventoryUpdatePayload =
+    requestedStatus === 'giveaway'
+      ? {
+          status: requestedStatus,
+          available_quantity: 0,
+          updated_at: new Date().toISOString(),
+        }
+      : {
+          status: requestedStatus,
+          updated_at: new Date().toISOString(),
+        }
+
   const { error } = await supabase
     .from('inventory_items')
-    .update({ status: requestedStatus })
+    .update(inventoryUpdatePayload)
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .in('id', itemIds)
@@ -639,8 +825,6 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
             ? `Bulk personal withdrawal: ${itemTitle} changed from ${previousStatus} to Personal. Cost basis preserved as inventory withdrawn for personal collection; do not also deduct this item as an expense.`
             : requestedStatus === 'junk'
               ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review; no automatic deduction was taken.`
-              : requestedStatus === 'disposed'
-                ? `Bulk disposal: ${itemTitle} changed from ${previousStatus} to Disposed. Item was removed from business inventory with no sale proceeds. Cost basis preserved in the transaction record for tax review; do not also deduct this item as another expense.`
                 : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
         created_at: new Date().toISOString(),
       }
@@ -669,6 +853,339 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
   )
 }
 
+async function bulkFinalizeGiveawayAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const giveawayType = String(formData.get('giveaway_type') ?? '').trim()
+  const businessPurpose = String(formData.get('business_purpose') ?? '').trim()
+  const recipientType = String(formData.get('recipient_type') ?? '').trim()
+  const campaignEvent = String(formData.get('campaign_event') ?? '').trim()
+  const relatedOrderSale = String(formData.get('related_order_sale') ?? '').trim()
+  const giveawayNotes = String(formData.get('giveaway_notes') ?? '').trim()
+  const eventDate = String(formData.get('event_date') ?? '').trim() || new Date().toISOString().slice(0, 10)
+  const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
+
+  if (itemIds.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Select at least one inventory item to mark as a giveaway.',
+        scrollY,
+      })
+    )
+  }
+
+  if (!giveawayType || !businessPurpose) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Giveaway Type and Business Purpose are required for bulk giveaways.',
+        scrollY,
+      })
+    )
+  }
+
+  if ((giveawayType === 'other' || businessPurpose === 'other') && !giveawayNotes) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'Notes are required when Giveaway Type or Business Purpose is Other.',
+        scrollY,
+      })
+    )
+  }
+
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data: activeSalesForSelectedItems, error: activeSalesCheckError } =
+    await supabase
+      .from('sales')
+      .select('id, inventory_item_id')
+      .eq('user_id', user.id)
+      .is('reversed_at', null)
+      .in('inventory_item_id', itemIds)
+
+  if (activeSalesCheckError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: activeSalesCheckError.message,
+        scrollY,
+      })
+    )
+  }
+
+  if ((activeSalesForSelectedItems ?? []).length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue:
+          'One or more selected items have active sales. Reverse the sale first so COGS and inventory stay audit-safe.',
+        scrollY,
+      })
+    )
+  }
+
+  const finalizedWriteOffCheck = await findFinalizedWriteOffItemIds({
+    supabase,
+    userId: user.id,
+    itemIds,
+  })
+
+  if (finalizedWriteOffCheck.error) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: finalizedWriteOffCheck.error,
+        scrollY,
+      })
+    )
+  }
+
+  if (finalizedWriteOffCheck.lockedItemIds.length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue:
+          'One or more selected items are written off and locked for tax review. Undo the write-off before marking them as giveaways.',
+        scrollY,
+      })
+    )
+  }
+
+  const { data: existingItems, error: existingItemsError } = await supabase
+    .from('inventory_items')
+    .select('id, title, status, quantity, available_quantity, cost_basis_unit, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
+  if (existingItemsError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: existingItemsError.message,
+        scrollY,
+      })
+    )
+  }
+
+  const items = existingItems ?? []
+
+  if (items.length === 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'No matching active inventory items were found. Refresh the page and select the rows again.',
+        scrollY,
+      })
+    )
+  }
+
+  await createAutomaticInventoryRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Bulk Giveaway ${new Date().toLocaleString()}`,
+  })
+
+  const giveawayAt = new Date().toISOString()
+
+  const { error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      status: 'giveaway',
+      available_quantity: 0,
+      updated_at: giveawayAt,
+    })
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', items.map((item) => item.id))
+
+  if (updateError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: updateError.message,
+        scrollY,
+      })
+    )
+  }
+
+  const giveawayTypeLabel = labelFromBulkGiveawayValue(giveawayType)
+  const businessPurposeLabel = labelFromBulkGiveawayValue(businessPurpose)
+  const recipientTypeLabel = recipientType ? labelFromBulkGiveawayValue(recipientType) : ''
+  const giveawayExpenseCategory = buildBulkGiveawayExpenseCategory(giveawayTypeLabel)
+
+  const bulkGiveawayRows = items.map((item) => {
+    const itemTitle = item.title || 'Inventory item'
+    const quantityRemoved = Number(item.available_quantity ?? item.quantity ?? 0)
+    const unitCost = Number(item.cost_basis_unit ?? 0)
+    const totalCost = Number(item.cost_basis_total ?? 0)
+    const amount = quantityRemoved > 0 && unitCost > 0 ? quantityRemoved * unitCost : totalCost
+    const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
+    const detailParts = [
+      `Giveaway Type: ${giveawayTypeLabel}`,
+      `Business Purpose: ${businessPurposeLabel}`,
+      recipientTypeLabel ? `Recipient Type: ${recipientTypeLabel}` : '',
+      campaignEvent ? `Campaign / Event: ${campaignEvent}` : '',
+      relatedOrderSale ? `Related Order / Sale #: ${relatedOrderSale}` : '',
+      giveawayNotes ? `Notes: ${giveawayNotes}` : '',
+      'Do not also deduct this item as COGS, disposal, donation, or another separate expense.',
+    ].filter(Boolean)
+    const sharedAuditNote = `Bulk giveaway recorded for advertising / marketing support. Item: ${itemTitle}. Quantity given away: ${quantityRemoved}. Cost basis recorded: ${money(amount)}. Previous status: ${previousStatus}. ${detailParts.join(' ')}`
+
+    return {
+      item,
+      amount,
+      quantityRemoved,
+      sharedAuditNote,
+    }
+  })
+
+  const expenseRows = bulkGiveawayRows.map((row) => ({
+    user_id: user.id,
+    expense_date: eventDate,
+    category: giveawayExpenseCategory,
+    amount: row.amount,
+    notes: row.sharedAuditNote,
+  }))
+
+  if (expenseRows.length > 0) {
+    const { error: expenseError } = await supabase.from('expenses').insert(expenseRows)
+
+    if (expenseError) {
+      redirect(
+        buildInventoryStatusHref({
+          q,
+          sort: safeSort,
+          dir: safeDir,
+          page: safePage,
+          limit: safeLimit,
+          statusKey: 'status_error',
+          statusValue: expenseError.message,
+          scrollY,
+        })
+      )
+    }
+  }
+
+  const inventoryTransactionRows = bulkGiveawayRows.map((row) => ({
+    user_id: user.id,
+    inventory_item_id: row.item.id,
+    transaction_type: 'adjustment',
+    from_status: row.item.status || null,
+    to_status: 'giveaway',
+    quantity_change: -Math.abs(row.quantityRemoved),
+    amount: row.amount,
+    event_date: eventDate,
+    notes: row.sharedAuditNote,
+    created_at: giveawayAt,
+  }))
+
+  if (inventoryTransactionRows.length > 0) {
+    const { error: transactionError } = await supabase
+      .from('inventory_transactions')
+      .insert(inventoryTransactionRows)
+
+    if (transactionError) {
+      redirect(
+        buildInventoryStatusHref({
+          q,
+          sort: safeSort,
+          dir: safeDir,
+          page: safePage,
+          limit: safeLimit,
+          statusKey: 'status_error',
+          statusValue: transactionError.message,
+          scrollY,
+        })
+      )
+    }
+  }
+
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/expenses')
+  revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
+  revalidatePath('/app/reports/profit-loss')
+  revalidatePath('/app/reports/cpa-packet')
+
+  redirect(
+    buildInventoryStatusHref({
+      q,
+      sort: safeSort,
+      dir: safeDir,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'status_updated',
+      statusValue: `${items.length} item(s) marked Giveaway with tax details`,
+      scrollY,
+    })
+  )
+}
+
+
 async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
   'use server'
 
@@ -686,7 +1203,7 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
         page: safePage,
         limit: safeLimit,
         statusKey: 'status_error',
-        statusValue: 'Select at least one disposed inventory item to finalize.',
+        statusValue: 'Select at least one inventory item to write off.',
         scrollY,
       })
     )
@@ -701,7 +1218,7 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
         page: safePage,
         limit: safeLimit,
         statusKey: 'status_error',
-        statusValue: 'Choose a disposal reason before finalizing disposal write-off review.',
+        statusValue: 'Choose a write-off reason before writing off selected items.',
         scrollY,
       })
     )
@@ -740,49 +1257,8 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
   }
 
   const items = existingItems ?? []
-  const nonDisposedCount = items.filter((item) => item.status !== 'disposed').length
 
-  if (items.length > 0) {
-    const { data: alreadyFinalizedRows, error: alreadyFinalizedError } = await supabase
-      .from('inventory_transactions')
-      .select('inventory_item_id')
-      .eq('user_id', user.id)
-      .eq('transaction_type', 'disposal_writeoff_review')
-      .eq('finalized_for_tax', true)
-      .in('inventory_item_id', itemIds)
-
-    if (alreadyFinalizedError) {
-      redirect(
-        buildInventoryStatusHref({
-          q,
-          sort: safeSort,
-          dir: safeDir,
-          page: safePage,
-          limit: safeLimit,
-          statusKey: 'status_error',
-          statusValue: alreadyFinalizedError.message,
-          scrollY,
-        })
-      )
-    }
-
-    if ((alreadyFinalizedRows ?? []).length > 0) {
-      redirect(
-        buildInventoryStatusHref({
-          q,
-          sort: safeSort,
-          dir: safeDir,
-          page: safePage,
-          limit: safeLimit,
-          statusKey: 'status_error',
-          statusValue: 'One or more selected disposed items are already finalized for write-off review.',
-          scrollY,
-        })
-      )
-    }
-  }
-
-  if (items.length === 0 || nonDisposedCount > 0) {
+  if (items.length === 0) {
     redirect(
       buildInventoryStatusHref({
         q,
@@ -791,7 +1267,84 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
         page: safePage,
         limit: safeLimit,
         statusKey: 'status_error',
-        statusValue: 'Only items already marked Disposed can be finalized for disposal write-off review.',
+        statusValue: 'No matching active inventory items were found to write off. Refresh the page and select the rows again.',
+        scrollY,
+      })
+    )
+  }
+
+  const { data: activeSalesForSelectedItems, error: activeSalesCheckError } =
+    await supabase
+      .from('sales')
+      .select('id, inventory_item_id')
+      .eq('user_id', user.id)
+      .is('reversed_at', null)
+      .in('inventory_item_id', itemIds)
+
+  if (activeSalesCheckError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: activeSalesCheckError.message,
+        scrollY,
+      })
+    )
+  }
+
+  if ((activeSalesForSelectedItems ?? []).length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue:
+          'One or more selected items have active sales. Reverse the sale first so COGS and inventory stay audit-safe.',
+        scrollY,
+      })
+    )
+  }
+
+  const { data: alreadyFinalizedRows, error: alreadyFinalizedError } = await supabase
+    .from('inventory_transactions')
+    .select('inventory_item_id')
+    .eq('user_id', user.id)
+    .eq('transaction_type', 'disposal_writeoff_review')
+    .eq('finalized_for_tax', true)
+    .in('inventory_item_id', itemIds)
+
+  if (alreadyFinalizedError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: alreadyFinalizedError.message,
+        scrollY,
+      })
+    )
+  }
+
+  if ((alreadyFinalizedRows ?? []).length > 0) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: 'One or more selected items are already written off and locked for tax review.',
         scrollY,
       })
     )
@@ -799,22 +1352,56 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
 
   const finalizedAt = new Date().toISOString()
 
+  const writeOffItemIds = items.map((item) => item.id)
+
+
+  await createAutomaticInventoryRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Inventory Write Off ${new Date().toLocaleString()}`,
+  })
+
+  const { error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      status: 'disposed',
+      available_quantity: 0,
+    })
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', writeOffItemIds)
+
+  if (updateError) {
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: updateError.message,
+        scrollY,
+      })
+    )
+  }
+
   const inventoryTransactionRows = items.map((item) => {
     const itemTitle = item.title || 'Inventory item'
-    const quantityForNotes = Number(item.available_quantity ?? item.quantity ?? 0)
+    const quantityRemoved = Number(item.available_quantity ?? item.quantity ?? 0)
     const costBasis = Number(item.cost_basis_total ?? 0)
-
     const trimmedNotes = disposalNotes || 'No extra notes entered.'
+    const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
 
     return {
       user_id: user.id,
       inventory_item_id: item.id,
       transaction_type: 'disposal_writeoff_review',
-      quantity_change: 0,
+      quantity_change: -Math.abs(quantityRemoved),
       disposal_reason: disposalReason,
       disposal_notes: disposalNotes || null,
       finalized_for_tax: true,
-      notes: `Finalized disposal write-off review: ${itemTitle} was already marked Disposed and is now flagged for year-end/accountant review. Disposal reason: ${disposalReason}. User notes: ${trimmedNotes}. Quantity at finalization: ${quantityForNotes}. Recorded cost basis at finalization: ${money(costBasis)}. Do not also deduct this item as an expense, giveaway, donation, or separate loss without accountant review.`,
+      notes: `Write-off finalized: ${itemTitle} was removed from active business inventory and locked for year-end/accountant review. Previous status: ${previousStatus}. Disposal reason: ${disposalReason}. User notes: ${trimmedNotes}. Quantity removed: ${quantityRemoved}. Recorded cost basis at write-off: ${money(costBasis)}. Do not also deduct this item as an expense, giveaway, donation, or separate loss without accountant review.`,
       created_at: finalizedAt,
     }
   })
@@ -843,6 +1430,7 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
   revalidatePath('/app/inventory')
   revalidatePath('/app/search')
   revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
 
   redirect(
     buildInventoryStatusHref({
@@ -852,7 +1440,7 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
       page: safePage,
       limit: safeLimit,
       statusKey: 'status_updated',
-      statusValue: `${items.length} disposed item(s) finalized for write-off review`,
+      statusValue: `${items.length} item(s) written off and removed from inventory`,
       scrollY,
     })
   )
@@ -1099,24 +1687,127 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
   )
 }
 
+function BulkGiveawayConfirmControl({ formId }: { formId: string }) {
+  return (
+    <details className="group">
+      <summary
+        data-bulk-action-toggle="true"
+        data-bulk-giveaway-toggle="true"
+        className="app-button cursor-pointer list-none whitespace-nowrap border-purple-900/60 bg-purple-950/30 text-purple-100 hover:bg-purple-900/50"
+      >
+        Mark as Giveaway
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-purple-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-[34rem]">
+        <div className="text-sm font-semibold text-purple-100">
+          Mark selected items as giveaways?
+        </div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          If one item is selected, HITS opens the full giveaway page. For multiple items, use these shared tax/audit details.
+        </div>
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Giveaway Type required</span>
+            <select form={formId} name="giveaway_type" required defaultValue="buyer_appreciation" className="app-select w-full">
+              <option value="buyer_appreciation">Buyer Appreciation</option>
+              <option value="livestream_giveaway">Livestream Giveaway</option>
+              <option value="social_media_promotion">Social Media Promotion</option>
+              <option value="customer_retention">Customer Retention</option>
+              <option value="contest_prize">Contest Prize</option>
+              <option value="show_or_event">Show / Event Giveaway</option>
+              <option value="community_outreach">Community Outreach</option>
+              <option value="promotional_item">Promotional Item</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Business Purpose required</span>
+            <select form={formId} name="business_purpose" required defaultValue="customer_retention" className="app-select w-full">
+              <option value="customer_retention">Customer Retention</option>
+              <option value="buyer_appreciation">Buyer Appreciation</option>
+              <option value="new_customer_acquisition">New Customer Acquisition</option>
+              <option value="stream_promotion">Stream Promotion</option>
+              <option value="whatnot_promotion">Whatnot Promotion</option>
+              <option value="card_show_promotion">Card Show Promotion</option>
+              <option value="social_media_promotion">Social Media Promotion</option>
+              <option value="brand_awareness">Brand Awareness</option>
+              <option value="community_outreach">Community Outreach</option>
+              <option value="contest_prize_support">Contest Prize Support</option>
+              <option value="other">Other (requires notes)</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Recipient Type</span>
+            <select form={formId} name="recipient_type" defaultValue="viewer_or_customer" className="app-select w-full">
+              <option value="viewer_or_customer">Viewer / Customer</option>
+              <option value="buyer">Buyer</option>
+              <option value="repeat_customer">Repeat Customer</option>
+              <option value="prospective_customer">Prospective Customer</option>
+              <option value="event_attendee">Event Attendee</option>
+              <option value="community_group">Community Group</option>
+              <option value="not_recorded">Not Recorded</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Giveaway Date</span>
+            <input form={formId} name="event_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="app-input w-full" />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Campaign / Event</span>
+            <input form={formId} name="campaign_event" className="app-input w-full" placeholder="Example: June Whatnot stream" />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Related Order / Sale #</span>
+            <input form={formId} name="related_order_sale" className="app-input w-full" placeholder="Optional order, sale, or stream reference" />
+          </label>
+
+          <label className="block md:col-span-2">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Notes</span>
+            <textarea form={formId} name="giveaway_notes" className="app-input min-h-20 w-full" placeholder="Required when Giveaway Type or Business Purpose is Other. Optional for all other purposes." />
+          </label>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-100">
+          This records an Advertising / Marketing giveaway expense for each selected item and adds an inventory audit trail. Do not also deduct these items as COGS, disposal, donation, or separate expenses.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="submit" form={formId} formAction={bulkFinalizeGiveawayAction} data-bulk-submit="true" data-bulk-status="giveaway" data-bulk-label="Mark as Giveaway" className="app-button-primary whitespace-nowrap">
+            Yes, Mark as Giveaway
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
 function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
   return (
     <details className="group">
       <summary
         className="app-button cursor-pointer list-none whitespace-nowrap border-amber-800/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
       >
-        Finalize Disposal Write-Off
+        Write Off Selected
       </summary>
 
       <div className="mt-2 rounded-xl border border-amber-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-80">
-        <div className="text-sm font-semibold text-amber-200">Finalize disposal write-off review?</div>
+        <div className="text-sm font-semibold text-amber-200">Write off selected items?</div>
         <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-          Use this only after items are already marked Disposed and physically removed from business inventory. This creates an audit note for year-end/accountant review without double-counting the item as a separate expense.
+          Removes selected items from inventory and records them as a tax write-off with an audit note for year-end review.
         </div>
 
         <div className="mt-3 grid gap-3">
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-300">Disposal reason required</span>
+            <span className="mb-1 block text-xs font-medium text-zinc-300">Write-off reason required</span>
             <select
               form={formId}
               name="disposal_reason"
@@ -1156,7 +1847,7 @@ function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
             data-bulk-finalize-submit="true"
             className="app-button whitespace-nowrap border-amber-800/80 bg-amber-950/50 text-amber-100 hover:bg-amber-900/60"
           >
-            Yes, Finalize Review
+            Yes, Write Off Items
           </button>
 
           <CancelDetailsButton />
@@ -1193,7 +1884,7 @@ function BulkActionsPanel({
           <div>
             <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
             <div className="mt-0.5 text-xs text-zinc-500">
-              Check inventory rows, then update their status or delete the selected rows. Finalized disposal rows are locked for tax review.
+              Check inventory rows, then update status, write off selected items, or delete correction rows. Written-off rows are locked for tax review.
             </div>
           </div>
 
@@ -1238,7 +1929,13 @@ function BulkActionsPanel({
               href={getFilterHref('disposed', sortKey, sortDir, limit)}
               className={`app-chip ${q === 'disposed' ? 'app-chip-active' : 'app-chip-idle'}`}
             >
-              Disposed
+              Written Off
+            </Link>
+            <Link
+              href={getFilterHref('giveaway', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'giveaway' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Giveaway
             </Link>
           </div>
         </div>
@@ -1304,12 +2001,7 @@ function BulkActionsPanel({
               label="Mark Junk"
               helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
             />
-            <BulkStatusConfirmControl
-              formId={statusFormId}
-              status="disposed"
-              label="Dispose Selected"
-              helpText="This will mark the selected inventory items as Disposed because they physically left the business with no sale proceeds. Cost basis is preserved in the transaction log for tax review."
-            />
+            <BulkGiveawayConfirmControl formId={statusFormId} />
             <BulkFinalizeDisposalConfirmControl formId={finalizeFormId} />
             <BulkDeleteConfirmControl formId={formId} />
           </div>
@@ -1528,13 +2220,15 @@ function BulkSelectionScript({
         if (status === 'listed') return 'Listed';
         if (status === 'personal') return 'Personal';
         if (status === 'junk') return 'Junk';
-        if (status === 'disposed') return 'Disposed';
+        if (status === 'giveaway') return 'Giveaway';
+        if (status === 'disposed') return 'Written Off';
         return 'Updated';
       }
 
       function statusPillClasses(status) {
         if (status === 'personal') return 'app-badge app-badge-info';
         if (status === 'junk') return 'app-badge app-badge-neutral';
+        if (status === 'giveaway') return 'app-badge app-badge-warning';
         if (status === 'disposed') return 'app-badge app-badge-danger';
         if (status === 'listed') return 'app-badge app-badge-warning';
         return 'app-badge app-badge-success';
@@ -1594,7 +2288,7 @@ function BulkSelectionScript({
         const status = button.getAttribute('data-bulk-status') || '';
         const isDelete = button.getAttribute('data-bulk-delete') === 'true';
         const label = button.getAttribute('data-bulk-label') || (isDelete ? 'Delete Selected' : 'Update Selected');
-        const isFinalize = label === 'Finalize Disposal Write-Off';
+        const isFinalize = label === 'Write Off Selected';
 
         button.setAttribute('data-original-label', button.textContent || label);
         button.textContent = isDelete ? 'Deleting…' : isFinalize ? 'Finalizing…' : 'Updating…';
@@ -1602,8 +2296,10 @@ function BulkSelectionScript({
           isDelete
             ? 'Deleting ' + count + ' selected item(s)…'
             : isFinalize
-              ? 'Finalizing disposal review for ' + count + ' selected item(s)…'
-              : 'Updating ' + count + ' selected item(s)…'
+              ? 'Writing off ' + count + ' selected item(s)…'
+              : status === 'giveaway'
+                ? 'Marking ' + count + ' selected item(s) as giveaways…'
+                : 'Updating ' + count + ' selected item(s)…'
         );
         closeOpenConfirmations();
         applyInstantRowState({ ids, status, isDelete });
@@ -1643,6 +2339,16 @@ function BulkSelectionScript({
         if (toggle && (selectedCount() === 0 || isBulkSubmitting)) {
           event.preventDefault();
           updateBulkState();
+          return;
+        }
+
+        if (toggle && toggle.getAttribute('data-bulk-giveaway-toggle') === 'true' && selectedCount() === 1) {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = selectedIds()[0];
+          if (id) {
+            window.location.href = '/app/inventory/' + encodeURIComponent(id) + '/giveaway';
+          }
           return;
         }
 
@@ -1979,7 +2685,7 @@ export default async function InventoryPage({
         : qNormalized === 'junk'
           ? 'Showing junk items you are not planning to sell.'
         : qNormalized === 'disposed'
-          ? 'Showing disposed inventory items that physically left the business.'
+          ? 'Showing written-off inventory items locked for tax review.'
           : qNormalized === 'sold'
             ? 'Showing sold inventory items.'
             : qNormalized === 'personal'
@@ -1999,7 +2705,11 @@ export default async function InventoryPage({
     if (!STATUS_FILTERS.includes(status)) continue
 
     const quantity =
-      status === 'sold'
+      status === 'sold' ||
+      status === 'giveaway' ||
+      status === 'disposed' ||
+      status === 'personal' ||
+      status === 'junk'
         ? Number(item.quantity ?? 0)
         : Number(item.available_quantity ?? item.quantity ?? 0)
 
@@ -2019,9 +2729,15 @@ export default async function InventoryPage({
           <p className="app-subtitle">{pageDescription}</p>
         </div>
 
-        <Link href="/app/inventory/new" className="app-button-primary">
-          Add Inventory
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/app/inventory/new" className="app-button-primary">
+            Add Inventory
+          </Link>
+
+          <Link href="/app/inventory/import" className="app-button">
+            Add Inventory in Bulk
+          </Link>
+        </div>
       </div>
 
       <div id="inventory-status" className="scroll-mt-28 space-y-3">
@@ -2218,7 +2934,13 @@ export default async function InventoryPage({
                   const itemLine = getCardDisplay(item)
                   const quantity = Number(item.quantity ?? 0)
                   const available = Number(item.available_quantity ?? 0)
-                  const hasAvailable = available > 0
+                  const hasAvailable =
+                    available > 0 &&
+                    item.status !== 'sold' &&
+                    item.status !== 'disposed' &&
+                    item.status !== 'personal' &&
+                    item.status !== 'junk' &&
+                    item.status !== 'giveaway'
                   const isLotLike = quantity > 1 || available > 1
                   const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
                   const finalizedDisposal = finalizedDisposalByItemId.get(item.id) ?? null
@@ -2321,7 +3043,14 @@ export default async function InventoryPage({
                             </form>
                           ) : null}
 
-                          {!isFinalizedDisposal ? (
+                          {item.status === 'giveaway' ? (
+                            <span
+                              className="rounded-full border border-purple-900/60 bg-purple-950/30 px-2.5 py-1 text-xs font-medium text-purple-200"
+                              title="Giveaway records are locked to preserve tax support."
+                            >
+                              Locked
+                            </span>
+                          ) : !isFinalizedDisposal ? (
                             <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
                           ) : null}
                         </div>

@@ -113,7 +113,6 @@ function getBreakStatus(projectedROI: number, reversedAt?: string | null) {
 function buildDisplay(card: BreakCardRow) {
   const parts = [
     card.year,
-    card.set_name,
     card.player_name,
     card.card_number ? `#${card.card_number}` : null,
     card.notes,

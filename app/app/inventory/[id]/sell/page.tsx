@@ -174,7 +174,6 @@ function buildItemLabel(item: {
     item.title || item.player_name || 'Untitled item',
     item.year,
     item.brand,
-    item.set_name,
     item.card_number ? `#${item.card_number}` : null,
     item.parallel_name,
     item.team,
@@ -252,6 +251,15 @@ export default async function SellInventoryPage({
   const shippingProfileDefaultsById = Object.fromEntries(
     shippingProfiles.map((profile) => [
       profile.id,
+      {
+        shippingCharged: Number(profile.shipping_charged_default ?? 0).toFixed(2),
+        suppliesCost: Number(profile.supplies_cost_default ?? 0).toFixed(2),
+      },
+    ])
+  )
+  const shippingProfileDefaultsByName = Object.fromEntries(
+    shippingProfiles.map((profile) => [
+      profile.name,
       {
         shippingCharged: Number(profile.shipping_charged_default ?? 0).toFixed(2),
         suppliesCost: Number(profile.supplies_cost_default ?? 0).toFixed(2),
@@ -446,7 +454,8 @@ export default async function SellInventoryPage({
                     name="sale_item_name"
                     type="text"
                     required
-                    placeholder="Example: Ken Griffey Jr."
+                    defaultValue={item.player_name || item.title || ''}
+                    placeholder="Example: Ken Griffey Jr. or Signed Baseball"
                     className="app-input"
                     disabled={availableQty <= 0}
                   />
@@ -459,17 +468,19 @@ export default async function SellInventoryPage({
                     type="number"
                     min={1800}
                     max={2100}
+                    defaultValue={item.year ?? ''}
                     placeholder="2025"
                     className="app-input"
                     disabled={availableQty <= 0}
                   />
                 </Field>
 
-                <Field label="Set / Product">
+                <Field label="Brand / Product">
                   <input
                     id="sale_item_set"
                     name="sale_item_set"
                     type="text"
+                    defaultValue={item.brand || item.set_name || ''}
                     placeholder="Example: Bowman Chrome"
                     className="app-input"
                     disabled={availableQty <= 0}
@@ -890,6 +901,7 @@ export default async function SellInventoryPage({
             const maxAvailable = ${JSON.stringify(availableQty)};
             const startingUnitCost = ${JSON.stringify(unitCost)};
             const shippingProfileDefaultsById = ${JSON.stringify(shippingProfileDefaultsById)};
+            const shippingProfileDefaultsByName = ${JSON.stringify(shippingProfileDefaultsByName)};
             const pulseSubcategoryOptionsByCategory = ${JSON.stringify(PULSE_SUBCATEGORY_OPTIONS_BY_CATEGORY)};
 
             const qtyInput = form.querySelector('#quantity_sold');
@@ -1009,58 +1021,81 @@ export default async function SellInventoryPage({
             };
 
             const applyShippingProfileDefaults = () => {
-              if (!shippingProfileSelect) {
+              const currentProfileSelect = form.querySelector('#shipping_profile_id');
+              const currentShippingChargedInput = form.querySelector('#shipping_charged');
+              const currentSuppliesCostInput = form.querySelector('#supplies_cost');
+
+              if (!currentProfileSelect) {
                 updatePreview();
                 return;
               }
 
-              const selectedProfileId = String(shippingProfileSelect.value || '').trim();
+              const option =
+                currentProfileSelect.selectedOptions && currentProfileSelect.selectedOptions.length > 0
+                  ? currentProfileSelect.selectedOptions[0]
+                  : currentProfileSelect.options[currentProfileSelect.selectedIndex];
+
+              const selectedProfileId = String(currentProfileSelect.value || '').trim();
+              const selectedProfileName = String(option?.textContent || '').trim();
 
               if (!selectedProfileId) {
                 updatePreview();
                 return;
               }
 
-              const option =
-                shippingProfileSelect.selectedOptions && shippingProfileSelect.selectedOptions.length > 0
-                  ? shippingProfileSelect.selectedOptions[0]
-                  : shippingProfileSelect.options[shippingProfileSelect.selectedIndex];
-
-              const defaults = shippingProfileDefaultsById[selectedProfileId] || {};
+              const defaultsById = shippingProfileDefaultsById[selectedProfileId] || {};
+              const defaultsByName = shippingProfileDefaultsByName[selectedProfileName] || {};
               const shippingCharged =
-                defaults.shippingCharged ||
+                defaultsById.shippingCharged ||
+                defaultsByName.shippingCharged ||
                 option?.getAttribute('data-shipping-charged') ||
                 '';
               const suppliesCost =
-                defaults.suppliesCost ||
+                defaultsById.suppliesCost ||
+                defaultsByName.suppliesCost ||
                 option?.getAttribute('data-supplies-cost') ||
                 '';
 
-              if (shippingChargedInput && shippingCharged !== '') {
-                shippingChargedInput.value = Number(shippingCharged).toFixed(2);
-                shippingChargedInput.dispatchEvent(new Event('input', { bubbles: true }));
+              if (currentShippingChargedInput && shippingCharged !== '') {
+                currentShippingChargedInput.value = Number(shippingCharged).toFixed(2);
+                currentShippingChargedInput.dispatchEvent(new Event('input', { bubbles: true }));
+                currentShippingChargedInput.dispatchEvent(new Event('change', { bubbles: true }));
               }
 
-              if (suppliesCostInput && suppliesCost !== '') {
-                suppliesCostInput.value = Number(suppliesCost).toFixed(2);
-                suppliesCostInput.dispatchEvent(new Event('input', { bubbles: true }));
+              if (currentSuppliesCostInput && suppliesCost !== '') {
+                currentSuppliesCostInput.value = Number(suppliesCost).toFixed(2);
+                currentSuppliesCostInput.dispatchEvent(new Event('input', { bubbles: true }));
+                currentSuppliesCostInput.dispatchEvent(new Event('change', { bubbles: true }));
               }
 
               updatePreview();
             };
 
+            document.addEventListener('change', (event) => {
+              if (event.target && event.target.id === 'shipping_profile_id') {
+                applyShippingProfileDefaults();
+              }
+            });
+
+            document.addEventListener('input', (event) => {
+              if (event.target && event.target.id === 'shipping_profile_id') {
+                applyShippingProfileDefaults();
+              }
+            });
+
+            document.addEventListener('click', (event) => {
+              if (event.target && event.target.id === 'shipping_profile_id') {
+                window.setTimeout(applyShippingProfileDefaults, 0);
+              }
+            });
+
             if (shippingProfileSelect) {
               shippingProfileSelect.addEventListener('change', applyShippingProfileDefaults);
               shippingProfileSelect.addEventListener('input', applyShippingProfileDefaults);
 
-              document.addEventListener('change', (event) => {
-                if (event.target === shippingProfileSelect) {
-                  applyShippingProfileDefaults();
-                }
-              });
-
               window.setTimeout(applyShippingProfileDefaults, 50);
               window.setTimeout(applyShippingProfileDefaults, 250);
+              window.setTimeout(applyShippingProfileDefaults, 750);
             }
 
             if (pulseCategorySelect) {

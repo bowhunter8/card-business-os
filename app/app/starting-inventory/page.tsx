@@ -711,6 +711,14 @@ export default async function StartingInventoryPage({
                 const isImported = item.status === 'imported'
                 const isArchived = item.status === 'archived'
 
+                const rowHref =
+                  isImported && item.imported_inventory_item_id
+                    ? `/app/inventory/${item.imported_inventory_item_id}`
+                    : `/app/starting-inventory/${item.id}/edit`
+
+                const clickableCellClass =
+                  'block -mx-3 -my-2 px-3 py-2 text-inherit no-underline'
+
                 const display = [
                   item.year,
                   item.set_name,
@@ -724,7 +732,7 @@ export default async function StartingInventoryPage({
                 const itemLabel = item.title || item.player_name || display || 'Untitled'
 
                 return (
-                  <tr key={item.id} className="app-tr">
+                  <tr key={item.id} className="app-tr cursor-pointer transition hover:bg-zinc-900/60">
                     <td className="app-td">
                       {isDraft ? (
                         <input
@@ -741,26 +749,50 @@ export default async function StartingInventoryPage({
                     </td>
 
                     <td className="app-td">
-                      <div className="font-medium">
-                        {item.title || item.player_name || 'Untitled'}
-                      </div>
-                      <div className="text-zinc-400">{display}</div>
+                      <Link href={rowHref} className={clickableCellClass}>
+                        <div className="font-medium">
+                          {item.title || item.player_name || 'Untitled'}
+                        </div>
+                        <div className="text-zinc-400">{display}</div>
+                      </Link>
                     </td>
 
                     <td className="app-td capitalize">
-                      {formatLabel(item.status)}
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {formatLabel(item.status)}
+                      </Link>
                     </td>
 
                     <td className="app-td capitalize">
-                      {formatLabel(item.destination)}
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {formatLabel(item.destination)}
+                      </Link>
                     </td>
 
-                    <td className="app-td">{item.quantity ?? 0}</td>
-                    <td className="app-td">{money(item.cost_basis_unit)}</td>
-                    <td className="app-td">{money(item.cost_basis_total)}</td>
-                    <td className="app-td">{money(item.estimated_value_total)}</td>
+                    <td className="app-td">
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {item.quantity ?? 0}
+                      </Link>
+                    </td>
+                    <td className="app-td">
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {money(item.cost_basis_unit)}
+                      </Link>
+                    </td>
+                    <td className="app-td">
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {money(item.cost_basis_total)}
+                      </Link>
+                    </td>
+                    <td className="app-td">
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {money(item.estimated_value_total)}
+                      </Link>
+                    </td>
                     <td className="app-td capitalize">
-                      {formatLabel(item.cost_basis_method)}
+                      <Link href={rowHref} className={clickableCellClass}>
+                        {formatLabel(item.cost_basis_method)}
+                      </Link>
                     </td>
 
                     <td className="app-td">

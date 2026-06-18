@@ -30,20 +30,11 @@ type InventoryItemRow = {
   card_number?: string | null;
   item_number?: string | null;
   status?: string | null;
-  purchase_price?: number | string | null;
-  cost?: number | string | null;
-  allocated_cost?: number | string | null;
   quantity?: number | string | null;
   available_quantity?: number | string | null;
-  unit_cost?: number | string | null;
-  total_cost?: number | string | null;
   cost_basis_unit?: number | string | null;
   cost_basis_total?: number | string | null;
   estimated_value_total?: number | string | null;
-  current_value?: number | string | null;
-  estimated_value?: number | string | null;
-  sale_price?: number | string | null;
-  sold_price?: number | string | null;
   created_at?: string | null;
   acquired_at?: string | null;
   purchase_date?: string | null;
@@ -129,15 +120,6 @@ type FinancialInventoryRow = {
   cost_basis_total: number | null;
   estimated_value_total: number | null;
   quantity?: number | string | null;
-  unit_cost?: number | string | null;
-  total_cost?: number | string | null;
-  allocated_cost?: number | string | null;
-  purchase_price?: number | string | null;
-  cost?: number | string | null;
-  current_value?: number | string | null;
-  estimated_value?: number | string | null;
-  sale_price?: number | string | null;
-  sold_price?: number | string | null;
 };
 
 type TaxYearSettingsRow = {
@@ -276,36 +258,18 @@ function getItemDate(item: InventoryItemRow) {
 function getItemCost(item: InventoryItemRow) {
   const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1);
   const costBasisTotal = asNumber(item.cost_basis_total);
-  const totalCost = asNumber(item.total_cost);
-  const allocatedCost = asNumber(item.allocated_cost);
   const costBasisUnit = asNumber(item.cost_basis_unit);
-  const unitCost = asNumber(item.unit_cost);
-  const purchasePrice = asNumber(item.purchase_price);
-  const legacyCost = asNumber(item.cost);
 
   if (costBasisTotal > 0) return costBasisTotal;
-  if (totalCost > 0) return totalCost;
-  if (allocatedCost > 0) return allocatedCost;
   if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1);
-  if (unitCost > 0) return unitCost * Math.max(quantity, 1);
-  if (purchasePrice > 0) return purchasePrice;
-  if (legacyCost > 0) return legacyCost;
 
   return 0;
 }
 
 function getItemValue(item: InventoryItemRow) {
   const estimatedValueTotal = asNumber(item.estimated_value_total);
-  const currentValue = asNumber(item.current_value);
-  const estimatedValue = asNumber(item.estimated_value);
-  const salePrice = asNumber(item.sale_price);
-  const soldPrice = asNumber(item.sold_price);
 
   if (estimatedValueTotal > 0) return estimatedValueTotal;
-  if (currentValue > 0) return currentValue;
-  if (estimatedValue > 0) return estimatedValue;
-  if (salePrice > 0) return salePrice;
-  if (soldPrice > 0) return soldPrice;
 
   return 0;
 }
@@ -2461,36 +2425,18 @@ function financialMatchesSearch(values: unknown[], search: string) {
 function getFinancialInventoryCost(row: FinancialInventoryRow) {
   const quantity = asNumber(row.available_quantity ?? row.quantity ?? 1);
   const costBasisTotal = asNumber(row.cost_basis_total);
-  const totalCost = asNumber(row.total_cost);
-  const allocatedCost = asNumber(row.allocated_cost);
   const costBasisUnit = asNumber(row.cost_basis_unit);
-  const unitCost = asNumber(row.unit_cost);
-  const purchasePrice = asNumber(row.purchase_price);
-  const legacyCost = asNumber(row.cost);
 
   if (costBasisTotal > 0) return costBasisTotal;
-  if (totalCost > 0) return totalCost;
-  if (allocatedCost > 0) return allocatedCost;
   if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1);
-  if (unitCost > 0) return unitCost * Math.max(quantity, 1);
-  if (purchasePrice > 0) return purchasePrice;
-  if (legacyCost > 0) return legacyCost;
 
   return 0;
 }
 
 function getFinancialInventoryValue(row: FinancialInventoryRow) {
   const estimatedValueTotal = asNumber(row.estimated_value_total);
-  const currentValue = asNumber(row.current_value);
-  const estimatedValue = asNumber(row.estimated_value);
-  const salePrice = asNumber(row.sale_price);
-  const soldPrice = asNumber(row.sold_price);
 
   if (estimatedValueTotal > 0) return estimatedValueTotal;
-  if (currentValue > 0) return currentValue;
-  if (estimatedValue > 0) return estimatedValue;
-  if (salePrice > 0) return salePrice;
-  if (soldPrice > 0) return soldPrice;
 
   return 0;
 }
@@ -2942,7 +2888,7 @@ function buildFinancialLines({
         ],
         rows: endingInventory.slice(0, 250).map((row, index) => {
           const availableQty = asNumber(row.available_quantity ?? row.quantity ?? 1);
-          const unitCost = asNumber(row.cost_basis_unit ?? row.unit_cost ?? 0);
+          const unitCost = asNumber(row.cost_basis_unit ?? 0);
           const rowCost = getFinancialInventoryCost(row);
 
           return {
@@ -4333,16 +4279,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
               quantity,
               cost_basis_unit,
               cost_basis_total,
-              unit_cost,
-              total_cost,
-              allocated_cost,
-              purchase_price,
-              cost,
-              current_value,
-              estimated_value,
-              estimated_value_total,
-              sale_price,
-              sold_price
+              estimated_value_total
             `)
             .eq("user_id", user.id)
             .gt("available_quantity", 0)
@@ -4962,16 +4899,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
               quantity,
               cost_basis_unit,
               cost_basis_total,
-              unit_cost,
-              total_cost,
-              allocated_cost,
-              purchase_price,
-              cost,
-              current_value,
-              estimated_value,
-              estimated_value_total,
-              sale_price,
-              sold_price
+              estimated_value_total
             `)
             .eq("user_id", user.id)
             .gt("available_quantity", 0)

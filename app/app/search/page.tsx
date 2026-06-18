@@ -318,20 +318,7 @@ async function bulkCombineOrdersAction(formData: FormData) {
     .select(`
       id,
       break_id,
-      order_id,
-      order_numeric_id,
-      buyer,
-      seller,
-      product_name,
-      processed_date,
-      processed_date_display,
-      order_status,
-      quantity,
-      subtotal,
-      shipping_price,
-      taxes,
-      total,
-      source_file_name
+      seller
     `)
     .eq('user_id', user.id)
     .in('id', uniqueOrderIds)
@@ -377,117 +364,7 @@ async function bulkCombineOrdersAction(formData: FormData) {
     )
   }
 
-  const datedOrders = orders
-    .map((order) => {
-      const rawDate = order.processed_date || order.processed_date_display || ''
-      const parsed = rawDate ? new Date(rawDate) : null
-
-      return { order, parsed }
-    })
-    .filter((entry) => entry.parsed && !Number.isNaN(entry.parsed.getTime())) as Array<{
-      order: WhatnotOrderRow
-      parsed: Date
-    }>
-
-  const newestDate =
-    datedOrders.length > 0
-      ? datedOrders.reduce(
-          (newest, entry) =>
-            entry.parsed.getTime() > newest.getTime() ? entry.parsed : newest,
-          datedOrders[0].parsed
-        )
-      : new Date()
-
-  const breakDate = newestDate.toISOString().slice(0, 10)
-  const sourceName = sellers[0] || 'Imported Orders'
-  const orderNumbers = orders
-    .map((order) => cleanText(order.order_numeric_id || order.order_id || ''))
-    .filter(Boolean)
-  const productNames = orders
-    .map((order) => cleanText(order.product_name || ''))
-    .filter(Boolean)
-
-  const purchasePrice = Number(
-    orders.reduce((sum, order) => sum + Number(order.subtotal ?? 0), 0).toFixed(2)
-  )
-  const salesTax = Number(
-    orders.reduce((sum, order) => sum + Number(order.taxes ?? 0), 0).toFixed(2)
-  )
-  const shippingCost = Number(
-    orders.reduce((sum, order) => sum + Number(order.shipping_price ?? 0), 0).toFixed(2)
-  )
-  const orderTotal = Number(
-    orders.reduce((sum, order) => sum + Number(order.total ?? 0), 0).toFixed(2)
-  )
-  const calculatedTotal = Number((purchasePrice + salesTax + shippingCost).toFixed(2))
-  const otherFees = Number((orderTotal - calculatedTotal).toFixed(2))
-  const totalCost = Number((purchasePrice + salesTax + shippingCost + otherFees).toFixed(2))
-
-  const { data: newBreak, error: createError } = await supabase
-    .from('breaks')
-    .insert({
-      user_id: user.id,
-      break_date: breakDate,
-      source_name: sourceName,
-      product_name: `Combined Imported Orders (${orders.length} orders)`,
-      format_type: 'Imported order group',
-      teams: [],
-      order_number: orderNumbers.length > 0 ? `MULTI: ${orderNumbers.join(', ')}` : null,
-      purchase_price: purchasePrice,
-      sales_tax: salesTax,
-      shipping_cost: shippingCost,
-      other_fees: otherFees,
-      total_cost: totalCost,
-      allocation_method: 'equal_per_item',
-      cards_received: 0,
-      notes: [
-        'Drafted from selected imported orders',
-        `Seller: ${sourceName}`,
-        orderNumbers.length > 0 ? `Order Numbers: ${orderNumbers.join(', ')}` : '',
-        productNames.length > 0 ? `Products: ${productNames.join(' | ')}` : '',
-        `Selected order row IDs: ${uniqueOrderIds.join(', ')}`,
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    })
-    .select('id')
-    .single()
-
-  if (createError || !newBreak) {
-    redirect(
-      buildSearchRedirect(
-        q,
-        'combine_error',
-        createError?.message || 'Could not create the combined break.'
-      )
-    )
-  }
-
-  const { error: linkError } = await supabase
-    .from('whatnot_orders')
-    .update({ break_id: newBreak.id })
-    .eq('user_id', user.id)
-    .in('id', uniqueOrderIds)
-
-  if (linkError) {
-    redirect(
-      buildSearchRedirect(
-        q,
-        'combine_error',
-        `Break was created, but selected orders could not be linked: ${linkError.message}`
-      )
-    )
-  }
-
-  revalidatePath('/app/search')
-  revalidatePath('/app/whatnot-orders')
-  revalidatePath('/app/breaks')
-
-  redirect(
-    `/app/breaks/${newBreak.id}/edit?success=${encodeURIComponent(
-      'Combined selected orders into a break. Enter Items Received, then add items.'
-    )}`
-  )
+  redirect(`/app/breaks/new?whatnot_order_ids=${encodeURIComponent(uniqueOrderIds.join(','))}`)
 }
 
 async function bulkDeleteInventoryItemsAction(formData: FormData) {
@@ -837,7 +714,7 @@ function BulkOrderActionsControl({
             <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl md:min-w-80">
               <div className="text-sm font-semibold text-zinc-200">Create combined break?</div>
               <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-                This creates one break from the selected unassigned orders, uses the newest selected order date as the break date, and sends you to edit Items Received before adding inventory.
+                This creates one order from the selected unassigned orders and sends you to the normal sorting tray / item entry page.
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2">

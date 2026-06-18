@@ -26,6 +26,14 @@ type InventoryItem = {
   notes: string | null
 }
 
+type FinalizedDisposalRow = {
+  id: string
+  created_at: string | null
+  disposal_reason: string | null
+  disposal_notes: string | null
+  notes: string | null
+}
+
 function renderStatusPill(status: string | null) {
   if (status === 'available') {
     return (
@@ -69,7 +77,7 @@ function renderStatusPill(status: string | null) {
 
   return (
     <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 capitalize">
-      {(status || 'unknown').replaceAll('_', ' ')}
+      {status === 'disposed' ? 'Written Off' : (status || 'unknown').replaceAll('_', ' ')}
     </span>
   )
 }
@@ -98,44 +106,64 @@ export default async function EditInventoryPage({
 
   if (!user) return null
 
-  const response = await supabase
-    .from('inventory_items')
-    .select(`
-      id,
-      status,
-      item_type,
-      title,
-      player_name,
-      year,
-      brand,
-      set_name,
-      card_number,
-      parallel_name,
-      team,
-      quantity,
-      available_quantity,
-      cost_basis_unit,
-      cost_basis_total,
-      estimated_value_unit,
-      estimated_value_total,
-      storage_location,
-      notes
-    `)
-    .eq('id', id)
-    .eq('user_id', user.id)
-    .single()
+  const [response, finalizedDisposalResponse] = await Promise.all([
+    supabase
+      .from('inventory_items')
+      .select(`
+        id,
+        status,
+        item_type,
+        title,
+        player_name,
+        year,
+        brand,
+        set_name,
+        card_number,
+        parallel_name,
+        team,
+        quantity,
+        available_quantity,
+        cost_basis_unit,
+        cost_basis_total,
+        estimated_value_unit,
+        estimated_value_total,
+        storage_location,
+        notes
+      `)
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single(),
+
+    supabase
+      .from('inventory_transactions')
+      .select(`
+        id,
+        created_at,
+        disposal_reason,
+        disposal_notes,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .eq('inventory_item_id', id)
+      .eq('transaction_type', 'disposal_writeoff_review')
+      .eq('finalized_for_tax', true)
+      .order('created_at', { ascending: false })
+      .limit(1),
+  ])
 
   if (response.error || !response.data) {
     notFound()
   }
 
   const item = response.data as InventoryItem
+  const finalizedDisposal =
+    ((finalizedDisposalResponse.data ?? [])[0] as FinalizedDisposalRow | undefined) ?? null
+  const isFinalizedDisposal = Boolean(finalizedDisposal)
 
   const itemLine = [
     item.title || item.player_name || 'Untitled item',
     item.year,
     item.brand,
-    item.set_name,
     item.card_number ? `#${item.card_number}` : null,
     item.parallel_name,
     item.team,
@@ -185,19 +213,34 @@ export default async function EditInventoryPage({
             Cancel
           </Link>
 
-          <button
-            type="submit"
-            form="edit-inventory-form"
-            className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
-          >
-            Save Item Changes
-          </button>
+          {isFinalizedDisposal ? (
+            <span className="rounded-xl border border-amber-900/60 bg-amber-950/30 px-5 py-2 font-medium text-amber-200">
+              Locked For Tax Review
+            </span>
+          ) : (
+            <button
+              type="submit"
+              form="edit-inventory-form"
+              className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
+            >
+              Save Item Changes
+            </button>
+          )}
         </div>
       </div>
 
       {!canDelete && (
         <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-200">
           This item cannot be deleted after sales have happened. Reverse the sale first.
+        </div>
+      )}
+
+      {isFinalizedDisposal && (
+        <div className="mt-6 rounded-xl border border-amber-900 bg-amber-950/30 px-4 py-3 text-sm text-amber-200">
+          <div className="font-semibold">This item is written off and locked for tax review.</div>
+          <div className="mt-1 text-amber-100/80">
+            Status, quantity, cost, and item edits are disabled. Undo the write-off before making changes.
+          </div>
         </div>
       )}
 
@@ -214,52 +257,47 @@ export default async function EditInventoryPage({
           {/* --- FIELDS (unchanged) --- */}
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Title</label>
-            <input name="title" defaultValue={item.title ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="title" disabled={isFinalizedDisposal} defaultValue={item.title ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Player</label>
-            <input name="player_name" defaultValue={item.player_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-sm text-zinc-300">Player / Item Name</label>
+            <input name="player_name" disabled={isFinalizedDisposal} defaultValue={item.player_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Year</label>
-            <input name="year" type="number" defaultValue={item.year ?? undefined} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="year" disabled={isFinalizedDisposal} type="number" defaultValue={item.year ?? undefined} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Brand</label>
-            <input name="brand" defaultValue={item.brand ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="brand" disabled={isFinalizedDisposal} defaultValue={item.brand ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
-            <label className="mb-1 block text-sm text-zinc-300">Set Name</label>
-            <input name="set_name" defaultValue={item.set_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm text-zinc-300">Card Number</label>
-            <input name="card_number" defaultValue={item.card_number ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <label className="mb-1 block text-sm text-zinc-300">#</label>
+            <input name="card_number" disabled={isFinalizedDisposal} defaultValue={item.card_number ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Parallel</label>
-            <input name="parallel_name" defaultValue={item.parallel_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="parallel_name" disabled={isFinalizedDisposal} defaultValue={item.parallel_name ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Team</label>
-            <input name="team" defaultValue={item.team ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="team" disabled={isFinalizedDisposal} defaultValue={item.team ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Quantity</label>
-            <input name="quantity" type="number" defaultValue={item.quantity ?? 1} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="quantity" disabled={isFinalizedDisposal} type="number" defaultValue={item.quantity ?? 1} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Status</label>
-            <select name="status" defaultValue={item.status ?? 'available'} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2">
+            <select name="status" disabled={isFinalizedDisposal} defaultValue={item.status ?? 'available'} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70">
               <option value="available">For Sale</option>
               <option value="listed">Listed</option>
               <option value="sold">Sold</option>
@@ -270,17 +308,17 @@ export default async function EditInventoryPage({
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Storage Location</label>
-            <input name="storage_location" defaultValue={item.storage_location ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="storage_location" disabled={isFinalizedDisposal} defaultValue={item.storage_location ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Estimated Value Per Unit</label>
-            <input name="estimated_value_unit" type="number" step="0.01" defaultValue={item.estimated_value_unit ?? 0} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <input name="estimated_value_unit" disabled={isFinalizedDisposal} type="number" step="0.01" defaultValue={item.estimated_value_unit ?? 0} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div className="md:col-span-2">
             <label className="mb-1 block text-sm text-zinc-300">Notes</label>
-            <textarea name="notes" rows={4} defaultValue={item.notes ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2" />
+            <textarea name="notes" disabled={isFinalizedDisposal} rows={4} defaultValue={item.notes ?? ''} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           {/* 🔻 BOTTOM BUTTONS */}
@@ -288,13 +326,19 @@ export default async function EditInventoryPage({
             <Link href={backHref} className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800">
               Cancel
             </Link>
-            <button type="submit" className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200">
-              Save Item Changes
-            </button>
+            {isFinalizedDisposal ? (
+              <span className="rounded-xl border border-amber-900/60 bg-amber-950/30 px-5 py-2 font-medium text-amber-200">
+                Locked
+              </span>
+            ) : (
+              <button type="submit" className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200">
+                Save Item Changes
+              </button>
+            )}
           </div>
         </form>
 
-        {canDelete && (
+        {canDelete && !isFinalizedDisposal && (
           <div className="mt-4 flex justify-end">
             <form action={deleteInventoryItemAction}>
               <input type="hidden" name="inventory_item_id" value={item.id} />

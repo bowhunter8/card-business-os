@@ -210,7 +210,7 @@ export default async function FinancialReportPage({
         </section>
 
         <section className="app-section space-y-3">
-          <div className="grid gap-3 xl:grid-cols-[180px_180px_140px_180px_160px_190px_190px_auto]">
+          <div className="grid gap-2 xl:grid-cols-[minmax(120px,145px)_minmax(135px,155px)_minmax(90px,115px)_minmax(130px,160px)_minmax(105px,130px)_minmax(135px,155px)_minmax(135px,155px)_minmax(270px,auto)]">
             <label className="block">
               <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 Period
@@ -319,25 +319,25 @@ export default async function FinancialReportPage({
               />
             </label>
 
-            <div className="flex items-end gap-2">
+            <div className="flex min-w-0 items-end justify-end gap-2">
               <button
                 type="submit"
-                className="app-button-primary h-9 whitespace-nowrap px-3 text-sm"
+                className="app-button-primary h-9 shrink-0 whitespace-nowrap px-3 text-sm"
               >
                 Run PDF Report
               </button>
 
               <button
                 type="submit"
-                formAction="/api/reports/financial/export"
-                className="app-button h-9 whitespace-nowrap px-3 text-sm"
+                formAction="/api/reports/financial"
+                className="app-button h-9 shrink-0 whitespace-nowrap px-3 text-sm"
               >
                 Run CSV Report
               </button>
 
               <Link
                 href="/app/reports/tax"
-                className="app-button h-9 whitespace-nowrap px-3 text-sm"
+                className="app-button h-9 shrink-0 whitespace-nowrap px-3 text-sm"
               >
                 Reset
               </Link>

@@ -80,20 +80,11 @@ type InventoryItemRow = {
   card_number?: string | null;
   item_number?: string | null;
   status?: string | null;
-  purchase_price?: number | string | null;
-  cost?: number | string | null;
-  allocated_cost?: number | string | null;
   quantity?: number | string | null;
   available_quantity?: number | string | null;
-  unit_cost?: number | string | null;
-  total_cost?: number | string | null;
   cost_basis_unit?: number | string | null;
   cost_basis_total?: number | string | null;
   estimated_value_total?: number | string | null;
-  current_value?: number | string | null;
-  estimated_value?: number | string | null;
-  sale_price?: number | string | null;
-  sold_price?: number | string | null;
   created_at?: string | null;
   acquired_at?: string | null;
   purchase_date?: string | null;
@@ -124,6 +115,47 @@ type TaxYearSettingsRow = {
   repairs_maintenance: number | null;
   notes: string | null;
 };
+
+
+type FinancialAccount =
+  | "all"
+  | "sales"
+  | "cogs"
+  | "selling-costs"
+  | "expenses"
+  | "purchases"
+  | "inventory"
+  | "schedule-c";
+
+function normalizeFinancialAccount(raw?: string | null): FinancialAccount {
+  const clean = String(raw || "all").trim();
+
+  if (
+    clean === "sales" ||
+    clean === "cogs" ||
+    clean === "selling-costs" ||
+    clean === "expenses" ||
+    clean === "purchases" ||
+    clean === "inventory" ||
+    clean === "schedule-c"
+  ) {
+    return clean;
+  }
+
+  return "all";
+}
+
+function getFinancialAccountLabel(account: FinancialAccount) {
+  if (account === "sales") return "Sales / income";
+  if (account === "cogs") return "COGS / cost basis";
+  if (account === "selling-costs") return "Selling costs";
+  if (account === "expenses") return "Manual expenses";
+  if (account === "purchases") return "Purchases / breaks";
+  if (account === "inventory") return "Inventory value";
+  if (account === "schedule-c") return "Schedule C support";
+
+  return "All financial accounts";
+}
 
 type DisposalTransactionRow = {
   id: string;
@@ -540,36 +572,18 @@ function getInventoryItemDate(item: InventoryItemRow) {
 function getInventoryItemCost(item: InventoryItemRow) {
   const quantity = asNumber(item.quantity ?? item.available_quantity ?? 1);
   const costBasisTotal = asNumber(item.cost_basis_total);
-  const totalCost = asNumber(item.total_cost);
-  const allocatedCost = asNumber(item.allocated_cost);
   const costBasisUnit = asNumber(item.cost_basis_unit);
-  const unitCost = asNumber(item.unit_cost);
-  const purchasePrice = asNumber(item.purchase_price);
-  const legacyCost = asNumber(item.cost);
 
   if (costBasisTotal > 0) return costBasisTotal;
-  if (totalCost > 0) return totalCost;
-  if (allocatedCost > 0) return allocatedCost;
   if (costBasisUnit > 0) return costBasisUnit * Math.max(quantity, 1);
-  if (unitCost > 0) return unitCost * Math.max(quantity, 1);
-  if (purchasePrice > 0) return purchasePrice;
-  if (legacyCost > 0) return legacyCost;
 
   return 0;
 }
 
 function getInventoryItemValue(item: InventoryItemRow) {
   const estimatedValueTotal = asNumber(item.estimated_value_total);
-  const currentValue = asNumber(item.current_value);
-  const estimatedValue = asNumber(item.estimated_value);
-  const salePrice = asNumber(item.sale_price);
-  const soldPrice = asNumber(item.sold_price);
 
   if (estimatedValueTotal > 0) return estimatedValueTotal;
-  if (currentValue > 0) return currentValue;
-  if (estimatedValue > 0) return estimatedValue;
-  if (salePrice > 0) return salePrice;
-  if (soldPrice > 0) return soldPrice;
 
   return 0;
 }
@@ -868,9 +882,7 @@ async function exportSalesReport(request: Request) {
     inventoryIds.length > 0
       ? await supabase
           .from("inventory_items")
-          .select(
-            "id, title, item_name, player_name, year, set_name, card_number, item_number, notes, status",
-          )
+          .select("*")
           .eq("user_id", user.id)
           .in("id", inventoryIds)
       : { data: [] };
@@ -2852,6 +2864,358 @@ async function exportPlatformProfitabilityReport(request: Request) {
 }
 
 
+async function exportFinancialReport(request: Request) {
+  const { searchParams } = new URL(request.url);
+
+  const selectedYear = clampYear(searchParams.get("year"));
+  const selectedPeriod = normalizePeriod(searchParams.get("period"));
+  const selectedMonth = clampMonth(searchParams.get("month"));
+  const selectedQuarter = clampQuarter(searchParams.get("quarter"));
+  const selectedAccount = normalizeFinancialAccount(searchParams.get("account"));
+  const search = String(searchParams.get("q") || "").trim();
+  const selectedStart =
+    searchParams.get("start") ||
+    searchParams.get("startDate") ||
+    searchParams.get("dateFrom") ||
+    searchParams.get("date");
+  const selectedEnd =
+    searchParams.get("end") ||
+    searchParams.get("endDate") ||
+    searchParams.get("dateTo");
+
+  const { startDate, endDate, label } = getReportDateRange({
+    selectedYear,
+    period: selectedPeriod,
+    start: selectedStart,
+    end: selectedEnd,
+    month: selectedMonth,
+    quarter: selectedQuarter,
+    reportLabel: "Financial",
+  });
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return unauthorizedError();
+  }
+
+  const [breaksRes, salesRes, inventoryRes, expensesRes, taxSettingsRes] =
+    await Promise.all([
+      supabase
+        .from("breaks")
+        .select("id, break_date, source_name, product_name, order_number, total_cost")
+        .eq("user_id", user.id)
+        .is("reversed_at", null)
+        .gte("break_date", startDate)
+        .lte("break_date", endDate)
+        .order("break_date", { ascending: false }),
+
+      supabase
+        .from("sales")
+        .select(
+          `
+          id,
+          sale_date,
+          gross_sale,
+          platform_fees,
+          shipping_cost,
+          other_costs,
+          net_proceeds,
+          cost_of_goods_sold,
+          profit,
+          platform,
+          notes,
+          inventory_item_id
+        `,
+        )
+        .eq("user_id", user.id)
+        .is("reversed_at", null)
+        .gte("sale_date", startDate)
+        .lte("sale_date", endDate)
+        .order("sale_date", { ascending: false }),
+
+      supabase
+        .from("inventory_items")
+        .select("*")
+        .eq("user_id", user.id)
+        .gt("available_quantity", 0)
+        .order("year", { ascending: false }),
+
+      supabase
+        .from("expenses")
+        .select(
+          `
+          id,
+          expense_date,
+          category,
+          vendor,
+          amount,
+          notes,
+          created_at
+        `,
+        )
+        .eq("user_id", user.id)
+        .gte("expense_date", startDate)
+        .lte("expense_date", endDate)
+        .order("expense_date", { ascending: false })
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("tax_year_settings")
+        .select(
+          `
+          beginning_inventory,
+          ending_inventory_snapshot,
+          ending_inventory_locked_at,
+          business_use_of_home,
+          vehicle_expense,
+          depreciation_expense,
+          legal_professional,
+          insurance,
+          utilities,
+          taxes_licenses,
+          repairs_maintenance,
+          notes
+        `,
+        )
+        .eq("user_id", user.id)
+        .eq("tax_year", selectedYear)
+        .maybeSingle(),
+    ]);
+
+  if (breaksRes.error) return jsonError(`Could not export financial break purchases: ${breaksRes.error.message}`);
+  if (salesRes.error) return jsonError(`Could not export financial sales: ${salesRes.error.message}`);
+  if (inventoryRes.error) return jsonError(`Could not export financial inventory: ${inventoryRes.error.message}`);
+  if (expensesRes.error) return jsonError(`Could not export financial expenses: ${expensesRes.error.message}`);
+  if (taxSettingsRes.error) return jsonError(`Could not export financial tax settings: ${taxSettingsRes.error.message}`);
+
+  const breaks = ((breaksRes.data ?? []) as BreakPurchaseRow[]).filter((row) =>
+    matchesCsvSearch([row.break_date, row.source_name, row.product_name, row.order_number, row.total_cost], search),
+  );
+  const sales = ((salesRes.data ?? []) as SalesRow[]).filter((row) =>
+    matchesCsvSearch([row.sale_date, row.gross_sale, row.platform_fees, row.shipping_cost, row.other_costs, row.net_proceeds, row.cost_of_goods_sold, row.profit, row.platform, row.notes], search),
+  );
+  const inventoryItems = ((inventoryRes.data ?? []) as InventoryItemRow[]).filter((row) =>
+    matchesCsvSearch([row.title, row.item_name, row.player_name, row.year, row.set_name, row.card_number, row.item_number, row.notes, row.status], search),
+  );
+  const expenses = ((expensesRes.data ?? []) as ExpenseRow[]).filter((row) =>
+    matchesCsvSearch([row.expense_date, row.category, row.vendor, row.amount, row.notes], search),
+  );
+  const taxSettings = (taxSettingsRes.data ?? null) as TaxYearSettingsRow | null;
+
+  const grossSales = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.gross_sale), 0));
+  const platformFees = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.platform_fees), 0));
+  const shippingCosts = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.shipping_cost), 0));
+  const otherSellingCosts = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.other_costs), 0));
+  const sellingCosts = roundMoney(platformFees + shippingCosts + otherSellingCosts);
+  const netProceeds = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.net_proceeds), 0));
+  const cogs = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.cost_of_goods_sold), 0));
+  const realizedProfit = roundMoney(sales.reduce((sum, row) => sum + asNumber(row.profit), 0));
+  const manualExpenses = roundMoney(expenses.reduce((sum, row) => sum + asNumber(row.amount), 0));
+  const breakPurchases = roundMoney(breaks.reduce((sum, row) => sum + asNumber(row.total_cost), 0));
+  const beginningInventory = roundMoney(asNumber(taxSettings?.beginning_inventory));
+  const liveEndingInventoryCost = roundMoney(inventoryItems.reduce((sum, item) => sum + getInventoryItemCost(item), 0));
+  const lockedEndingInventory =
+    taxSettings?.ending_inventory_snapshot != null
+      ? roundMoney(asNumber(taxSettings.ending_inventory_snapshot))
+      : null;
+  const endingInventoryCost = lockedEndingInventory ?? liveEndingInventoryCost;
+  const endingInventoryEstimatedValue = roundMoney(inventoryItems.reduce((sum, item) => sum + getInventoryItemValue(item), 0));
+  const extraScheduleC = roundMoney(
+    asNumber(taxSettings?.business_use_of_home) +
+      asNumber(taxSettings?.vehicle_expense) +
+      asNumber(taxSettings?.depreciation_expense) +
+      asNumber(taxSettings?.legal_professional) +
+      asNumber(taxSettings?.insurance) +
+      asNumber(taxSettings?.utilities) +
+      asNumber(taxSettings?.taxes_licenses) +
+      asNumber(taxSettings?.repairs_maintenance),
+  );
+  const grossIncomeAfterCOGS = roundMoney(grossSales - cogs);
+  const netBusinessProfit = roundMoney(grossSales - cogs - sellingCosts - manualExpenses - extraScheduleC);
+  const purchasesSupport = roundMoney(cogs + endingInventoryCost - beginningInventory);
+
+  const baseRow = {
+    report: label,
+    section: "",
+    account_filter: getFinancialAccountLabel(selectedAccount),
+    range_start: startDate,
+    range_end: endDate,
+    search_filter: search || "None",
+    metric: "",
+    value: "",
+    date: "",
+    item: "",
+    category: "",
+    schedule_c_area: "",
+    platform: "",
+    vendor: "",
+    source: "",
+    order_number: "",
+    status: "",
+    quantity: "",
+    gross_sale: "",
+    platform_fees: "",
+    shipping_cost: "",
+    other_costs: "",
+    net_proceeds: "",
+    cost_of_goods_sold: "",
+    profit: "",
+    cost_basis: "",
+    estimated_value: "",
+    estimated_gain_loss: "",
+    notes: "",
+    record_id: "",
+    inventory_item_id: "",
+  };
+
+  const outputRows = [
+    ["sales_count", String(sales.length)],
+    ["gross_sales", moneyString(grossSales)],
+    ["platform_fees", moneyString(platformFees)],
+    ["shipping_costs", moneyString(shippingCosts)],
+    ["other_selling_costs", moneyString(otherSellingCosts)],
+    ["selling_costs", moneyString(sellingCosts)],
+    ["net_proceeds", moneyString(netProceeds)],
+    ["realized_cogs", moneyString(cogs)],
+    ["gross_income_after_cogs", moneyString(grossIncomeAfterCOGS)],
+    ["realized_profit", moneyString(realizedProfit)],
+    ["manual_expenses", moneyString(manualExpenses)],
+    ["extra_schedule_c_settings", moneyString(extraScheduleC)],
+    ["net_business_profit", moneyString(netBusinessProfit)],
+    ["break_purchases", moneyString(breakPurchases)],
+    ["beginning_inventory", moneyString(beginningInventory)],
+    ["purchases_support", moneyString(purchasesSupport)],
+    ["ending_inventory_cost", moneyString(endingInventoryCost)],
+    ["ending_inventory_estimated_value", moneyString(endingInventoryEstimatedValue)],
+  ].map(([metric, value]) => ({
+    ...baseRow,
+    section: "summary",
+    metric,
+    value,
+  }));
+
+  const includeSales = selectedAccount === "all" || selectedAccount === "sales" || selectedAccount === "selling-costs" || selectedAccount === "cogs";
+  const includeExpenses = selectedAccount === "all" || selectedAccount === "expenses" || selectedAccount === "schedule-c";
+  const includeBreaks = selectedAccount === "all" || selectedAccount === "purchases" || selectedAccount === "cogs";
+  const includeInventory = selectedAccount === "all" || selectedAccount === "inventory" || selectedAccount === "cogs" || selectedAccount === "schedule-c";
+  const includeScheduleC = selectedAccount === "all" || selectedAccount === "schedule-c";
+
+  if (includeSales) {
+    outputRows.push(...sales.map((sale) => ({
+      ...baseRow,
+      section: "sales_detail",
+      date: sale.sale_date || "",
+      platform: platformKey(sale.platform),
+      gross_sale: moneyString(sale.gross_sale),
+      platform_fees: moneyString(sale.platform_fees),
+      shipping_cost: moneyString(sale.shipping_cost),
+      other_costs: moneyString(sale.other_costs),
+      net_proceeds: moneyString(sale.net_proceeds),
+      cost_of_goods_sold: moneyString(sale.cost_of_goods_sold),
+      profit: moneyString(sale.profit),
+      notes: sale.notes || "",
+      record_id: sale.id,
+      inventory_item_id: sale.inventory_item_id || "",
+    })));
+  }
+
+  if (includeExpenses) {
+    outputRows.push(...expenses.map((expense) => {
+      const category = String(expense.category || "Uncategorized").trim() || "Uncategorized";
+
+      return {
+        ...baseRow,
+        section: "expense_detail",
+        date: expense.expense_date || "",
+        category,
+        schedule_c_area: getExpenseScheduleCArea(category),
+        vendor: expense.vendor || "",
+        value: moneyString(expense.amount),
+        notes: expense.notes || "",
+        record_id: expense.id,
+      };
+    }));
+  }
+
+  if (includeBreaks) {
+    outputRows.push(...breaks.map((row) => ({
+      ...baseRow,
+      section: "break_purchase_detail",
+      date: row.break_date || "",
+      item: row.product_name || "",
+      source: row.source_name || "",
+      order_number: row.order_number || "",
+      cost_basis: moneyString(row.total_cost),
+      record_id: row.id,
+    })));
+  }
+
+  if (includeInventory) {
+    outputRows.push(...inventoryItems.map((item) => {
+      const costBasis = getInventoryItemCost(item);
+      const estimatedValue = getInventoryItemValue(item);
+
+      return {
+        ...baseRow,
+        section: "ending_inventory_detail",
+        date: getInventoryItemDate(item) || "",
+        item: getInventoryItemName(item),
+        status: normalizeStatus(item.status),
+        quantity: String(asNumber(item.available_quantity ?? item.quantity ?? 0)),
+        cost_basis: moneyString(costBasis),
+        estimated_value: moneyString(estimatedValue),
+        estimated_gain_loss: moneyString(roundMoney(estimatedValue - costBasis)),
+        notes: item.notes || "",
+        inventory_item_id: item.id,
+        record_id: item.id,
+      };
+    }));
+  }
+
+  if (includeScheduleC) {
+    [
+      ["business_use_of_home", "Schedule C Line 30", taxSettings?.business_use_of_home],
+      ["vehicle_expense", "Schedule C Line 9", taxSettings?.vehicle_expense],
+      ["depreciation_expense", "Schedule C Line 13", taxSettings?.depreciation_expense],
+      ["legal_professional", "Schedule C Line 17", taxSettings?.legal_professional],
+      ["insurance", "Schedule C Line 15", taxSettings?.insurance],
+      ["utilities", "Schedule C Line 25", taxSettings?.utilities],
+      ["taxes_licenses", "Schedule C Line 23", taxSettings?.taxes_licenses],
+      ["repairs_maintenance", "Schedule C Line 21", taxSettings?.repairs_maintenance],
+    ].forEach(([metric, scheduleCArea, amount]) => {
+      outputRows.push({
+        ...baseRow,
+        section: "schedule_c_support",
+        metric: String(metric),
+        schedule_c_area: String(scheduleCArea),
+        value: moneyString(amount),
+      });
+    });
+  }
+
+  const csv = excelSafeCsv(
+    buildCsv(outputRows, "No financial records found for this report range."),
+  );
+
+  const filename = buildReportFilename({
+    reportName: "financial-report",
+    startDate,
+    endDate,
+    extension: "csv",
+  });
+
+  return csvDownloadResponse({
+    csv,
+    filename,
+  });
+}
+
+
 async function exportProfitLossReport(request: Request) {
   const { searchParams } = new URL(request.url)
 
@@ -4333,6 +4697,10 @@ export async function GET(request: Request, context: RouteContext) {
 
   if (reportType === "platform-profitability") {
     return exportPlatformProfitabilityReport(request);
+  }
+
+  if (reportType === "financial") {
+    return exportFinancialReport(request);
   }
 
   if (reportType === "profit-loss") {

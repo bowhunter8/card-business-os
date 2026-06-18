@@ -659,7 +659,26 @@ export async function GET(request: NextRequest) {
 
   const advertisingGiveaways = roundMoney(
     expenseCategoryRows
-      .filter((row) => row.scheduleCArea === 'Advertising' && row.category.toLowerCase().includes('giveaway'))
+      .filter(
+        (row) =>
+          row.scheduleCArea === 'Advertising' &&
+          categoryIncludes(row, [
+            'giveaway',
+            'givvy',
+            'givvies',
+            'buyer appreciation',
+            'buyer gift',
+            'buyer gifts',
+            'stream promotion',
+            'stream giveaway',
+            'whatnot promotion',
+            'customer appreciation',
+            'customer retention',
+            'contest prize',
+            'promotion prize',
+            'promo prize',
+          ])
+      )
       .reduce((sum, row) => sum + row.amount, 0)
   )
 

@@ -33,8 +33,9 @@ export default function CreateRestorePointButton() {
         )
       }
 
+      localStorage.setItem('last_restore_point_date', new Date().toISOString())
       localStorage.setItem('last_backup_date', new Date().toISOString())
-      setMessage('Restore point created successfully.')
+      setMessage('Manual restore point created successfully.')
 
       window.location.reload()
     } catch (err) {
@@ -56,7 +57,7 @@ export default function CreateRestorePointButton() {
         disabled={loading}
         className="app-button-primary w-full justify-center disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {loading ? 'Creating Restore Point...' : 'Create Restore Point'}
+        {loading ? 'Creating Manual Restore Point...' : 'Create Manual Restore Point'}
       </button>
 
       {message ? (

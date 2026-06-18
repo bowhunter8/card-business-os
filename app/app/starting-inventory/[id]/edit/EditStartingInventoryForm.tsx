@@ -1,19 +1,11 @@
 'use client'
 
-import Link from 'next/link'
-import { use, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { updateStartingInventoryItemAction } from '@/app/actions/starting-inventory'
-import { createClient } from '@/lib/supabase/client'
 
 type EntryMode = 'single' | 'bulk'
 
-type EditStartingInventoryPageProps = {
-  params: Promise<{
-    id: string
-  }>
-}
-
-type StartingInventoryItem = {
+type StartingInventoryInitialItem = {
   id: string
   destination?: string | null
   item_type?: string | null
@@ -42,6 +34,10 @@ type StartingInventoryItem = {
   storage_location?: string | null
   tax_notes?: string | null
   notes?: string | null
+}
+
+type EditStartingInventoryFormProps = {
+  item: StartingInventoryInitialItem
 }
 
 type FormState = {
@@ -103,41 +99,12 @@ function inferEntryMode(itemType: string) {
     : 'single'
 }
 
-function buildDefaultInitial(id: string): StartingInventoryItem {
-  return {
-    id,
-    destination: 'sell',
-    item_type: 'single_card',
-    title: '',
-    player_name: '',
-    year: '',
-    brand: '',
-    set_name: '',
-    card_number: '',
-    parallel_name: '',
-    variation: '',
-    team: '',
-    rookie_flag: false,
-    auto_flag: false,
-    relic_flag: false,
-    serial_number_text: '',
-    condition_note: '',
-    grader: '',
-    grade: '',
-    quantity: 1,
-    cost_basis_method: 'estimated_legacy',
-    cost_basis_unit: 0,
-    estimated_value_unit: '',
-    acquisition_source: '',
-    acquired_date: '',
-    storage_location: '',
-    tax_notes: '',
-    notes: '',
-  }
-}
+export default function EditStartingInventoryForm({
+  item,
+}: EditStartingInventoryFormProps) {
+  const initial = item
 
-function buildFormState(initial: StartingInventoryItem): FormState {
-  return {
+  const [form, setForm] = useState<FormState>({
     entryMode: inferEntryMode(initial.item_type ?? 'single_card'),
     destination: initial.destination === 'personal' ? 'personal' : 'sell',
     itemType: initial.item_type ?? 'single_card',
@@ -180,66 +147,7 @@ function buildFormState(initial: StartingInventoryItem): FormState {
 
     opgLow: '',
     opgHigh: '',
-  }
-}
-
-
-export default function EditStartingInventoryPage({
-  params,
-}: EditStartingInventoryPageProps) {
-  const resolvedParams = use(params)
-
-  const defaultInitial = useMemo(
-    () => buildDefaultInitial(resolvedParams.id),
-    [resolvedParams.id]
-  )
-
-  const [isLoadingItem, setIsLoadingItem] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [form, setForm] = useState<FormState>(() => buildFormState(defaultInitial))
-
-  useEffect(() => {
-    let isMounted = true
-
-    async function loadStartingInventoryItem() {
-      setIsLoadingItem(true)
-      setLoadError('')
-
-      const supabase = createClient()
-
-      const { data, error } = await supabase
-        .from('starting_inventory_items')
-        .select('*')
-        .eq('id', resolvedParams.id)
-        .maybeSingle()
-
-      if (!isMounted) return
-
-      if (error) {
-        console.error(error)
-        setLoadError('Could not load this starting inventory item.')
-        setForm(buildFormState(defaultInitial))
-        setIsLoadingItem(false)
-        return
-      }
-
-      if (!data) {
-        setLoadError('Starting inventory item was not found.')
-        setForm(buildFormState(defaultInitial))
-        setIsLoadingItem(false)
-        return
-      }
-
-      setForm(buildFormState(data as StartingInventoryItem))
-      setIsLoadingItem(false)
-    }
-
-    loadStartingInventoryItem()
-
-    return () => {
-      isMounted = false
-    }
-  }, [defaultInitial, resolvedParams.id])
+  })
 
   const quantityNumber = useMemo(
     () => Math.max(1, Math.floor(asNumber(form.quantity) || 1)),
@@ -296,28 +204,16 @@ export default function EditStartingInventoryPage({
           </p>
         </div>
 
-        <Link
+        <a
           href="/app/starting-inventory"
           className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
         >
           Back
-        </Link>
+        </a>
       </div>
 
-      {isLoadingItem ? (
-        <div className="mt-6 rounded-xl border border-blue-800 bg-blue-950/40 px-4 py-3 text-sm text-blue-200">
-          Loading starting inventory item...
-        </div>
-      ) : null}
-
-      {loadError ? (
-        <div className="mt-6 rounded-xl border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-200">
-          {loadError}
-        </div>
-      ) : null}
-
       <form className="mt-6 space-y-6">
-        <input type="hidden" name="id" value={resolvedParams.id} />
+        <input type="hidden" name="id" value={initial.id} />
         <input type="hidden" name="destination" value={form.destination} />
         <input type="hidden" name="item_type" value={form.itemType} />
         <input type="hidden" name="title" value={form.title} />
@@ -667,69 +563,6 @@ export default function EditStartingInventoryPage({
           </section>
         )}
 
-        {!isBulk ? (
-          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-            <h2 className="text-lg font-semibold">Research Value</h2>
-
-            <p className="mt-2 text-sm text-zinc-400">
-              Use these tools to estimate value and determine a reasonable cost basis.
-            </p>
-
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  const query = [
-                    form.year,
-                    form.brand,
-                    form.setName,
-                    form.playerName,
-                    form.cardNumber,
-                    form.parallelName,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-
-                  window.open(
-                    `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(
-                      query
-                    )}&LH_Sold=1&LH_Complete=1`,
-                    '_blank'
-                  )
-                }}
-                className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
-              >
-                eBay Sold Comps
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const query = [
-                    form.year,
-                    form.brand,
-                    form.setName,
-                    form.playerName,
-                    form.cardNumber,
-                  ]
-                    .filter(Boolean)
-                    .join(' ')
-
-                  window.open(
-                    `https://www.sportscardspro.com/search-products?q=${encodeURIComponent(
-                      query
-                    )}`,
-                    '_blank'
-                  )
-                }}
-                className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
-              >
-                SportsCardsPro
-              </button>
-            </div>
-          </section>
-        ) : null}
-
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-lg font-semibold">Cost Basis and Tax Notes</h2>
 
@@ -876,12 +709,12 @@ export default function EditStartingInventoryPage({
             Save Changes
           </button>
 
-          <Link
+          <a
             href="/app/starting-inventory"
             className="rounded-xl border border-zinc-700 px-4 py-2 hover:bg-zinc-800"
           >
             Cancel
-          </Link>
+          </a>
         </div>
       </form>
     </div>

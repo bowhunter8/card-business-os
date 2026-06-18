@@ -23,6 +23,7 @@ type InventoryRow = {
 type ExpenseRow = {
   category: string | null
   amount: number | null
+  notes: string | null
 }
 
 type DisposalInventoryItemRow = {
@@ -84,6 +85,8 @@ type ExpenseCategorySummaryRow = {
   category: string
   amount: number
   count: number
+  giveawayAmount: number
+  giveawayCount: number
   scheduleCArea: string
 }
 
@@ -383,6 +386,35 @@ function mapExpenseCategoryToScheduleCArea(category: string) {
   }
 
   return 'Other expenses'
+}
+
+function categoryIncludes(row: ExpenseCategorySummaryRow, keywords: string[]) {
+  const normalized = row.category.toLowerCase()
+  return keywords.some((keyword) => normalized.includes(keyword))
+}
+
+function isGiveawayExpenseText(value: string | null | undefined) {
+  const normalized = String(value ?? '').toLowerCase()
+
+  return (
+    normalized.includes('giveaway') ||
+    normalized.includes('givvy') ||
+    normalized.includes('givvies') ||
+    normalized.includes('buyer appreciation') ||
+    normalized.includes('buyer gift') ||
+    normalized.includes('buyer gifts') ||
+    normalized.includes('stream promotion') ||
+    normalized.includes('stream giveaway') ||
+    normalized.includes('whatnot promotion') ||
+    normalized.includes('customer appreciation') ||
+    normalized.includes('customer retention') ||
+    normalized.includes('contest prize') ||
+    normalized.includes('promotion prize') ||
+    normalized.includes('promo prize') ||
+    normalized.includes('inventory giveaway recorded') ||
+    normalized.includes('giveaway type:') ||
+    normalized.includes('business purpose:')
+  )
 }
 
 function formatDisposalReason(value: string | null | undefined) {
@@ -720,7 +752,8 @@ export async function GET(request: NextRequest) {
       .from('expenses')
       .select(`
         category,
-        amount
+        amount,
+        notes
       `)
       .eq('user_id', user.id)
       .gte('expense_date', startDate)
@@ -856,14 +889,24 @@ export async function GET(request: NextRequest) {
   const endingInventoryCost = lockedEndingInventoryCost ?? liveEndingInventoryCost
   const endingInventoryIsLocked = lockedEndingInventoryCost != null
 
-  const expenseByCategory = new Map<string, { amount: number; count: number }>()
+  const expenseByCategory = new Map<string, { amount: number; count: number; giveawayAmount: number; giveawayCount: number }>()
 
   for (const expense of expenses) {
     const category = String(expense.category || 'Uncategorized').trim() || 'Uncategorized'
-    const current = expenseByCategory.get(category) ?? { amount: 0, count: 0 }
+    const amount = Number(expense.amount ?? 0)
+    const isGiveawayExpense = isGiveawayExpenseText(category) || isGiveawayExpenseText(expense.notes)
+    const current = expenseByCategory.get(category) ?? {
+      amount: 0,
+      count: 0,
+      giveawayAmount: 0,
+      giveawayCount: 0,
+    }
+
     expenseByCategory.set(category, {
-      amount: current.amount + Number(expense.amount ?? 0),
+      amount: current.amount + amount,
       count: current.count + 1,
+      giveawayAmount: current.giveawayAmount + (isGiveawayExpense ? amount : 0),
+      giveawayCount: current.giveawayCount + (isGiveawayExpense ? 1 : 0),
     })
   }
 
@@ -872,6 +915,8 @@ export async function GET(request: NextRequest) {
       category,
       amount: roundMoney(values.amount),
       count: values.count,
+      giveawayAmount: roundMoney(values.giveawayAmount),
+      giveawayCount: values.giveawayCount,
       scheduleCArea: mapExpenseCategoryToScheduleCArea(category),
     })
   )
@@ -901,12 +946,33 @@ export async function GET(request: NextRequest) {
 
   const advertisingGiveaways = roundMoney(
     expenseCategoryRows
-      .filter(
-        (row) =>
-          row.scheduleCArea === 'Advertising' &&
-          row.category.toLowerCase().includes('giveaway')
-      )
-      .reduce((sum, row) => sum + row.amount, 0)
+      .filter((row) => row.scheduleCArea === 'Advertising')
+      .reduce((sum, row) => {
+        if (row.giveawayAmount > 0) return sum + row.giveawayAmount
+
+        if (
+          categoryIncludes(row, [
+            'giveaway',
+            'givvy',
+            'givvies',
+            'buyer appreciation',
+            'buyer gift',
+            'buyer gifts',
+            'stream promotion',
+            'stream giveaway',
+            'whatnot promotion',
+            'customer appreciation',
+            'customer retention',
+            'contest prize',
+            'promotion prize',
+            'promo prize',
+          ])
+        ) {
+          return sum + row.amount
+        }
+
+        return sum
+      }, 0)
   )
 
   const advertisingMarketingOther = roundMoney(
@@ -1035,6 +1101,9 @@ export async function GET(request: NextRequest) {
 
   const commissionsAndFeesCount = countForScheduleArea('Commissions and fees')
   const advertisingCount = countForScheduleArea('Advertising')
+  const advertisingGiveawayCount = expenseCategoryRows
+    .filter((row) => row.scheduleCArea === 'Advertising')
+    .reduce((sum, row) => sum + row.giveawayCount, 0)
   const suppliesCount = countForScheduleArea('Supplies')
   const officeCount = countForScheduleArea('Office expense')
   const travelCount = countForScheduleArea('Travel')
@@ -1195,7 +1264,7 @@ export async function GET(request: NextRequest) {
       type: 'main',
     },
     {
-      label: `Giveaways / buyer appreciation / stream promotion (${advertisingCount} tracked advertising entries)`,
+      label: `Giveaways / buyer appreciation / stream promotion (${advertisingGiveawayCount} tracked giveaway entries)`,
       amount: advertisingGiveaways,
       type: 'sub',
     },
@@ -1543,6 +1612,12 @@ export async function GET(request: NextRequest) {
     {
       label: 'Advertising entries',
       amount: advertisingCount,
+      valueType: 'count',
+      type: 'sub',
+    },
+    {
+      label: 'Giveaway advertising entries',
+      amount: advertisingGiveawayCount,
       valueType: 'count',
       type: 'sub',
     },

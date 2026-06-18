@@ -375,9 +375,9 @@ export default function BreakCardEntryGrid({
             <thead className="app-thead">
               <tr>
                 <th className="app-th">Year</th>
-                <th className="app-th">Set</th>
+                <th className="app-th">Brand / Product</th>
                 <th className="app-th">Item / Player / Lot Name</th>
-                <th className="app-th">Item #</th>
+                <th className="app-th">#</th>
                 <th className="app-th">Type</th>
                 <th className="app-th">Qty</th>
                 <th className="app-th">Status</th>

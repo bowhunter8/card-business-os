@@ -61,7 +61,8 @@ export async function reverseSaleAction(formData: FormData) {
       id,
       user_id,
       quantity,
-      available_quantity
+      available_quantity,
+      status
     `)
     .eq('id', inventoryItemId)
     .eq('user_id', user.id)
@@ -81,10 +82,14 @@ export async function reverseSaleAction(formData: FormData) {
     )
   }
 
+  const restoredStatus = restoredAvailable > 0 ? 'available' : 'sold'
+
   const { error: inventoryUpdateError } = await supabase
     .from('inventory_items')
     .update({
       available_quantity: restoredAvailable,
+      status: restoredStatus,
+      updated_at: new Date().toISOString(),
     })
     .eq('id', inventoryItemId)
     .eq('user_id', user.id)
@@ -114,5 +119,5 @@ export async function reverseSaleAction(formData: FormData) {
     )
   }
 
-  redirect(`/app/inventory/${inventoryItemId}?success=Sale reversed successfully`)
+  redirect(`/app/inventory/${inventoryItemId}?deletedSale=1`)
 }

@@ -246,11 +246,11 @@ export default function NewInventoryPage() {
       );
 
       if (!hasAnyFilledItem) {
-        return "Enter at least one card/item inside the bulk lot.";
+        return "Enter at least one item inside the bulk lot.";
       }
     } else {
       if (!form.player.trim() && !form.title.trim()) {
-        return "Enter either a title or a player name.";
+        return "Enter either a title or a player/item name.";
       }
     }
 
@@ -372,12 +372,48 @@ export default function NewInventoryPage() {
         <div>
           <h1 className="app-title">New Inventory Entry</h1>
           <p className="app-subtitle">
-            Add a single card or create a bulk lot with child items.
+            Add a single item or create a bulk lot with child items.
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="sticky top-3 z-40 mb-4 rounded-2xl border border-zinc-800 bg-zinc-950/95 px-4 py-3 shadow-lg backdrop-blur">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-zinc-100">
+              Ready to save this entry?
+            </div>
+            <div className="text-xs text-zinc-400">
+              Use this top button to save without scrolling to the bottom.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              form="new-inventory-form"
+              disabled={saving}
+              className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving
+                ? "Saving..."
+                : isBulkLot
+                ? "Create Bulk Lot"
+                : "Create Inventory Item"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/app/inventory")}
+              className="app-button"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <form id="new-inventory-form" onSubmit={handleSubmit} className="space-y-4">
         <section className="app-section">
           <div className="grid gap-3 md:grid-cols-3">
             <div>
@@ -389,7 +425,7 @@ export default function NewInventoryPage() {
                   updateForm("entryMode", e.target.value as EntryMode)
                 }
               >
-                <option value="single_card">Single Card</option>
+                <option value="single_card">Single Item</option>
                 <option value="bulk_lot">Bulk Lot</option>
               </select>
             </div>
@@ -412,7 +448,7 @@ export default function NewInventoryPage() {
                 className="app-input"
                 value={form.source}
                 onChange={(e) => updateForm("source", e.target.value)}
-                placeholder="Break, eBay, trade, giveaway, etc."
+                placeholder="Break, eBay, trade, giveaway, show purchase, etc."
               />
             </div>
           </div>
@@ -459,7 +495,7 @@ export default function NewInventoryPage() {
         {!isBulkLot ? (
           <section className="app-section">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Single Card Details</h2>
+              <h2 className="text-lg font-semibold">Single Item Details</h2>
               <button
                 type="button"
                 onClick={autoFillTitleForSingleCard}
@@ -481,7 +517,7 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Player</label>
+                <label className="mb-1 block text-sm text-zinc-400">Player / Item Name</label>
                 <input
                   className="app-input"
                   value={form.player}
@@ -508,17 +544,8 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Set Name</label>
-                <input
-                  className="app-input"
-                  value={form.setName}
-                  onChange={(e) => updateForm("setName", e.target.value)}
-                />
-              </div>
-
-              <div>
                 <label className="mb-1 block text-sm text-zinc-400">
-                  Card Number
+                  #
                 </label>
                 <input
                   className="app-input"
@@ -673,15 +700,6 @@ export default function NewInventoryPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-sm text-zinc-400">Set Name</label>
-                  <input
-                    className="app-input"
-                    value={form.setName}
-                    onChange={(e) => updateForm("setName", e.target.value)}
-                  />
-                </div>
-
                 <div className="md:col-span-3">
                   <label className="mb-1 block text-sm text-zinc-400">
                     Lot Description / Notes
@@ -766,7 +784,7 @@ export default function NewInventoryPage() {
 
                       <div>
                         <label className="mb-1 block text-sm text-zinc-400">
-                          Card #
+                          #
                         </label>
                         <input
                           className="app-input"
@@ -819,19 +837,6 @@ export default function NewInventoryPage() {
                           value={item.brand}
                           onChange={(e) =>
                             updateBulkItem(item.id, { brand: e.target.value })
-                          }
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-sm text-zinc-400">
-                          Set Name
-                        </label>
-                        <input
-                          className="app-input"
-                          value={item.setName}
-                          onChange={(e) =>
-                            updateBulkItem(item.id, { setName: e.target.value })
                           }
                         />
                       </div>
@@ -898,7 +903,7 @@ export default function NewInventoryPage() {
             <div className="app-metric-card py-2 px-3">
               <div className="text-sm text-zinc-400">Mode</div>
               <div className="mt-1 font-semibold">
-                {isBulkLot ? "Bulk Lot" : "Single Card"}
+                {isBulkLot ? "Bulk Lot" : "Single Item"}
               </div>
             </div>
 

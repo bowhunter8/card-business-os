@@ -4,7 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
 import { updateInventoryItemAction } from '@/app/actions/inventory'
-import { markAsGiveawayAction } from '@/app/actions/inventory-giveaway'
 import DeleteInventoryItemButton from '../DeleteInventoryItemButton'
 import EstimateValueHelper from './EstimateValueHelper'
 
@@ -62,6 +61,15 @@ type FinalizedDisposalRow = {
   notes: string | null
 }
 
+type GiveawayAuditRow = {
+  id: string
+  created_at: string | null
+  event_date: string | null
+  amount: number | null
+  quantity_change: number | null
+  notes: string | null
+}
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -99,13 +107,29 @@ function buildDisplay(item: InventoryItem) {
   const parts = [
     item.player_name,
     item.year,
-    item.set_name,
     item.card_number ? `#${item.card_number}` : null,
     item.parallel_name,
     item.notes,
   ]
 
   return parts.filter(Boolean).join(' • ')
+}
+
+function readGiveawayDetail(notes: string | null | undefined, label: string) {
+  if (!notes) return '—'
+
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const nextLabels =
+    'Giveaway Type|Business Purpose|Recipient Type|Campaign / Event|Related Order / Sale #|Notes|Do not also deduct'
+  const pattern = new RegExp(`${escapedLabel}:\\s*(.*?)(?=\\s+(?:${nextLabels}):|\\s+Do not also deduct|$)`)
+  const match = notes.match(pattern)
+
+  return match?.[1]?.trim() || '—'
+}
+
+function giveawayQuantity(row: GiveawayAuditRow | null) {
+  const quantity = Math.abs(Number(row?.quantity_change ?? 0))
+  return Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '—'
 }
 
 function renderStatusPill(status: string | null) {
@@ -148,6 +172,7 @@ function EditableField({
   step,
   min,
   formId,
+  disabled = false,
 }: {
   label: string
   name: string
@@ -156,6 +181,7 @@ function EditableField({
   step?: string | number
   min?: string | number
   formId: string
+  disabled?: boolean
 }) {
   return (
     <div className="app-metric-card p-3">
@@ -170,7 +196,8 @@ function EditableField({
         step={step}
         min={min}
         defaultValue={defaultValue}
-        className="app-input mt-1.5"
+        disabled={disabled}
+        className={`app-input mt-1.5 ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
       />
     </div>
   )
@@ -196,11 +223,13 @@ function EditableSelect({
   name,
   defaultValue,
   formId,
+  disabled = false,
 }: {
   label: string
   name: string
   defaultValue: string
   formId: string
+  disabled?: boolean
 }) {
   return (
     <div className="app-metric-card p-3">
@@ -212,7 +241,8 @@ function EditableSelect({
         form={formId}
         name={name}
         defaultValue={defaultValue}
-        className="app-select mt-1.5"
+        disabled={disabled}
+        className={`app-select mt-1.5 ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
       >
         <option value="available">For Sale</option>
         <option value="listed">Listed</option>
@@ -300,7 +330,7 @@ export default async function InventoryDetailPage({
 
   if (!user) return null
 
-  const [itemResponse, salesResponse, finalizedDisposalResponse] = await Promise.all([
+  const [itemResponse, salesResponse, finalizedDisposalResponse, giveawayAuditResponse] = await Promise.all([
     supabase
       .from('inventory_items')
       .select(`
@@ -372,6 +402,23 @@ export default async function InventoryDetailPage({
       .eq('finalized_for_tax', true)
       .order('created_at', { ascending: false })
       .limit(1),
+
+    supabase
+      .from('inventory_transactions')
+      .select(`
+        id,
+        created_at,
+        event_date,
+        amount,
+        quantity_change,
+        notes
+      `)
+      .eq('user_id', user.id)
+      .eq('inventory_item_id', id)
+      .eq('transaction_type', 'adjustment')
+      .eq('to_status', 'giveaway')
+      .order('created_at', { ascending: false })
+      .limit(1),
   ])
 
   if (itemResponse.error || !itemResponse.data) {
@@ -382,8 +429,13 @@ export default async function InventoryDetailPage({
   const sales: SaleRow[] = (salesResponse.data ?? []) as SaleRow[]
   const finalizedDisposal =
     ((finalizedDisposalResponse.data ?? [])[0] as FinalizedDisposalRow | undefined) ?? null
+  const giveawayAudit =
+    ((giveawayAuditResponse.data ?? [])[0] as GiveawayAuditRow | undefined) ?? null
 
   const isFinalizedDisposal = Boolean(finalizedDisposal)
+
+  const isGiveaway = item.status === 'giveaway'
+  const isLockedForBusinessEvent = isFinalizedDisposal || isGiveaway
 
   const activeSales = sales.filter((sale) => !sale.reversed_at)
 
@@ -397,10 +449,10 @@ export default async function InventoryDetailPage({
     availableQuantity <= 0 && totalQtySold > 0 ? 'sold' : item.status
 
   const hasAvailableToSell = availableQuantity > 0
-  const latestActiveSale = activeSales[0] ?? null
   const canDelete = activeSales.length === 0
   const itemFormId = 'inventory-inline-edit-form'
   const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
+  const hasActiveSales = activeSales.length > 0
 
   return (
     <div className="app-page-wide space-y-3">
@@ -423,52 +475,51 @@ export default async function InventoryDetailPage({
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             {renderStatusPill(effectiveStatus)}
 
-            {!isFinalizedDisposal && hasAvailableToSell ? (
+            {!isLockedForBusinessEvent && hasAvailableToSell ? (
               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
                 Sell Item
               </Link>
+            ) : null}
+
+            {!isLockedForBusinessEvent && hasActiveSales ? (
+              <a href="#sales-history" className="app-button">
+                Reverse Sale
+              </a>
             ) : null}
           </div>
         </div>
 
         <div className="flex flex-wrap items-start gap-2">
-          <button type="submit" form={itemFormId} className="app-button">
-            Save Changes
-          </button>
+          {isLockedForBusinessEvent ? (
+            <span className="app-button pointer-events-none opacity-60">
+              Locked
+            </span>
+          ) : (
+            <>
+              <button type="submit" form={itemFormId} className="app-button">
+                Save Changes
+              </button>
 
-          <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
-            Edit Page
-          </Link>
+              <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
+                Edit Page
+              </Link>
+            </>
+          )}
 
           {isFinalizedDisposal ? (
             <div className="rounded-full border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-200">
               Locked For Tax Review
             </div>
-          ) : hasAvailableToSell ? (
-            <>
-              <form action={markAsGiveawayAction}>
-                <input type="hidden" name="inventory_item_id" value={item.id} />
-                <button type="submit" className="app-button-warning">
-                  Mark as Giveaway
-                </button>
-              </form>
-            </>
-          ) : latestActiveSale ? (
-            <form action={reverseSaleAction}>
-              <input type="hidden" name="sale_id" value={latestActiveSale.id} />
-              <input type="hidden" name="inventory_item_id" value={item.id} />
-              <input
-                type="hidden"
-                name="reversal_reason"
-                value="Quick reverse from inventory item header"
-              />
-              <button type="submit" className="app-button-danger">
-                Reverse Sale
-              </button>
-            </form>
+          ) : !isLockedForBusinessEvent && hasAvailableToSell ? (
+            <Link
+              href={`/app/inventory/${item.id}/giveaway`}
+              className="app-button-warning"
+            >
+              Mark as Giveaway
+            </Link>
           ) : null}
 
-          {canDelete && !isFinalizedDisposal ? (
+          {canDelete && !isLockedForBusinessEvent ? (
             <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
           ) : null}
         </div>
@@ -498,18 +549,69 @@ export default async function InventoryDetailPage({
 
       {effectiveStatus === 'giveaway' ? (
         <div className="app-alert-info">
-          This item has been marked as a Giveaway and recorded as a marketing expense.
+          <div className="font-semibold">
+            This item has been marked as a Giveaway and recorded as a marketing expense.
+          </div>
+          <div className="mt-1 text-sm">
+            Selling, deletion, quantity changes, cost changes, and status changes are disabled to help preserve clean tax records.
+          </div>
+        </div>
+      ) : null}
+
+      {effectiveStatus === 'giveaway' ? (
+        <div className="app-section mt-0 p-4">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold leading-tight">
+                Giveaway Details
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Read-only giveaway support details pulled from the audit trail.
+              </p>
+            </div>
+
+            <span className="app-button pointer-events-none opacity-60">
+              Tax Support
+            </span>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <Detail label="Giveaway Date" value={formatDate(giveawayAudit?.event_date)} />
+            <Detail label="Giveaway Type" value={readGiveawayDetail(giveawayAudit?.notes, 'Giveaway Type')} />
+            <Detail label="Recipient Type" value={readGiveawayDetail(giveawayAudit?.notes, 'Recipient Type')} />
+            <Detail label="Business Purpose" value={readGiveawayDetail(giveawayAudit?.notes, 'Business Purpose')} />
+            <Detail label="Campaign / Event" value={readGiveawayDetail(giveawayAudit?.notes, 'Campaign / Event')} />
+            <Detail label="Related Order / Sale #" value={readGiveawayDetail(giveawayAudit?.notes, 'Related Order / Sale #')} />
+            <Detail label="Quantity Given Away" value={giveawayQuantity(giveawayAudit)} />
+            <Detail label="Recorded Cost Basis" value={money(giveawayAudit?.amount)} />
+            <Detail label="Recorded" value={formatDateTime(giveawayAudit?.created_at)} />
+          </div>
+
+          {giveawayAudit?.notes ? (
+            <div className="mt-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Giveaway Notes / Audit Trail
+              </div>
+              <div className="mt-1.5 whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-sm leading-relaxed text-zinc-200">
+                {giveawayAudit.notes}
+              </div>
+            </div>
+          ) : (
+            <div className="app-alert-warning mt-3">
+              No detailed giveaway audit note was found for this item. Older giveaway records may only show the Giveaway status and related expense entry.
+            </div>
+          )}
         </div>
       ) : null}
 
       {isFinalizedDisposal ? (
         <div className="app-alert-warning">
           <div className="font-semibold">
-            This disposal has been finalized for tax write-off review and is now locked.
+            This item has been written off for tax review and is now locked.
           </div>
 
           <div className="mt-1 text-sm">
-            Selling, giveaway conversion, deletion, and sale reversal actions are disabled to preserve audit-safe records.
+            Selling, giveaway conversion, deletion, status changes, quantity changes, cost changes, and sale reversal actions are disabled to preserve audit-safe records.
           </div>
 
           <div className="mt-2 grid gap-2 md:grid-cols-3">
@@ -524,7 +626,7 @@ export default async function InventoryDetailPage({
 
             <div>
               <div className="text-xs uppercase tracking-wide text-zinc-400">
-                Disposal Reason
+                Write-Off Reason
               </div>
               <div className="mt-1 text-sm">
                 {finalizedDisposal?.disposal_reason || '—'}
@@ -533,7 +635,7 @@ export default async function InventoryDetailPage({
 
             <div>
               <div className="text-xs uppercase tracking-wide text-zinc-400">
-                Disposal Notes
+                Write-Off Notes
               </div>
               <div className="mt-1 whitespace-pre-wrap text-sm">
                 {finalizedDisposal?.disposal_notes ||
@@ -546,12 +648,18 @@ export default async function InventoryDetailPage({
       ) : null}
 
       <div className="grid gap-2 md:grid-cols-4">
-        <EditableSelect
-          label="Status"
-          name="status"
-          defaultValue={effectiveStatus ?? 'available'}
-          formId={itemFormId}
-        />
+        {isFinalizedDisposal ? (
+          <ReadonlyMetric label="Status" value="Written Off - Tax Locked" />
+        ) : isGiveaway ? (
+          <ReadonlyMetric label="Status" value="Giveaway" />
+        ) : (
+          <EditableSelect
+            label="Status"
+            name="status"
+            defaultValue={effectiveStatus ?? 'available'}
+            formId={itemFormId}
+          />
+        )}
 
         <EditableField
           label="Quantity"
@@ -560,11 +668,18 @@ export default async function InventoryDetailPage({
           min={1}
           defaultValue={item.quantity ?? 0}
           formId={itemFormId}
+          disabled={isLockedForBusinessEvent}
         />
 
         <ReadonlyMetric label="Available" value={item.available_quantity ?? 0} />
         <ReadonlyMetric label="Qty Sold" value={totalQtySold} />
       </div>
+
+      {hasActiveSales ? (
+        <div className="app-alert-info">
+          This item has active sale history. To reverse a sale, use the Sales History section below and reverse the specific sale row.
+        </div>
+      ) : null}
 
       <div className="grid gap-2 md:grid-cols-4">
         <EditableField
@@ -575,6 +690,7 @@ export default async function InventoryDetailPage({
           min={0}
           defaultValue={moneyInput(item.cost_basis_unit)}
           formId={itemFormId}
+          disabled={isLockedForBusinessEvent}
         />
         <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
         <EstimateValueMetric item={item} formId={itemFormId} />
@@ -584,9 +700,15 @@ export default async function InventoryDetailPage({
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <h2 className="text-base font-semibold leading-tight">Quick Edit Item</h2>
 
-          <button type="submit" form={itemFormId} className="app-button">
-            Save Changes
-          </button>
+          {isLockedForBusinessEvent ? (
+            <span className="app-button pointer-events-none opacity-60">
+              Locked
+            </span>
+          ) : (
+            <button type="submit" form={itemFormId} className="app-button">
+              Save Changes
+            </button>
+          )}
         </div>
 
         <div className="mt-3 grid gap-2.5 md:grid-cols-3">
@@ -597,22 +719,24 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="title"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.title ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Item Name
+              Player / Item Name
             </label>
             <input
               form={itemFormId}
               name="player_name"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.player_name ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -623,35 +747,24 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="year"
+              disabled={isLockedForBusinessEvent}
               type="number"
               defaultValue={item.year ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Set
-            </label>
-            <input
-              form={itemFormId}
-              name="set_name"
-              type="text"
-              defaultValue={item.set_name ?? ''}
-              className="app-input"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Item #
+              #
             </label>
             <input
               form={itemFormId}
               name="card_number"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.card_number ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -662,9 +775,10 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="brand"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.brand ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -675,9 +789,10 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="parallel_name"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.parallel_name ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -688,9 +803,10 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="team"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.team ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -701,9 +817,10 @@ export default async function InventoryDetailPage({
             <input
               form={itemFormId}
               name="storage_location"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.storage_location ?? ''}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -714,9 +831,10 @@ export default async function InventoryDetailPage({
             <textarea
               form={itemFormId}
               name="notes"
+              disabled={isLockedForBusinessEvent}
               rows={3}
               defaultValue={item.notes ?? ''}
-              className="app-textarea"
+              className={`app-textarea ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
         </div>
@@ -740,12 +858,13 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_price"
+              disabled={isLockedForBusinessEvent}
               type="number"
               min={0}
               step="0.01"
               defaultValue={item.listed_price != null ? Number(item.listed_price).toFixed(2) : ''}
               placeholder="0.00"
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -755,10 +874,11 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_platform"
+              disabled={isLockedForBusinessEvent}
               type="text"
               defaultValue={item.listed_platform ?? ''}
               placeholder="eBay, Whatnot, Facebook, local..."
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
@@ -768,16 +888,23 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_date"
+              disabled={isLockedForBusinessEvent}
               type="date"
               defaultValue={formatDateInput(item.listed_date)}
-              className="app-input"
+              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
             />
           </div>
 
           <div className="md:col-span-3 flex justify-end pt-1">
-            <button type="submit" className="app-button">
-              Save Listing Details
-            </button>
+            {isLockedForBusinessEvent ? (
+              <span className="app-button pointer-events-none opacity-60">
+                Listing Locked
+              </span>
+            ) : (
+              <button type="submit" className="app-button">
+                Save Listing Details
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -787,9 +914,8 @@ export default async function InventoryDetailPage({
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <Detail label="Year" value={item.year?.toString() || '—'} />
-          <Detail label="Set" value={item.set_name || '—'} />
-          <Detail label="Item Name" value={item.player_name || '—'} />
-          <Detail label="Item #" value={item.card_number || '—'} />
+          <Detail label="Player / Item Name" value={item.player_name || '—'} />
+          <Detail label="#" value={item.card_number || '—'} />
           <Detail label="Brand" value={item.brand || '—'} />
           <Detail label="Parallel" value={item.parallel_name || '—'} />
           <Detail label="Team" value={item.team || '—'} />
@@ -829,9 +955,12 @@ export default async function InventoryDetailPage({
         ) : null}
       </div>
 
-      <div className="app-table-wrap mt-0 overflow-hidden">
+      <div id="sales-history" className="app-table-wrap mt-0 overflow-hidden scroll-mt-24">
         <div className="border-b border-zinc-800 px-4 py-2.5">
           <h2 className="text-base font-semibold leading-tight">Sales History</h2>
+          <p className="mt-1 text-xs leading-snug text-zinc-400">
+            Reverse individual sales here. This is safest for partial quantity lots because each sale may belong to a different buyer or transaction.
+          </p>
         </div>
 
         {sales.length === 0 ? (
@@ -882,9 +1011,9 @@ export default async function InventoryDetailPage({
                           <div className="text-xs text-zinc-500">
                             {sale.reversal_reason || 'Already reversed'}
                           </div>
-                        ) : isFinalizedDisposal ? (
+                        ) : isLockedForBusinessEvent ? (
                           <div className="text-xs text-amber-300">
-                            Locked after finalized disposal review
+                            Locked after giveaway or write-off review
                           </div>
                         ) : (
                           <form action={reverseSaleAction} className="space-y-1.5">
@@ -897,7 +1026,7 @@ export default async function InventoryDetailPage({
                               className="app-textarea min-w-[200px]"
                             />
                             <button type="submit" className="app-button-danger">
-                              Reverse Sale
+                              Reverse This Sale
                             </button>
                           </form>
                         )}

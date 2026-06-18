@@ -3,6 +3,10 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import TaxExportButton from '../TaxExportButton'
 import TaxPdfExportButton from '../TaxPdfExportButton'
+import {
+  lockEndingInventorySnapshotAction,
+  unlockEndingInventorySnapshotAction,
+} from '@/app/actions/tax'
 
 type SearchParams = Promise<{
   year?: string
@@ -101,6 +105,7 @@ type TaxYearSettingsRow = {
   beginning_inventory: number | null
   ending_inventory_snapshot: number | null
   ending_inventory_locked_at: string | null
+  ending_inventory_item_count: number | null
   business_use_of_home: number | null
   vehicle_expense: number | null
   depreciation_expense: number | null
@@ -183,6 +188,7 @@ async function saveTaxYearSettings(formData: FormData) {
 
   const payload = {
     user_id: user.id,
+    year,
     tax_year: year,
     beginning_inventory: parseMoneyInput(formData.get('beginning_inventory')),
     business_use_of_home: parseMoneyInput(formData.get('business_use_of_home')),
@@ -200,7 +206,7 @@ async function saveTaxYearSettings(formData: FormData) {
   await supabase
     .from('tax_year_settings')
     .upsert(payload, {
-      onConflict: 'user_id,tax_year',
+      onConflict: 'user_id,year',
     })
 
   revalidatePath('/app/reports/tax/summary')
@@ -251,6 +257,7 @@ async function carryForwardEndingInventory(formData: FormData) {
     .upsert(
       {
         user_id: user.id,
+        year: nextYear,
         tax_year: nextYear,
         beginning_inventory: endingInventoryCost,
         business_use_of_home: Number(existingSettings?.business_use_of_home ?? 0),
@@ -265,7 +272,7 @@ async function carryForwardEndingInventory(formData: FormData) {
         updated_at: new Date().toISOString(),
       },
       {
-        onConflict: 'user_id,tax_year',
+        onConflict: 'user_id,year',
       }
     )
 
@@ -424,6 +431,7 @@ export default async function TaxReportPage({
         beginning_inventory,
         ending_inventory_snapshot,
         ending_inventory_locked_at,
+        ending_inventory_item_count,
         business_use_of_home,
         vehicle_expense,
         depreciation_expense,
@@ -558,31 +566,6 @@ export default async function TaxReportPage({
     'beginning_inventory' | 'notes'
   > | null
 
-  if (!nextTaxSettings && endingInventoryCost > 0) {
-    await supabase
-      .from('tax_year_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          tax_year: nextYear,
-          beginning_inventory: endingInventoryCost,
-          business_use_of_home: 0,
-          vehicle_expense: 0,
-          depreciation_expense: 0,
-          legal_professional: 0,
-          insurance: 0,
-          utilities: 0,
-          taxes_licenses: 0,
-          repairs_maintenance: 0,
-          notes: `Auto-created from ${selectedYear} ending inventory: ${money(endingInventoryCost)}.`,
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: 'user_id,tax_year',
-        }
-      )
-  }
-
   const beginningInventory = Number(taxSettings?.beginning_inventory ?? 0)
   const businessUseOfHome = Number(taxSettings?.business_use_of_home ?? 0)
   const vehicleExpense = Number(taxSettings?.vehicle_expense ?? 0)
@@ -593,6 +576,14 @@ export default async function TaxReportPage({
   const taxesLicenses = Number(taxSettings?.taxes_licenses ?? 0)
   const repairsMaintenance = Number(taxSettings?.repairs_maintenance ?? 0)
   const endingInventoryIsLocked = taxSettings?.ending_inventory_snapshot != null
+  const lockedEndingInventorySnapshot = Number(taxSettings?.ending_inventory_snapshot ?? 0)
+  const yearEndInventoryCost = endingInventoryIsLocked
+    ? lockedEndingInventorySnapshot
+    : endingInventoryCost
+  const lockedEndingInventoryItemCount = Number(taxSettings?.ending_inventory_item_count ?? 0)
+  const lockedEndingInventoryDate = taxSettings?.ending_inventory_locked_at
+    ? formatDate(taxSettings.ending_inventory_locked_at)
+    : 'Not locked'
   const manualExpenseCount = expenses.length
   const uncategorizedExpenseCount = expenses.filter((expense) => {
     const category = String(expense.category ?? '').trim().toLowerCase()
@@ -607,7 +598,7 @@ export default async function TaxReportPage({
     taxReadinessWarnings.push('No yearly tax settings record exists yet. Beginning inventory and extra Schedule C lines are using zero defaults.')
   }
 
-  if (beginningInventory === 0 && (totalCOGS > 0 || endingInventoryCost > 0)) {
+  if (beginningInventory === 0 && (totalCOGS > 0 || yearEndInventoryCost > 0)) {
     taxReadinessWarnings.push('Beginning inventory is zero. Confirm this is correct before filing.')
   }
 
@@ -699,7 +690,7 @@ export default async function TaxReportPage({
           <StatCard label="Realized COGS" value={money(totalCOGS)} />
           <StatCard label="Realized Profit" value={money(totalProfit)} />
           <StatCard label="Beginning Inventory" value={money(beginningInventory)} />
-          <StatCard label="Ending Inventory Cost" value={money(endingInventoryCost)} />
+          <StatCard label="Ending Inventory Cost" value={money(yearEndInventoryCost)} />
           <StatCard label="Ending Inventory Est. Value" value={money(endingInventoryEstimatedValue)} />
           <StatCard label="Home Office" value={money(businessUseOfHome)} />
           <StatCard label="Depreciation / Section 179" value={money(depreciationExpense)} />
@@ -762,9 +753,9 @@ export default async function TaxReportPage({
         </div>
       </div>
 
-      {endingInventoryCost > 0 && (
+      {yearEndInventoryCost > 0 && (
         <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/20 p-4 text-sm text-emerald-100">
-          The system checks for a {nextYear} tax settings record automatically. If one does not exist yet, it creates it using {selectedYear} ending inventory as {nextYear} beginning inventory.
+          Use Inventory Carryover below after locking the year. Carry Forward updates {nextYear} beginning inventory using the official {selectedYear} year-end inventory value.
         </div>
       )}
 
@@ -933,6 +924,88 @@ export default async function TaxReportPage({
         </form>
 
         <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Ending Inventory Snapshot Lock</h3>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-400">
+                Lock the ending inventory snapshot before filing taxes or sending final numbers to a CPA.
+                Once locked, tax exports can use this saved year-end inventory value instead of changing live inventory totals.
+              </p>
+
+              <div className="mt-3 grid gap-2 text-sm md:grid-cols-3">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">Lock Status</div>
+                  <div className="mt-1 font-semibold text-zinc-100">
+                    {endingInventoryIsLocked ? 'Locked' : 'Not Locked'}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">Locked Snapshot</div>
+                  <div className="mt-1 font-semibold text-zinc-100">
+                    {endingInventoryIsLocked ? money(lockedEndingInventorySnapshot) : money(endingInventoryCost)}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                  <div className="text-xs uppercase tracking-wide text-zinc-500">Locked At</div>
+                  <div className="mt-1 font-semibold text-zinc-100">{lockedEndingInventoryDate}</div>
+                </div>
+              </div>
+
+              {endingInventoryIsLocked ? (
+                <p className="mt-3 text-xs text-zinc-500">
+                  Snapshot item count: {lockedEndingInventoryItemCount}. Unlock only if you need to correct records before final filing.
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-amber-200">
+                  Current live ending inventory cost is {money(endingInventoryCost)}. Type LOCK below to save this as the official {selectedYear} ending inventory snapshot.
+                </p>
+              )}
+            </div>
+
+            {endingInventoryIsLocked ? (
+              <form action={unlockEndingInventorySnapshotAction} className="w-full max-w-sm space-y-2">
+                <input type="hidden" name="tax_year" value={selectedYear} />
+
+                <label className="block">
+                  <span className="mb-1 block text-xs text-zinc-400">Type UNLOCK to remove snapshot</span>
+                  <input
+                    name="confirm_unlock"
+                    className="app-input"
+                    placeholder="UNLOCK"
+                  />
+                </label>
+
+                <button
+                  type="submit"
+                  className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+                >
+                  Unlock Ending Inventory
+                </button>
+              </form>
+            ) : (
+              <form action={lockEndingInventorySnapshotAction} className="w-full max-w-sm space-y-2">
+                <input type="hidden" name="tax_year" value={selectedYear} />
+
+                <label className="block">
+                  <span className="mb-1 block text-xs text-zinc-400">Type LOCK to confirm snapshot</span>
+                  <input
+                    name="confirm_lock"
+                    className="app-input"
+                    placeholder="LOCK"
+                  />
+                </label>
+
+                <button type="submit" className="app-button-primary whitespace-nowrap">
+                  Lock Ending Inventory
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <h3 className="text-lg font-semibold">Inventory Carryover</h3>
@@ -942,7 +1015,7 @@ export default async function TaxReportPage({
               <p className="mt-2 text-sm text-zinc-300">
                 Carryover amount:{' '}
                 <span className="font-semibold text-zinc-100">
-                  {money(endingInventoryCost)}
+                  {money(yearEndInventoryCost)}
                 </span>
               </p>
             </div>
@@ -952,7 +1025,7 @@ export default async function TaxReportPage({
               <input
                 type="hidden"
                 name="ending_inventory_cost"
-                value={endingInventoryCost}
+                value={yearEndInventoryCost}
               />
 
               <button type="submit" className="app-button-primary">

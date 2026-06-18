@@ -6,15 +6,14 @@ import { useEffect, useState } from 'react'
 import CreateRestorePointButton from './CreateRestorePointButton'
 import DownloadBackupButton from './DownloadBackupButton'
 import RestorePreviewPanel from './RestorePreviewPanel'
-import ScheduledBackupSection from './ScheduledBackupSection'
 
-function formatDateTime(value: string | null) {
-  if (!value) return 'No manual restore point recorded yet'
+function formatDateTime(value: string | null, fallback: string) {
+  if (!value) return fallback
 
   const date = new Date(value)
 
   if (Number.isNaN(date.getTime())) {
-    return 'No manual restore point recorded yet'
+    return fallback
   }
 
   return date.toLocaleString()
@@ -74,19 +73,55 @@ function BackupActionCard({
 }
 
 export default function BackupRestorePage() {
-  const [lastBackup, setLastBackup] = useState<string | null>(null)
+  const [lastRestorePoint, setLastRestorePoint] = useState<string | null>(null)
+  const [lastBackupDownload, setLastBackupDownload] = useState<string | null>(null)
   const [showRestorePointPanel, setShowRestorePointPanel] = useState(false)
+  const [showRestorePointLoadingNotice, setShowRestorePointLoadingNotice] =
+    useState(false)
   const [showBackupFileRestorePanel, setShowBackupFileRestorePanel] =
     useState(false)
-  const [showScheduleSettings, setShowScheduleSettings] = useState(false)
 
   useEffect(() => {
-    const storedLastBackup = localStorage.getItem('last_backup_date')
+    const storedLastRestorePoint = localStorage.getItem('last_restore_point_date')
+    const legacyLastRestorePoint = localStorage.getItem('last_backup_date')
+    const storedLastBackupDownload = localStorage.getItem('last_backup_download')
 
-    if (storedLastBackup) {
-      setLastBackup(storedLastBackup)
+    if (storedLastRestorePoint || legacyLastRestorePoint) {
+      setLastRestorePoint(storedLastRestorePoint || legacyLastRestorePoint)
+    }
+
+    if (storedLastBackupDownload) {
+      setLastBackupDownload(storedLastBackupDownload)
+    }
+
+    function handleBackupDownloadRecorded() {
+      const updatedLastBackupDownload = localStorage.getItem('last_backup_download')
+      setLastBackupDownload(updatedLastBackupDownload)
+    }
+
+    window.addEventListener('hits-backup-download-recorded', handleBackupDownloadRecorded)
+
+    return () => {
+      window.removeEventListener('hits-backup-download-recorded', handleBackupDownloadRecorded)
     }
   }, [])
+
+  useEffect(() => {
+    if (!showRestorePointPanel) {
+      setShowRestorePointLoadingNotice(false)
+      return
+    }
+
+    setShowRestorePointLoadingNotice(true)
+
+    const timer = window.setTimeout(() => {
+      setShowRestorePointLoadingNotice(false)
+    }, 18000)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [showRestorePointPanel])
 
   return (
     <div className="app-page-wide space-y-5">
@@ -95,8 +130,8 @@ export default function BackupRestorePage() {
           <h1 className="app-title">Backup & Restore</h1>
 
           <p className="app-subtitle">
-            Protect your data with restore points, downloadable JSON backups,
-            scheduled backup settings, and simple restore tools.
+            Protect your data with manual restore points, downloadable JSON
+            backups, and simple restore tools.
           </p>
         </div>
 
@@ -111,12 +146,23 @@ export default function BackupRestorePage() {
         </div>
       </div>
 
+      <section className="app-alert-info">
+        <div className="font-semibold">Weekly backup reminder</div>
+        <div className="mt-1 text-sm">
+          Download a full backup at least once per week and before major imports,
+          restores, bulk edits, write-offs, or year-end tax work.
+        </div>
+      </section>
+
       <div className="space-y-5">
         <BackupActionCard
           number="1"
           title="Restore Points"
-          description="Create a restore point before major imports, restores, edits, or large inventory changes. You can also restore the app back to a selected restore point here."
-          detail={`Last restore point: ${formatDateTime(lastBackup)}`}
+          description="Create a manual restore point before major imports, restores, edits, or large inventory changes. HITS may also create automatic restore points before higher-risk actions."
+          detail={`Last manual restore point: ${formatDateTime(
+            lastRestorePoint,
+            'No manual restore point recorded yet'
+          )}`}
           accent="green"
         >
           <CreateRestorePointButton />
@@ -136,6 +182,16 @@ export default function BackupRestorePage() {
 
         {showRestorePointPanel ? (
           <section className="app-section p-5">
+            {showRestorePointLoadingNotice ? (
+              <div className="mb-4 rounded-xl border border-blue-900/60 bg-blue-950/30 p-4 text-sm text-blue-100">
+                <div className="font-semibold">Loading restore points…</div>
+                <div className="mt-1 text-blue-200/90">
+                  Checking saved restore points. This can take several seconds
+                  if your backup history is large.
+                </div>
+              </div>
+            ) : null}
+
             <RestorePreviewPanel
               allowedSources={['restore_point']}
               defaultSource="restore_point"
@@ -147,6 +203,10 @@ export default function BackupRestorePage() {
           number="2"
           title="Backups"
           description="Download a full JSON backup for safekeeping, emergency recovery, or migration. You can also restore from a downloaded JSON backup file."
+          detail={`Last downloaded backup: ${formatDateTime(
+            lastBackupDownload,
+            'Unknown / never downloaded from this browser'
+          )}`}
           accent="blue"
         >
           <DownloadBackupButton />
@@ -173,26 +233,26 @@ export default function BackupRestorePage() {
           </section>
         ) : null}
 
-        <BackupActionCard
-          number="3"
-          title="Scheduled Backups"
-          description="Configure automatic backup frequency. Weekly backups are recommended for most users."
-          accent="purple"
-        >
-          <button
-            type="button"
-            onClick={() =>
-              setShowScheduleSettings((current) => !current)
-            }
-            className="app-button-primary w-full justify-center"
-          >
-            {showScheduleSettings
-              ? 'Hide Scheduled Backup Settings'
-              : 'Scheduled Backup Settings'}
-          </button>
-        </BackupActionCard>
+        <section className="app-section p-5">
+          <div className="grid gap-4 md:grid-cols-[56px_minmax(0,1fr)] md:items-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-purple-500/30 bg-purple-500/10 text-lg font-bold text-purple-300">
+              3
+            </div>
 
-        {showScheduleSettings ? <ScheduledBackupSection /> : null}
+            <div>
+              <h2 className="text-base font-semibold">
+                Manual backups only
+              </h2>
+
+              <p className="mt-1 text-sm leading-6 text-zinc-400">
+                Scheduled backups have been removed for now so the page does not
+                imply files are downloading automatically. Use Backup Now for a
+                full downloadable JSON backup, and use restore points as quick
+                rollback checkpoints.
+              </p>
+            </div>
+          </div>
+        </section>
 
         <section className="app-section p-5">
           <div className="grid gap-4 md:grid-cols-[56px_minmax(0,1fr)] md:items-center">

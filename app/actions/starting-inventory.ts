@@ -140,7 +140,9 @@ export async function updateStartingInventoryItemAction(formData: FormData) {
     redirect('/login')
   }
 
-  const startingInventoryItemId = String(formData.get('starting_inventory_item_id') ?? '').trim()
+  const startingInventoryItemId = String(
+    formData.get('starting_inventory_item_id') ?? formData.get('id') ?? ''
+  ).trim()
 
   if (!startingInventoryItemId) {
     redirect('/app/starting-inventory?error=Missing starting inventory item id')
@@ -278,7 +280,9 @@ export async function archiveStartingInventoryItemAction(formData: FormData) {
     redirect('/login')
   }
 
-  const startingInventoryItemId = String(formData.get('starting_inventory_item_id') ?? '').trim()
+  const startingInventoryItemId = String(
+    formData.get('starting_inventory_item_id') ?? formData.get('id') ?? ''
+  ).trim()
 
   if (!startingInventoryItemId) {
     redirect('/app/starting-inventory?error=Missing starting inventory item id')
@@ -311,7 +315,9 @@ export async function importStartingInventoryItemAction(formData: FormData) {
     redirect('/login')
   }
 
-  const startingInventoryItemId = String(formData.get('starting_inventory_item_id') ?? '').trim()
+  const startingInventoryItemId = String(
+    formData.get('starting_inventory_item_id') ?? formData.get('id') ?? ''
+  ).trim()
 
   if (!startingInventoryItemId) {
     redirect('/app/starting-inventory?error=Missing starting inventory item id')

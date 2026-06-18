@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAutomaticRestorePoint } from '@/lib/restore-points/createAutomaticRestorePoint'
 
 function normalizeInventoryStatus(value: string) {
   if (value === 'personal') return 'personal'
@@ -239,9 +240,11 @@ export async function updateInventoryItemAction(formData: FormData) {
     ? Math.max(0, newQuantity - soldQuantity)
     : 0
 
-  const costBasisUnit = Number.isFinite(costBasisUnitInput) && costBasisUnitInput >= 0
-    ? costBasisUnitInput
-    : Number(item.cost_basis_unit ?? 0)
+  const costBasisUnit =
+    Number.isFinite(costBasisUnitInput) && costBasisUnitInput >= 0
+      ? costBasisUnitInput
+      : Number(item.cost_basis_unit ?? 0)
+
   const year = yearRaw ? Number(yearRaw) : null
   const safeYear = year && !Number.isNaN(year) ? year : null
   const title = buildInventoryTitle({
@@ -254,6 +257,16 @@ export async function updateInventoryItemAction(formData: FormData) {
 
   const costBasisTotal = Number((costBasisUnit * newQuantity).toFixed(2))
   const estimatedValueTotal = Number((estimatedValueUnit * newQuantity).toFixed(2))
+
+  await createAutomaticRestorePoint({
+    userId: user.id,
+    backupName: `Before Inventory Edit ${new Date().toLocaleString()}`,
+    backupType: 'automatic',
+    metadata: {
+      source: 'updateInventoryItemAction',
+      inventory_item_id: inventoryItemId,
+    },
+  })
 
   const updateResponse = await supabase
     .from('inventory_items')
@@ -294,7 +307,8 @@ export async function updateInventoryItemAction(formData: FormData) {
       to_status: normalizedStatus,
       amount: 0,
       event_date: new Date().toISOString().slice(0, 10),
-      notes: normalizedStatus === 'giveaway'
+      notes:
+        normalizedStatus === 'giveaway'
           ? `Inventory moved to giveaway (marketing). Do not also deduct separately as expense.`
           : normalizedStatus === 'personal'
             ? `Inventory moved to personal collection. Treated as withdrawal, not deductible.`

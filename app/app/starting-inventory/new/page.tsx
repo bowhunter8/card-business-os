@@ -527,6 +527,69 @@ export default function NewStartingInventoryPage() {
           </section>
         )}
 
+        {!isBulk ? (
+          <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+            <h2 className="text-lg font-semibold">Research Value</h2>
+
+            <p className="mt-2 text-sm text-zinc-400">
+              Use these tools to estimate value and determine a reasonable cost basis.
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const query = [
+                    form.year,
+                    form.brand,
+                    form.setName,
+                    form.playerName,
+                    form.cardNumber,
+                    form.parallelName,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
+
+                  window.open(
+                    `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(
+                      query
+                    )}&LH_Sold=1&LH_Complete=1`,
+                    '_blank'
+                  )
+                }}
+                className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+              >
+                eBay Sold Comps
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const query = [
+                    form.year,
+                    form.brand,
+                    form.setName,
+                    form.playerName,
+                    form.cardNumber,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
+
+                  window.open(
+                    `https://www.sportscardspro.com/search-products?q=${encodeURIComponent(
+                      query
+                    )}`,
+                    '_blank'
+                  )
+                }}
+                className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800"
+              >
+                SportsCardsPro
+              </button>
+            </div>
+          </section>
+        ) : null}
+
         <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
           <h2 className="text-lg font-semibold">Cost Basis and Tax Notes</h2>
 

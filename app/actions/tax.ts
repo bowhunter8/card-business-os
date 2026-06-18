@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { buildUserBackup } from '@/app/api/utilities/backup/export/route'
 
 function safeText(value: FormDataEntryValue | null) {
   return String(value ?? '').trim()
@@ -57,7 +58,7 @@ function buildTaxSettingsRedirect({
   if (success) params.set('success', success)
   if (error) params.set('error', error)
 
-  return `/app/settings/tax?${params.toString()}`
+  return `/app/reports/tax/summary?${params.toString()}`
 }
 
 async function getLiveEndingInventoryCost({
@@ -106,6 +107,29 @@ async function getLiveEndingInventoryCost({
   }
 }
 
+async function createAutomaticTaxRestorePoint({
+  supabase,
+  userId,
+  backupName,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  backupName: string
+}) {
+  try {
+    const backup = await buildUserBackup(userId)
+
+    await supabase.from('backup_restore_points').insert({
+      user_id: userId,
+      backup_name: backupName,
+      backup_type: 'before_tax_lock',
+      backup_json: backup,
+    })
+  } catch {
+    // Automatic restore points should never block the tax workflow.
+  }
+}
+
 export async function saveTaxYearSettingsAction(formData: FormData) {
   const { supabase, user } = await requireUser()
   const taxYear = clampTaxYear(formData.get('tax_year'))
@@ -128,6 +152,7 @@ export async function saveTaxYearSettingsAction(formData: FormData) {
   const { error } = await supabase.from('tax_year_settings').upsert(
     {
       user_id: user.id,
+      year: taxYear,
       tax_year: taxYear,
       beginning_inventory: beginningInventory,
       business_use_of_home: businessUseOfHome,
@@ -141,7 +166,7 @@ export async function saveTaxYearSettingsAction(formData: FormData) {
       notes: notes || null,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'user_id,tax_year' }
+    { onConflict: 'user_id,year' }
   )
 
   if (error) {
@@ -150,6 +175,7 @@ export async function saveTaxYearSettingsAction(formData: FormData) {
 
   revalidatePath('/app/settings/tax')
   revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
   redirect(buildTaxSettingsRedirect({ year: taxYear, success: 'Tax year settings saved.' }))
 }
 
@@ -161,6 +187,12 @@ export async function lockEndingInventorySnapshotAction(formData: FormData) {
   if (confirmLock !== 'LOCK') {
     redirect(buildTaxSettingsRedirect({ year: taxYear, error: 'Type LOCK to confirm the ending inventory snapshot.' }))
   }
+
+  await createAutomaticTaxRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Tax Lock ${taxYear} ${new Date().toLocaleString()}`,
+  })
 
   const snapshot = await getLiveEndingInventoryCost({ supabase, userId: user.id })
 
@@ -174,12 +206,13 @@ export async function lockEndingInventorySnapshotAction(formData: FormData) {
     .from('tax_year_settings')
     .select('beginning_inventory')
     .eq('user_id', user.id)
-    .eq('tax_year', taxYear)
+    .eq('year', taxYear)
     .maybeSingle()
 
   const { error } = await supabase.from('tax_year_settings').upsert(
     {
       user_id: user.id,
+      year: taxYear,
       tax_year: taxYear,
       beginning_inventory: Number(existingSettings?.beginning_inventory ?? 0),
       ending_inventory_snapshot: snapshot.endingInventoryCost,
@@ -187,7 +220,7 @@ export async function lockEndingInventorySnapshotAction(formData: FormData) {
       ending_inventory_locked_at: lockedAt,
       updated_at: lockedAt,
     },
-    { onConflict: 'user_id,tax_year' }
+    { onConflict: 'user_id,year' }
   )
 
   if (error) {
@@ -206,6 +239,7 @@ export async function lockEndingInventorySnapshotAction(formData: FormData) {
 
   revalidatePath('/app/settings/tax')
   revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
   redirect(buildTaxSettingsRedirect({ year: taxYear, success: `Ending inventory snapshot locked at ${snapshot.endingInventoryCost.toFixed(2)}.` }))
 }
 
@@ -218,6 +252,12 @@ export async function unlockEndingInventorySnapshotAction(formData: FormData) {
     redirect(buildTaxSettingsRedirect({ year: taxYear, error: 'Type UNLOCK to confirm removing the locked snapshot.' }))
   }
 
+  await createAutomaticTaxRestorePoint({
+    supabase,
+    userId: user.id,
+    backupName: `Before Tax Unlock ${taxYear} ${new Date().toLocaleString()}`,
+  })
+
   const unlockedAt = new Date().toISOString()
 
   const { error } = await supabase
@@ -229,7 +269,7 @@ export async function unlockEndingInventorySnapshotAction(formData: FormData) {
       updated_at: unlockedAt,
     })
     .eq('user_id', user.id)
-    .eq('tax_year', taxYear)
+    .eq('year', taxYear)
 
   if (error) {
     redirect(buildTaxSettingsRedirect({ year: taxYear, error: error.message }))
@@ -247,5 +287,6 @@ export async function unlockEndingInventorySnapshotAction(formData: FormData) {
 
   revalidatePath('/app/settings/tax')
   revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
   redirect(buildTaxSettingsRedirect({ year: taxYear, success: 'Ending inventory snapshot unlocked.' }))
 }
