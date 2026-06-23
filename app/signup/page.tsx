@@ -1,8 +1,5 @@
 import Link from 'next/link'
-import {
-  resendConfirmationAction,
-  signUpAction,
-} from '@/app/actions/auth'
+import SignupForm from './SignupForm'
 
 export default async function SignUpPage({
   searchParams,
@@ -25,12 +22,6 @@ export default async function SignUpPage({
             </p>
           </div>
 
-          <div className="mb-4 rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-100">
-            After signing up, you must confirm your email before logging in.
-            <br />
-            If you don&apos;t see the email, check your junk or spam folder.
-          </div>
-
           {error ? (
             <div className="mb-4 rounded-xl border border-red-900/60 bg-red-950/30 p-3 text-sm text-red-200">
               {error}
@@ -43,82 +34,7 @@ export default async function SignUpPage({
             </div>
           ) : null}
 
-          <form action={signUpAction} className="space-y-4">
-            <div>
-              <label className="app-label">Email</label>
-              <input
-                name="email"
-                type="email"
-                required
-                className="app-input"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
-              <label className="app-label">Password</label>
-              <input
-                name="password"
-                type="password"
-                required
-                minLength={6}
-                className="app-input"
-                placeholder="Minimum 6 characters"
-              />
-            </div>
-
-            <label className="flex gap-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-3 text-sm text-zinc-300">
-              <input
-                name="accept_terms"
-                type="checkbox"
-                required
-                value="yes"
-                className="mt-1 h-4 w-4 shrink-0"
-              />
-              <span>
-                I agree to the{' '}
-                <Link
-                  href="/terms"
-                  target="_blank"
-                  className="text-amber-300 hover:text-amber-200"
-                >
-                  Terms & Conditions
-                </Link>{' '}
-                and{' '}
-                <Link
-                  href="/privacy"
-                  target="_blank"
-                  className="text-amber-300 hover:text-amber-200"
-                >
-                  Privacy Policy
-                </Link>
-                . I understand HITS is not tax, legal, accounting, or financial advice.
-              </span>
-            </label>
-
-            <button type="submit" className="app-button w-full">
-              Create account
-            </button>
-          </form>
-
-          <div className="mt-6 border-t border-zinc-800 pt-5">
-            <form action={resendConfirmationAction} className="space-y-3">
-              <div>
-                <label className="app-label">Resend confirmation email</label>
-                <input
-                  name="email"
-                  type="email"
-                  required
-                  className="app-input"
-                  placeholder="you@example.com"
-                />
-              </div>
-
-              <button type="submit" className="app-button w-full">
-                Resend confirmation
-              </button>
-            </form>
-          </div>
+          <SignupForm />
 
           <div className="mt-5 text-center text-sm text-zinc-400">
             Already have an account?{' '}
