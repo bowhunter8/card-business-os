@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useFormStatus } from 'react-dom'
 
 type SubmitButtonProps = {
@@ -14,17 +15,19 @@ export default function SubmitButton({
   className = 'app-button w-full',
 }: SubmitButtonProps) {
   const { pending } = useFormStatus()
+  const [clicked, setClicked] = useState(false)
 
-  console.log('SubmitButton pending:', pending)
+  const isLoading = pending || clicked
 
   return (
     <button
       type="submit"
       className={className}
-      disabled={pending}
-      aria-disabled={pending}
+      disabled={isLoading}
+      aria-disabled={isLoading}
+      onClick={() => setClicked(true)}
     >
-      {pending ? `⏳ ${pendingText}` : children}
+      {isLoading ? `⏳ ${pendingText}` : children}
     </button>
   )
 }
