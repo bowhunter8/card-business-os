@@ -479,3 +479,13 @@ body[data-theme="retro-terminal"] {
   border-color: #d4d4d8 !important;
 }
 
+
+@keyframes hitsLoadingBar {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(340%);
+  }
+}
