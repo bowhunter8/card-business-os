@@ -15,6 +15,8 @@ export default function SubmitButton({
 }: SubmitButtonProps) {
   const { pending } = useFormStatus()
 
+  console.log('SubmitButton pending:', pending)
+
   return (
     <button
       type="submit"
@@ -22,7 +24,7 @@ export default function SubmitButton({
       disabled={pending}
       aria-disabled={pending}
     >
-      {pending ? pendingText : children}
+      {pending ? `⏳ ${pendingText}` : children}
     </button>
   )
 }
