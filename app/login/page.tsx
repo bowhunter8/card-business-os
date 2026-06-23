@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { signInAction } from '@/app/actions/auth'
+import SubmitButton from '@/app/components/SubmitButton'
 
 export default async function LoginPage({
   searchParams,
@@ -58,9 +59,9 @@ export default async function LoginPage({
               />
             </div>
 
-            <button type="submit" className="app-button w-full">
+            <SubmitButton pendingText="Signing in...">
               Sign in
-            </button>
+            </SubmitButton>
           </form>
 
           <div className="mt-5 flex flex-col gap-2 text-center text-sm text-zinc-400">
