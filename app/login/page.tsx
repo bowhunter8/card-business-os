@@ -1,6 +1,5 @@
 import Link from 'next/link'
-import { signInAction } from '@/app/actions/auth'
-import SubmitButton from '@/app/components/SubmitButton'
+import LoginForm from './LoginForm'
 
 export default async function LoginPage({
   searchParams,
@@ -36,33 +35,7 @@ export default async function LoginPage({
             </div>
           ) : null}
 
-          <form action={signInAction} className="space-y-4">
-            <div>
-              <label className="app-label">Email</label>
-              <input
-                name="email"
-                type="email"
-                required
-                className="app-input"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
-              <label className="app-label">Password</label>
-              <input
-                name="password"
-                type="password"
-                required
-                className="app-input"
-                placeholder="Enter your password"
-              />
-            </div>
-
-            <SubmitButton pendingText="Signing in...">
-              Sign in
-            </SubmitButton>
-          </form>
+          <LoginForm />
 
           <div className="mt-5 flex flex-col gap-2 text-center text-sm text-zinc-400">
             <Link

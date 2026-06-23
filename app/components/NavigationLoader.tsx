@@ -1,11 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 
 export default function NavigationLoader() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -33,7 +32,7 @@ export default function NavigationLoader() {
 
   useEffect(() => {
     stopLoading()
-  }, [pathname, searchParams])
+  }, [pathname])
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -71,27 +70,15 @@ export default function NavigationLoader() {
       const nextUrl = new URL(href, window.location.href)
 
       if (nextUrl.origin !== currentUrl.origin) return
-      if (nextUrl.pathname === currentUrl.pathname && nextUrl.search === currentUrl.search) return
-
-      startLoading()
-    }
-
-    function handleSubmit(event: SubmitEvent) {
-      const form = event.target as HTMLFormElement | null
-
-      if (!form || form.tagName !== 'FORM') return
-      if (form.target === '_blank') return
-      if (!form.checkValidity()) return
+      if (nextUrl.pathname === currentUrl.pathname) return
 
       startLoading()
     }
 
     window.addEventListener('click', handleClick)
-    window.addEventListener('submit', handleSubmit)
 
     return () => {
       window.removeEventListener('click', handleClick)
-      window.removeEventListener('submit', handleSubmit)
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
