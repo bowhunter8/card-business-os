@@ -1739,6 +1739,7 @@ function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
   return (
     <details className="group">
       <summary
+        data-bulk-action-toggle="true"
         className="app-button cursor-pointer list-none whitespace-nowrap border-amber-800/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
       >
         Write Off Selected
@@ -2142,7 +2143,11 @@ function BulkSelectionScript({
           setDisabled(checkbox, totalOnPage === 0 || isBulkSubmitting);
         });
 
-        toggles().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
+        // Keep the visible bulk action buttons clickable after a row is selected.
+        // Some browsers do not reliably clear pointer-events/opacity on <summary>
+        // elements once they were disabled on initial page load. The click guard
+        // below still prevents opening confirmations when no rows are selected.
+        toggles().forEach((node) => setDisabled(node, isBulkSubmitting));
         submitButtons().forEach((node) => setDisabled(node, !hasSelection || isBulkSubmitting));
         selectPageButtons().forEach((node) => {
           setDisabled(node, totalOnPage === 0 || allPageSelected || isBulkSubmitting);
