@@ -3,7 +3,6 @@ import Script from 'next/script'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { buildUserBackup } from '@/lib/restore-points/buildUserBackup'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import DeleteInventoryItemButton from './DeleteInventoryItemButton'
 import CancelDetailsButton from '../search/CancelDetailsButton'
@@ -79,6 +78,8 @@ const BULK_FINALIZE_FORM_ID = 'bulk-finalize-inventory-direct-form'
 const BULK_SELECTION_COUNT_ID = 'bulk-inventory-selected-count'
 const BULK_SCROLL_RESTORE_ID = 'bulk-inventory-scroll-restore'
 const BULK_PENDING_STATE_ID = 'bulk-inventory-pending-state'
+const BULK_PENDING_OVERLAY_ID = 'bulk-inventory-pending-overlay'
+const BULK_SUCCESS_OVERLAY_ID = 'bulk-inventory-success-overlay'
 
 const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
@@ -432,37 +433,6 @@ async function findFinalizedWriteOffItemIds({
   }
 }
 
-async function createAutomaticInventoryRestorePoint({
-  supabase,
-  userId,
-  backupName,
-}: {
-  supabase: Awaited<ReturnType<typeof createClient>>
-  userId: string
-  backupName: string
-}) {
-  try {
-    const backup = await buildUserBackup(userId)
-
-    const { error } = await supabase.from('backup_restore_points').insert({
-      user_id: userId,
-      backup_name: backupName,
-      backup_type: 'automatic',
-      backup_json: backup,
-    })
-
-    if (error) {
-      console.error('Automatic inventory restore point failed:', error.message)
-    }
-  } catch (error) {
-    console.error(
-      'Automatic inventory restore point failed:',
-      error instanceof Error ? error.message : error
-    )
-  }
-}
-
-
 async function bulkDeleteInventoryItemsAction(formData: FormData) {
   'use server'
 
@@ -613,13 +583,6 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
     )
   }
 
-
-  await createAutomaticInventoryRestorePoint({
-    supabase,
-    userId: user.id,
-    backupName: `Before Inventory Delete ${new Date().toLocaleString()}`,
-  })
-
   const { error } = await supabase
     .from('inventory_items')
     .update({ deleted_at: deletedAt })
@@ -766,13 +729,6 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .in('id', itemIds)
-
-
-  await createAutomaticInventoryRestorePoint({
-    supabase,
-    userId: user.id,
-    backupName: `Before Bulk Inventory Status Update ${new Date().toLocaleString()}`,
-  })
 
   const inventoryUpdatePayload =
     requestedStatus === 'giveaway'
@@ -1035,12 +991,6 @@ async function bulkFinalizeGiveawayAction(formData: FormData) {
       })
     )
   }
-
-  await createAutomaticInventoryRestorePoint({
-    supabase,
-    userId: user.id,
-    backupName: `Before Bulk Giveaway ${new Date().toLocaleString()}`,
-  })
 
   const giveawayAt = new Date().toISOString()
 
@@ -1354,13 +1304,6 @@ async function bulkFinalizeDisposalWriteOffAction(formData: FormData) {
 
   const writeOffItemIds = items.map((item) => item.id)
 
-
-  await createAutomaticInventoryRestorePoint({
-    supabase,
-    userId: user.id,
-    backupName: `Before Inventory Write Off ${new Date().toLocaleString()}`,
-  })
-
   const { error: updateError } = await supabase
     .from('inventory_items')
     .update({
@@ -1591,11 +1534,11 @@ function StatusSummaryCard({
   return (
     <Link
       href={href}
-      className={`app-card-tight block p-2.5 text-center transition ${active ? activeClass : toneClass}`}
+      className={`app-card-tight block p-1.5 text-center transition ${active ? activeClass : toneClass}`}
     >
-      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">{label}</div>
-      <div className="mt-0.5 text-lg font-bold leading-none text-zinc-100">{summary.quantity}</div>
-      <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] leading-tight text-zinc-500">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-300">{label}</div>
+      <div className="mt-0 text-base font-bold leading-none text-zinc-100">{summary.quantity}</div>
+      <div className="mt-0.5 grid grid-cols-2 gap-1 text-[10px] leading-tight text-zinc-500">
         <div>
           <div className="uppercase tracking-wide">Cost</div>
           <div className="font-semibold text-zinc-200">{money(summary.cost)}</div>
@@ -1675,6 +1618,8 @@ function BulkDeleteConfirmControl({ formId }: { formId: string }) {
             form={BULK_DELETE_FORM_ID}
             formAction={bulkDeleteInventoryItemsAction}
             data-bulk-native-delete-submit="true"
+            data-bulk-delete="true"
+            data-bulk-label="Delete Selected"
             className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
           >
             Yes, Delete Selected
@@ -1845,6 +1790,8 @@ function BulkFinalizeDisposalConfirmControl({ formId }: { formId: string }) {
             form={formId}
             formAction={bulkFinalizeDisposalWriteOffAction}
             data-bulk-finalize-submit="true"
+            data-bulk-status="disposed"
+            data-bulk-label="Write Off Selected"
             className="app-button whitespace-nowrap border-amber-800/80 bg-amber-950/50 text-amber-100 hover:bg-amber-900/60"
           >
             Yes, Write Off Items
@@ -1878,8 +1825,8 @@ function BulkActionsPanel({
   limit: number
 }) {
   return (
-    <div className="sticky top-[4.75rem] z-40 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2.5 shadow-2xl shadow-black/40 backdrop-blur">
-      <div className="flex flex-col gap-2">
+    <div className="sticky top-[4.75rem] z-40 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-2 shadow-2xl shadow-black/40 backdrop-blur">
+      <div className="flex flex-col gap-1.5">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
@@ -2055,6 +2002,7 @@ function BulkSelectionScript({
       const finalizeForm = () => document.getElementById(finalizeFormId);
       const countNodes = () => Array.from(document.querySelectorAll('[data-bulk-selected-count="true"]'));
       const pendingNodes = () => Array.from(document.querySelectorAll('[data-bulk-pending-state="true"]'));
+      const pendingOverlay = () => document.getElementById('bulk-inventory-pending-overlay');
       const rowCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"][data-inventory-bulk-row-checkbox="true"]'));
       const allSelectionCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][form="' + formId + '"][name="' + fieldName + '"]'));
       const pageToggleCheckboxes = () => Array.from(document.querySelectorAll('input[type="checkbox"][data-bulk-page-checkbox="true"][form="' + formId + '"]'));
@@ -2240,11 +2188,25 @@ function BulkSelectionScript({
         });
       }
 
-      function showPendingMessage(message) {
+      function showPendingMessage(message, detail) {
         pendingNodes().forEach((node) => {
           node.textContent = message;
           node.classList.remove('hidden');
         });
+
+        const overlay = pendingOverlay();
+        if (overlay) {
+          const title = overlay.querySelector('[data-bulk-overlay-title="true"]');
+          const body = overlay.querySelector('[data-bulk-overlay-body="true"]');
+
+          if (title) title.textContent = message;
+          if (body) body.textContent = detail || 'Please wait while HITS updates the selected inventory records.';
+
+          overlay.classList.remove('hidden');
+          overlay.classList.add('flex');
+        }
+
+        document.body.classList.add('overflow-hidden');
       }
 
       function applyInstantRowState({ ids, status, isDelete }) {
@@ -2281,6 +2243,16 @@ function BulkSelectionScript({
         });
       }
 
+      function submitAfterOverlay(button) {
+        window.setTimeout(() => {
+          if (button && button.form && typeof button.form.requestSubmit === 'function') {
+            button.form.requestSubmit(button);
+          } else if (button && button.form) {
+            button.form.submit();
+          }
+        }, 150);
+      }
+
       function setSubmitting(button) {
         isBulkSubmitting = true;
         const count = selectedCount();
@@ -2292,15 +2264,23 @@ function BulkSelectionScript({
 
         button.setAttribute('data-original-label', button.textContent || label);
         button.textContent = isDelete ? 'Deleting…' : isFinalize ? 'Finalizing…' : 'Updating…';
-        showPendingMessage(
-          isDelete
-            ? 'Deleting ' + count + ' selected item(s)…'
-            : isFinalize
-              ? 'Writing off ' + count + ' selected item(s)…'
-              : status === 'giveaway'
-                ? 'Marking ' + count + ' selected item(s) as giveaways…'
-                : 'Updating ' + count + ' selected item(s)…'
-        );
+        const pendingMessage = isDelete
+          ? 'Deleting ' + count + ' selected item(s)…'
+          : isFinalize
+            ? 'Writing off ' + count + ' selected item(s)…'
+            : status === 'giveaway'
+              ? 'Marking ' + count + ' selected item(s) as giveaways…'
+              : 'Updating ' + count + ' selected item(s)…';
+
+        const pendingDetail = isDelete
+          ? 'HITS is hiding the selected correction rows and recording the inventory audit trail. A restore point will be picked up by the scheduled backup process.'
+          : isFinalize
+            ? 'HITS is removing the selected item(s) from inventory and recording the tax write-off audit trail. A restore point will be picked up by the scheduled backup process.'
+            : status === 'giveaway'
+              ? 'HITS is recording the giveaway details, marketing expense support, and inventory audit trail. A restore point will be picked up by the scheduled backup process.'
+              : 'HITS is updating the selected inventory status and recording the audit trail. A restore point will be picked up by the scheduled backup process.';
+
+        showPendingMessage(pendingMessage, pendingDetail);
         closeOpenConfirmations();
         applyInstantRowState({ ids, status, isDelete });
 
@@ -2387,24 +2367,25 @@ function BulkSelectionScript({
 
         const finalizeButton = event.target && event.target.closest ? event.target.closest('[data-bulk-finalize-submit="true"]') : null;
         if (finalizeButton) {
+          event.preventDefault();
           replaceSelectionWithVisibleCheckedRows();
 
           if (selectedCount() === 0) {
-            event.preventDefault();
             updateBulkState();
             return;
           }
 
           rememberScrollPosition();
-
-          // Submit the dedicated final disposal form normally.
+          setSubmitting(finalizeButton);
+          submitAfterOverlay(finalizeButton);
           return;
         }
 
         const nativeDeleteSubmitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-native-delete-submit="true"]') : null;
         if (nativeDeleteSubmitButton) {
+          event.preventDefault();
+
           if (selectedCount() === 0 || isBulkSubmitting) {
-            event.preventDefault();
             updateBulkState();
             return;
           }
@@ -2412,13 +2393,16 @@ function BulkSelectionScript({
           selectedIdsSet = new Set(selectedIds());
           syncStoredInputs();
           rememberScrollPosition();
+          setSubmitting(nativeDeleteSubmitButton);
+          submitAfterOverlay(nativeDeleteSubmitButton);
           return;
         }
 
         const submitButton = event.target && event.target.closest ? event.target.closest('[data-bulk-submit="true"]') : null;
         if (submitButton) {
+          event.preventDefault();
+
           if (selectedCount() === 0 || isBulkSubmitting) {
-            event.preventDefault();
             updateBulkState();
             return;
           }
@@ -2427,8 +2411,8 @@ function BulkSelectionScript({
           syncStoredInputs();
           setBulkStatus(submitButton.getAttribute('data-bulk-status') || '');
           rememberScrollPosition();
-
-          // Submit the dedicated status form normally, same as the working delete button.
+          setSubmitting(submitButton);
+          submitAfterOverlay(submitButton);
           return;
         }
       }, true);
@@ -2470,6 +2454,90 @@ function ScrollRestoreScript({ scrollY }: { scrollY: string }) {
   `
 
   return <Script id={BULK_SCROLL_RESTORE_ID} strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: script }} />
+}
+
+
+
+function buildInventoryContinueHref({
+  q,
+  sort,
+  dir,
+  page,
+  limit,
+  scrollY,
+}: {
+  q?: string
+  sort: SortKey
+  dir: SortDir
+  page: number
+  limit: number
+  scrollY?: string
+}) {
+  const params = new URLSearchParams()
+
+  if (q) {
+    params.set('q', q)
+  }
+
+  params.set('sort', sort)
+  params.set('dir', dir)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+
+  if (scrollY) {
+    params.set('scroll_y', scrollY)
+  }
+
+  return `/app/inventory?${params.toString()}#inventory-status`
+}
+
+function buildSuccessOverlayCopy({
+  saved,
+  deletedCount,
+  statusUpdated,
+}: {
+  saved: string
+  deletedCount: string
+  statusUpdated: string
+}) {
+  if (deletedCount) {
+    return {
+      title: 'Delete Complete',
+      body: `Deleted ${deletedCount} successfully. The inventory audit trail was updated and backup processing was queued.`,
+    }
+  }
+
+  if (statusUpdated) {
+    const normalized = statusUpdated.toLowerCase()
+
+    if (normalized.includes('written off')) {
+      return {
+        title: 'Write Off Complete',
+        body: `Updated ${statusUpdated} successfully. The tax audit trail was recorded and backup processing was queued.`,
+      }
+    }
+
+    if (normalized.includes('giveaway')) {
+      return {
+        title: 'Giveaway Complete',
+        body: `Updated ${statusUpdated} successfully. Marketing expense support, inventory history, and backup processing were updated.`,
+      }
+    }
+
+    return {
+      title: 'Update Complete',
+      body: `Updated ${statusUpdated} successfully. The inventory audit trail was updated and backup processing was queued.`,
+    }
+  }
+
+  if (saved === '1') {
+    return {
+      title: 'Sale Complete',
+      body: 'Quick sale recorded, inventory updated, and tax tracking kept in sync.',
+    }
+  }
+
+  return null
 }
 
 export default async function InventoryPage({
@@ -2720,9 +2788,63 @@ export default async function InventoryPage({
 
   const hasPreviousPage = page > 1
   const hasNextPage = items.length === limit
+  const successOverlayCopy = buildSuccessOverlayCopy({ saved, deletedCount, statusUpdated })
+  const successContinueHref = buildInventoryContinueHref({
+    q,
+    sort: sortKey,
+    dir: sortDir,
+    page,
+    limit,
+    scrollY,
+  })
 
   return (
-    <div className="app-page-wide flex h-[calc(100vh-6.5rem)] flex-col gap-3 overflow-hidden">
+    <div className="app-page-wide flex h-[calc(100vh-6.5rem)] flex-col gap-2 overflow-hidden">
+      <div
+        id={BULK_PENDING_OVERLAY_ID}
+        className="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+        aria-live="assertive"
+        aria-modal="true"
+        role="alertdialog"
+      >
+        <div className="w-full max-w-md rounded-2xl border border-sky-900/60 bg-zinc-950 p-5 text-center shadow-2xl shadow-black/60">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-sky-300 border-t-transparent" />
+          <div data-bulk-overlay-title="true" className="mt-4 text-base font-semibold text-zinc-100">
+            Updating selected items…
+          </div>
+          <div data-bulk-overlay-body="true" className="mt-2 text-sm leading-relaxed text-zinc-400">
+            Please wait while HITS updates the selected inventory records.
+          </div>
+          <div className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-100">
+            Do not close this page or click back while the update is finishing.
+          </div>
+        </div>
+      </div>
+
+      {successOverlayCopy ? (
+        <div
+          id={BULK_SUCCESS_OVERLAY_ID}
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+          aria-live="assertive"
+          aria-modal="true"
+          role="alertdialog"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-emerald-900/60 bg-zinc-950 p-5 text-center shadow-2xl shadow-black/60">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-emerald-700 bg-emerald-950/50 text-2xl text-emerald-200">
+              ✓
+            </div>
+            <div className="mt-4 text-lg font-semibold text-zinc-100">
+              {successOverlayCopy.title}
+            </div>
+            <div className="mt-2 text-sm leading-relaxed text-zinc-300">
+              {successOverlayCopy.body}
+            </div>
+            <Link href={successContinueHref} className="app-button-primary mt-4 inline-flex">
+              Continue
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <div className="app-page-header gap-3">
         <div className="min-w-0">
           <h1 className="app-title">Inventory</h1>
@@ -2772,7 +2894,7 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
+      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-7">
         {STATUS_FILTERS.map((status) => (
           <StatusSummaryCard
             key={status}
@@ -2784,13 +2906,6 @@ export default async function InventoryPage({
           />
         ))}
       </div>
-
-      {activeStatusFilter && inventoryTaxSafetyNote(activeStatusFilter) ? (
-        <div className="app-alert-info">
-          {inventoryTaxSafetyNote(activeStatusFilter)}
-        </div>
-      ) : null}
-
 
       {error ? <div className="app-alert-error">Error loading inventory: {error.message}</div> : null}
 

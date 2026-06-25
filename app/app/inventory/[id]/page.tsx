@@ -70,6 +70,32 @@ type GiveawayAuditRow = {
   notes: string | null
 }
 
+type RelatedSourceInventoryItem = {
+  id: string
+  status: string | null
+  title: string | null
+  player_name: string | null
+  year: number | null
+  brand: string | null
+  set_name: string | null
+  card_number: string | null
+  parallel_name: string | null
+  team: string | null
+  quantity: number | null
+  cost_basis_total: number | null
+}
+
+type RelatedBreakRow = {
+  id: string
+  break_date: string | null
+  source_name: string | null
+  product_name: string | null
+  format_type: string | null
+  order_number: string | null
+  cards_received: number | null
+  created_at: string | null
+}
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -113,6 +139,40 @@ function buildDisplay(item: InventoryItem) {
   ]
 
   return parts.filter(Boolean).join(' • ')
+}
+
+function buildRelatedSourceItemDisplay(item: RelatedSourceInventoryItem) {
+  const primary = item.title || item.player_name || 'Untitled item'
+  const details = [
+    item.year,
+    item.brand,
+    item.set_name,
+    item.card_number ? `#${item.card_number}` : null,
+    item.parallel_name,
+    item.team,
+  ]
+    .filter(Boolean)
+    .join(' • ')
+
+  return details ? `${primary} • ${details}` : primary
+}
+
+function buildSourceTypeLabel(value: string | null | undefined) {
+  if (!value) return 'Manual / Unknown'
+
+  return value
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function buildBreakTitle(breakRow: RelatedBreakRow | null, fallbackId: string | null | undefined) {
+  if (!breakRow) return fallbackId ? `Break ${fallbackId.slice(0, 8)}` : 'Related Break'
+
+  const pieces = [breakRow.product_name, breakRow.source_name, breakRow.break_date]
+    .map((piece) => String(piece || '').trim())
+    .filter(Boolean)
+
+  return pieces.length > 0 ? pieces.join(' • ') : `Break ${breakRow.id.slice(0, 8)}`
 }
 
 function readGiveawayDetail(notes: string | null | undefined, label: string) {
@@ -453,19 +513,89 @@ export default async function InventoryDetailPage({
   const itemFormId = 'inventory-inline-edit-form'
   const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
   const hasActiveSales = activeSales.length > 0
+  const relatedBreakHref = item.source_break_id ? `/app/breaks/${item.source_break_id}` : ''
+  const relatedBreakAddItemsHref = item.source_break_id
+    ? `/app/breaks/${item.source_break_id}/add-cards`
+    : ''
+  const relatedBreakItemsHref = item.source_break_id
+    ? `/app/breaks/${item.source_break_id}#break-items`
+    : ''
+
+  let relatedBreak: RelatedBreakRow | null = null
+  let relatedSourceItems: RelatedSourceInventoryItem[] = []
+
+  if (item.source_break_id) {
+    const [relatedBreakResponse, relatedSourceItemsResponse] = await Promise.all([
+      supabase
+        .from('breaks')
+        .select(`
+          id,
+          break_date,
+          source_name,
+          product_name,
+          format_type,
+          order_number,
+          cards_received,
+          created_at
+        `)
+        .eq('user_id', user.id)
+        .eq('id', item.source_break_id)
+        .maybeSingle(),
+
+      supabase
+        .from('inventory_items')
+        .select(`
+          id,
+          status,
+          title,
+          player_name,
+          year,
+          brand,
+          set_name,
+          card_number,
+          parallel_name,
+          team,
+          quantity,
+          cost_basis_total
+        `)
+        .eq('user_id', user.id)
+        .eq('source_break_id', item.source_break_id)
+        .is('deleted_at', null)
+        .neq('id', item.id)
+        .order('created_at', { ascending: true })
+        .limit(25),
+    ])
+
+    relatedBreak = (relatedBreakResponse.data as RelatedBreakRow | null) ?? null
+    relatedSourceItems = (relatedSourceItemsResponse.data ?? []) as RelatedSourceInventoryItem[]
+  }
+
+  const relatedBreakTitle = buildBreakTitle(relatedBreak, item.source_break_id)
 
   return (
-    <div className="app-page-wide space-y-3">
+    <div className="app-page-wide min-h-[calc(100vh-6.5rem)] space-y-3 pb-8">
       <form id={itemFormId} action={updateInventoryItemAction}>
         <input type="hidden" name="inventory_item_id" value={item.id} />
       </form>
 
       <div className="app-page-header gap-3">
         <div className="min-w-0">
-          <div className="mb-1">
-            <Link href="/app/inventory" className="text-xs text-zinc-400 hover:underline">
-              ← Back to Inventory
+          <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-zinc-400">
+            <Link href="/app/inventory" className="hover:text-zinc-200 hover:underline">
+              Inventory
             </Link>
+            {item.source_break_id ? (
+              <>
+                <span>/</span>
+                <Link href={relatedBreakHref} className="max-w-[20rem] truncate hover:text-zinc-200 hover:underline">
+                  {relatedBreakTitle}
+                </Link>
+              </>
+            ) : null}
+            <span>/</span>
+            <span className="max-w-[20rem] truncate text-zinc-500">
+              {item.title || item.player_name || 'Inventory Item'}
+            </span>
           </div>
 
           <h1 className="app-title text-2xl leading-tight">Inventory Item</h1>
@@ -527,6 +657,105 @@ export default async function InventoryDetailPage({
 
       {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
       {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
+
+      {item.source_break_id ? (
+        <div className="app-section mt-0 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Original Source
+              </div>
+              <h2 className="mt-1 text-base font-semibold leading-tight">
+                {relatedBreakTitle}
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                This item was created from a saved break. Use these links to review the original break, continue entering items, or jump to the other items from the same break.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Link href={relatedBreakHref} className="app-button">
+                Open Break Details
+              </Link>
+              <Link href={relatedBreakAddItemsHref} className="app-button-primary">
+                Continue Entering Items
+              </Link>
+              <Link href={relatedBreakItemsHref} className="app-button">
+                View Break Items
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <Detail label="Created From" value={buildSourceTypeLabel(item.source_type)} />
+            <Detail label="Break Date" value={formatDate(relatedBreak?.break_date)} />
+            <Detail label="Breaker / Source" value={relatedBreak?.source_name || '—'} />
+            <Detail label="Order #" value={relatedBreak?.order_number || '—'} />
+            <Detail label="Format" value={relatedBreak?.format_type || '—'} />
+            <Detail label="Items Received" value={String(relatedBreak?.cards_received ?? '—')} />
+            <Detail label="Created" value={formatDate(item.created_at)} />
+            <Detail label="Last Updated" value={formatDate(item.updated_at)} />
+          </div>
+
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Item History
+                </div>
+                <div className="mt-1 text-sm text-zinc-300">
+                  Created from break inventory entry. Cost basis and quantity are preserved on this item for sale, giveaway, personal, junk, or write-off tracking.
+                </div>
+              </div>
+              <div className="text-xs text-zinc-500">
+                Source ID: {item.source_break_id}
+              </div>
+            </div>
+          </div>
+
+          {relatedSourceItems.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Other Inventory Items From This Break
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Showing {relatedSourceItems.length} related item(s)
+                </div>
+              </div>
+              <div className="divide-y divide-zinc-800">
+                {relatedSourceItems.map((relatedItem) => (
+                  <Link
+                    key={relatedItem.id}
+                    href={`/app/inventory/${relatedItem.id}`}
+                    className="flex flex-col gap-1 px-3 py-2.5 transition hover:bg-zinc-900/70 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="break-words text-sm font-medium text-zinc-100">
+                        {buildRelatedSourceItemDisplay(relatedItem)}
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        Qty {relatedItem.quantity ?? 0} • Cost {money(relatedItem.cost_basis_total)}
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {renderStatusPill(relatedItem.status)}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="app-alert-info mt-3">
+              No other active inventory items were found with this same source break ID.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="app-alert-info">
+          This item does not have a saved source break ID. It may have been created manually, imported, or created before source linking was added.
+        </div>
+      )}
 
       {(effectiveStatus === 'personal' || effectiveStatus === 'giveaway' || effectiveStatus === 'junk') ? (
         <div className="app-alert-warning">
@@ -934,25 +1163,35 @@ export default async function InventoryDetailPage({
       </div>
 
       <div className="app-section mt-0 p-4">
-        <h2 className="text-base font-semibold leading-tight">Record Trail</h2>
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold leading-tight">Record Trail</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              System record details for this inventory item.
+            </p>
+          </div>
+
+          {item.source_break_id ? (
+            <div className="flex flex-wrap gap-2">
+              <Link href={relatedBreakHref} className="app-button">
+                Break Details
+              </Link>
+              <Link href={relatedBreakAddItemsHref} className="app-button-primary">
+                Add More Items
+              </Link>
+              <Link href={relatedBreakItemsHref} className="app-button">
+                View Break Items
+              </Link>
+            </div>
+          ) : null}
+        </div>
 
         <div className="mt-3 grid gap-2 md:grid-cols-4">
-          <Detail label="Source Type" value={item.source_type || '—'} />
-          <Detail label="Source Break ID" value={item.source_break_id || '—'} />
+          <Detail label="Source Type" value={buildSourceTypeLabel(item.source_type)} />
+          <Detail label="Source Break" value={item.source_break_id ? relatedBreakTitle : '—'} />
           <Detail label="Created" value={formatDate(item.created_at)} />
           <Detail label="Updated" value={formatDate(item.updated_at)} />
         </div>
-
-        {item.source_break_id ? (
-          <div className="mt-2">
-            <Link
-              href={`/app/breaks/${item.source_break_id}`}
-              className="text-sm text-zinc-300 hover:underline"
-            >
-              View Related Break
-            </Link>
-          </div>
-        ) : null}
       </div>
 
       <div id="sales-history" className="app-table-wrap mt-0 overflow-hidden scroll-mt-24">
