@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import Script from 'next/script'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { updateInventoryItemAction } from '@/app/actions/inventory'
@@ -32,6 +33,48 @@ type FinalizedDisposalRow = {
   disposal_reason: string | null
   disposal_notes: string | null
   notes: string | null
+}
+
+const EDIT_INVENTORY_FORM_ID = 'edit-inventory-form'
+const EDIT_INVENTORY_OVERLAY_ID = 'edit-inventory-save-overlay'
+
+function EditInventorySaveScript() {
+  const script = `
+    (() => {
+      const form = document.getElementById('${EDIT_INVENTORY_FORM_ID}');
+      const overlay = document.getElementById('${EDIT_INVENTORY_OVERLAY_ID}');
+      if (!form || !overlay) return;
+
+      let submitting = false;
+
+      function showOverlay() {
+        overlay.classList.remove('hidden');
+        overlay.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
+
+        window.setTimeout(() => {
+          form.querySelectorAll('button[type="submit"]').forEach((button) => {
+            button.setAttribute('aria-disabled', 'true');
+            button.classList.add('pointer-events-none', 'opacity-60');
+          });
+        }, 0);
+      }
+
+      form.addEventListener('submit', () => {
+        if (submitting) return;
+        submitting = true;
+        showOverlay();
+      });
+    })();
+  `
+
+  return (
+    <Script
+      id="edit-inventory-save-script"
+      strategy="afterInteractive"
+      dangerouslySetInnerHTML={{ __html: script }}
+    />
+  )
 }
 
 function renderStatusPill(status: string | null) {
@@ -178,6 +221,29 @@ export default async function EditInventoryPage({
 
   return (
     <div className="max-w-4xl">
+      <EditInventorySaveScript />
+
+      <div
+        id={EDIT_INVENTORY_OVERLAY_ID}
+        className="fixed inset-0 z-[9999] hidden items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+        aria-live="assertive"
+        aria-modal="true"
+        role="alertdialog"
+      >
+        <div className="w-full max-w-md rounded-2xl border border-sky-900/60 bg-zinc-950 p-5 text-center shadow-2xl shadow-black/60">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-sky-300 border-t-transparent" />
+          <div className="mt-4 text-base font-semibold text-zinc-100">
+            Saving Inventory Item…
+          </div>
+          <div className="mt-2 text-sm leading-relaxed text-zinc-400">
+            Please wait while HITS updates this inventory record.
+          </div>
+          <div className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-100">
+            Do not close this page or click back while the save is finishing.
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold">Edit Inventory Item</h1>
@@ -220,7 +286,7 @@ export default async function EditInventoryPage({
           ) : (
             <button
               type="submit"
-              form="edit-inventory-form"
+              form={EDIT_INVENTORY_FORM_ID}
               className="rounded-xl bg-white px-5 py-2 font-medium text-black hover:bg-zinc-200"
             >
               Save Item Changes
@@ -246,7 +312,7 @@ export default async function EditInventoryPage({
 
       <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
         <form
-          id="edit-inventory-form"
+          id={EDIT_INVENTORY_FORM_ID}
           action={updateInventoryItemAction}
           className="grid gap-4 md:grid-cols-2"
         >
