@@ -446,6 +446,293 @@ function escapeLike(value: string) {
   return value.replace(/[%_]/g, '')
 }
 
+type SearchFilters = {
+  status: string[]
+  team: string[]
+  year: string[]
+  brand: string[]
+  set: string[]
+  player: string[]
+  type: string[]
+  platform: string[]
+  seller: string[]
+  order: string[]
+  source: string[]
+  notes: string[]
+}
+
+const EMPTY_SEARCH_FILTERS: SearchFilters = {
+  status: [],
+  team: [],
+  year: [],
+  brand: [],
+  set: [],
+  player: [],
+  type: [],
+  platform: [],
+  seller: [],
+  order: [],
+  source: [],
+  notes: [],
+}
+
+const SEARCH_OPERATOR_ALIASES: Record<string, keyof SearchFilters> = {
+  status: 'status',
+  st: 'status',
+  team: 'team',
+  tm: 'team',
+  year: 'year',
+  yr: 'year',
+  brand: 'brand',
+  product: 'brand',
+  set: 'set',
+  player: 'player',
+  name: 'player',
+  item: 'player',
+  type: 'type',
+  itemtype: 'type',
+  platform: 'platform',
+  saleplatform: 'platform',
+  seller: 'seller',
+  source: 'source',
+  breaker: 'source',
+  order: 'order',
+  ordernumber: 'order',
+  orderno: 'order',
+  notes: 'notes',
+  note: 'notes',
+}
+
+function normalizeSearchText(value: string | number | null | undefined) {
+  return cleanText(String(value ?? ''))
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeSearchValue(value: string | number | null | undefined) {
+  return escapeLike(normalizeSearchText(value))
+}
+
+function buildSearchTokens(value: string) {
+  return Array.from(
+    new Set(
+      normalizeSearchText(value)
+        .split(' ')
+        .map((token) => escapeLike(token.trim()))
+        .filter((token) => token.length >= 2)
+    )
+  ).slice(0, 10)
+}
+
+function parseSearchQuery(raw: string) {
+  const filters: SearchFilters = {
+    status: [],
+    team: [],
+    year: [],
+    brand: [],
+    set: [],
+    player: [],
+    type: [],
+    platform: [],
+    seller: [],
+    order: [],
+    source: [],
+    notes: [],
+  }
+
+  const remainingParts: string[] = []
+  const operatorPattern = /(\b[a-zA-Z][a-zA-Z0-9_-]{1,20}):(?:"([^"]+)"|'([^']+)'|([^\s]+))/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = operatorPattern.exec(raw)) !== null) {
+    remainingParts.push(raw.slice(lastIndex, match.index))
+    lastIndex = operatorPattern.lastIndex
+
+    const rawKey = normalizeSearchValue(match[1]).replace(/[^a-z0-9]/g, '')
+    const key = SEARCH_OPERATOR_ALIASES[rawKey]
+    const value = cleanText(match[2] || match[3] || match[4] || '')
+
+    if (key && value) {
+      filters[key].push(value)
+    } else {
+      remainingParts.push(match[0])
+    }
+  }
+
+  remainingParts.push(raw.slice(lastIndex))
+
+  const freeText = cleanText(remainingParts.join(' '))
+  const filterText = Object.values(filters).flat().join(' ')
+  const hasFilters = Object.values(filters).some((values) => values.length > 0)
+
+  return {
+    freeText,
+    filters,
+    hasFilters,
+    searchTextForMatching: cleanText([freeText, filterText].filter(Boolean).join(' ')),
+  }
+}
+
+function buildTokenVariants(token: string) {
+  const variants = new Set<string>([token])
+
+  if (token.endsWith('s') && token.length > 3) variants.add(token.slice(0, -1))
+  if (!token.endsWith('s') && token.length > 3) variants.add(`${token}s`)
+
+  const aliases: Record<string, string[]> = {
+    auto: ['autograph'],
+    autograph: ['auto'],
+    rc: ['rookie'],
+    rookie: ['rc'],
+    refractor: ['refr'],
+    refr: ['refractor'],
+    jr: ['junior'],
+    junior: ['jr'],
+    mariner: ['mariners'],
+    mariners: ['mariner'],
+    yankee: ['yankees'],
+    yankees: ['yankee'],
+    dodger: ['dodgers'],
+    dodgers: ['dodger'],
+  }
+
+  for (const alias of aliases[token] ?? []) variants.add(alias)
+
+  return Array.from(variants)
+}
+
+function buildTokenOrFilters(fields: string[], tokens: string[]) {
+  return tokens.flatMap((token) =>
+    buildTokenVariants(token).flatMap((variant) =>
+      fields.map((field) => `${field}.ilike.%${variant}%`)
+    )
+  )
+}
+
+function buildYearOrFilters(tokens: string[]) {
+  return Array.from(new Set(tokens))
+    .filter((token) => /^\d{4}$/.test(token))
+    .map((token) => `year.eq.${token}`)
+}
+
+function buildSearchableText(values: Array<string | number | null | undefined>) {
+  return normalizeSearchText(values.map((value) => String(value ?? '')).join(' '))
+}
+
+function tokenMatchesSearchableText(searchableText: string, token: string) {
+  return buildTokenVariants(token).some((variant) => searchableText.includes(variant))
+}
+
+function matchesAllSearchTokens(searchableText: string, tokens: string[]) {
+  if (tokens.length === 0) return true
+  return tokens.every((token) => tokenMatchesSearchableText(searchableText, token))
+}
+
+function tokenMatchScore(searchableText: string, tokens: string[]) {
+  if (tokens.length === 0) return 0
+
+  return tokens.reduce((score, token) => {
+    let bestScore = 0
+
+    for (const variant of buildTokenVariants(token)) {
+      if (searchableText.includes(` ${variant} `)) bestScore = Math.max(bestScore, variant === token ? 6 : 4)
+      else if (searchableText.includes(variant)) bestScore = Math.max(bestScore, variant === token ? 3 : 2)
+    }
+
+    return score + bestScore
+  }, 0)
+}
+
+function filterTextMatches(value: string | number | null | undefined, expectedValues: string[]) {
+  if (expectedValues.length === 0) return true
+
+  const searchableText = ` ${normalizeSearchText(value)} `
+
+  return expectedValues.some((expected) => {
+    const tokens = buildSearchTokens(expected)
+    return tokens.length === 0 || matchesAllSearchTokens(searchableText, tokens)
+  })
+}
+
+function filterNumberMatches(value: string | number | null | undefined, expectedValues: string[]) {
+  if (expectedValues.length === 0) return true
+  const normalizedValue = normalizeSearchValue(value)
+  return expectedValues.some((expected) => normalizeSearchValue(expected) === normalizedValue)
+}
+
+function matchesInventoryFilters(item: InventoryItemRow, filters: SearchFilters) {
+  return (
+    filterTextMatches(item.status, filters.status) &&
+    filterTextMatches(item.team, filters.team) &&
+    filterNumberMatches(item.year, filters.year) &&
+    filterTextMatches(item.brand, filters.brand) &&
+    filterTextMatches(item.set_name, filters.set) &&
+    filterTextMatches([item.player_name, item.title].filter(Boolean).join(' '), filters.player) &&
+    filterTextMatches(item.item_type, filters.type) &&
+    filterTextMatches(item.notes, filters.notes)
+  )
+}
+
+function matchesBreakFilters(breakRow: BreakRow, filters: SearchFilters) {
+  return (
+    filterTextMatches(breakRow.source_name, [...filters.source, ...filters.seller]) &&
+    filterTextMatches(breakRow.order_number, filters.order) &&
+    filterTextMatches(breakRow.product_name, [...filters.brand, ...filters.set]) &&
+    filterTextMatches(breakRow.notes, filters.notes)
+  )
+}
+
+function matchesOrderFilters(order: WhatnotOrderRow, filters: SearchFilters) {
+  return (
+    filterTextMatches(order.seller, [...filters.seller, ...filters.source]) &&
+    filterTextMatches([order.order_id, order.order_numeric_id].filter(Boolean).join(' '), filters.order) &&
+    filterTextMatches(order.product_name, [...filters.brand, ...filters.set]) &&
+    filterTextMatches(order.order_status, filters.status)
+  )
+}
+
+function matchesSaleFilters(sale: SaleSearchRow, filters: SearchFilters) {
+  return (
+    filterTextMatches(sale.platform, filters.platform) &&
+    filterTextMatches(sale.notes, filters.notes) &&
+    (!sale.inventory_items || matchesInventoryFilters(sale.inventory_items as InventoryItemRow, filters))
+  )
+}
+
+function filterAndRankByTokens<T>({
+  rows,
+  tokens,
+  getSearchableText,
+  getExactBoostText,
+}: {
+  rows: T[]
+  tokens: string[]
+  getSearchableText: (row: T) => string
+  getExactBoostText?: (row: T) => string
+}) {
+  if (tokens.length === 0) return rows
+
+  return rows
+    .map((row) => {
+      const searchableText = ` ${getSearchableText(row)} `
+      const exactBoostText = getExactBoostText ? ` ${getExactBoostText(row)} ` : searchableText
+      const phraseBoost = tokens.length > 1 && exactBoostText.includes(` ${tokens.join(' ')} `) ? 25 : 0
+
+      return {
+        row,
+        searchableText,
+        score: tokenMatchScore(searchableText, tokens) + phraseBoost,
+      }
+    })
+    .filter((item) => matchesAllSearchTokens(item.searchableText, tokens))
+    .sort((left, right) => right.score - left.score)
+    .map((item) => item.row)
+}
+
 function extractOrderNumbers(input: string): string[] {
   if (!input) return []
 
@@ -564,6 +851,19 @@ function SearchSummaryCard({
     <div className="app-card-tight p-2.5">
       <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
+    </div>
+  )
+}
+
+function NotesPreview({ value }: { value: string | null | undefined }) {
+  const notes = cleanText(value || '')
+
+  return (
+    <div
+      className="max-w-64 truncate text-xs leading-tight text-zinc-400"
+      title={notes || 'No notes'}
+    >
+      {notes || '—'}
     </div>
   )
 }
@@ -821,7 +1121,9 @@ export default async function GlobalSearchPage({
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim()
-  const q = escapeLike(qRaw)
+  const parsedSearch = parseSearchQuery(qRaw)
+  const searchTokens = buildSearchTokens(parsedSearch.searchTextForMatching || qRaw)
+  const searchFilters = parsedSearch.filters
   const extractedNumbers = extractOrderNumbers(qRaw)
   const deleted = String(params?.deleted ?? '').trim()
   const deletedCount = String(params?.deleted_count ?? '').trim()
@@ -919,10 +1221,53 @@ export default async function GlobalSearchPage({
       ordersError = ordersResponse.error?.message ?? null
       breaksError = breaksResponse.error?.message ?? null
     } else {
-      const orderQuery = `%${q}%`
-      const breakQuery = `%${q}%`
-      const inventoryQuery = `%${q}%`
-      const salesQuery = `%${q}%`
+      const orderFields = [
+        'order_id',
+        'order_numeric_id',
+        'buyer',
+        'seller',
+        'product_name',
+        'order_status',
+        'source_file_name',
+      ]
+      const breakFields = ['order_number', 'source_name', 'product_name', 'format_type', 'notes']
+      const inventoryFields = [
+        'title',
+        'player_name',
+        'brand',
+        'set_name',
+        'card_number',
+        'parallel_name',
+        'team',
+        'status',
+        'item_type',
+        'notes',
+      ]
+      const soldInventoryFields = [
+        'title',
+        'player_name',
+        'brand',
+        'set_name',
+        'card_number',
+        'parallel_name',
+        'team',
+        'item_type',
+        'notes',
+      ]
+      const salesFields = ['platform', 'notes']
+
+      const orderFilters = buildTokenOrFilters(orderFields, searchTokens)
+      const breakFilters = buildTokenOrFilters(breakFields, searchTokens)
+      const yearFilters = buildYearOrFilters(searchTokens)
+      const inventoryFilters = [
+        ...buildTokenOrFilters(inventoryFields, searchTokens),
+        ...yearFilters,
+      ]
+      const soldInventoryFilters = [
+        ...buildTokenOrFilters(soldInventoryFields, searchTokens),
+        ...yearFilters,
+      ]
+      const salesFilters = buildTokenOrFilters(salesFields, searchTokens)
 
       const [
         ordersResponse,
@@ -931,178 +1276,223 @@ export default async function GlobalSearchPage({
         soldInventoryResponse,
         salesDirectResponse,
       ] = await Promise.all([
-        supabase
-          .from('whatnot_orders')
-          .select(`
-            id,
-            break_id,
-            order_id,
-            order_numeric_id,
-            buyer,
-            seller,
-            product_name,
-            processed_date,
-            processed_date_display,
-            order_status,
-            quantity,
-            subtotal,
-            shipping_price,
-            taxes,
-            total,
-            source_file_name
-          `)
-          .eq('user_id', user.id)
-          .or(
-            [
-              `order_id.ilike.${orderQuery}`,
-              `order_numeric_id.ilike.${orderQuery}`,
-              `buyer.ilike.${orderQuery}`,
-              `seller.ilike.${orderQuery}`,
-              `product_name.ilike.${orderQuery}`,
-              `order_status.ilike.${orderQuery}`,
-              `source_file_name.ilike.${orderQuery}`,
-            ].join(',')
-          )
-          .order('processed_date', { ascending: false })
-          .limit(SECTION_LIMIT),
+        orderFilters.length > 0
+          ? supabase
+              .from('whatnot_orders')
+              .select(`
+                id,
+                break_id,
+                order_id,
+                order_numeric_id,
+                buyer,
+                seller,
+                product_name,
+                processed_date,
+                processed_date_display,
+                order_status,
+                quantity,
+                subtotal,
+                shipping_price,
+                taxes,
+                total,
+                source_file_name
+              `)
+              .eq('user_id', user.id)
+              .or(orderFilters.join(','))
+              .order('processed_date', { ascending: false })
+              .limit(SECTION_LIMIT * 4)
+          : Promise.resolve({ data: [], error: null }),
 
-        supabase
-          .from('breaks')
-          .select(`
-            id,
-            break_date,
-            source_name,
-            order_number,
-            product_name,
-            format_type,
-            notes,
-            total_cost,
-            reversed_at
-          `)
-          .eq('user_id', user.id)
-          .or(
-            [
-              `order_number.ilike.${breakQuery}`,
-              `source_name.ilike.${breakQuery}`,
-              `product_name.ilike.${breakQuery}`,
-              `format_type.ilike.${breakQuery}`,
-              `notes.ilike.${breakQuery}`,
-            ].join(',')
-          )
-          .order('break_date', { ascending: false })
-          .limit(SECTION_LIMIT),
+        breakFilters.length > 0
+          ? supabase
+              .from('breaks')
+              .select(`
+                id,
+                break_date,
+                source_name,
+                order_number,
+                product_name,
+                format_type,
+                notes,
+                total_cost,
+                reversed_at
+              `)
+              .eq('user_id', user.id)
+              .or(breakFilters.join(','))
+              .order('break_date', { ascending: false })
+              .limit(SECTION_LIMIT * 4)
+          : Promise.resolve({ data: [], error: null }),
 
-        supabase
-          .from('inventory_items')
-          .select(`
-            id,
-            source_break_id,
-            title,
-            player_name,
-            year,
-            brand,
-            set_name,
-            card_number,
-            parallel_name,
-            team,
-            quantity,
-            available_quantity,
-            cost_basis_total,
-            estimated_value_total,
-            status,
-            item_type,
-            notes,
-            source_type
-          `)
-          .eq('user_id', user.id)
-          .or(
-            [
-              `title.ilike.${inventoryQuery}`,
-              `player_name.ilike.${inventoryQuery}`,
-              `brand.ilike.${inventoryQuery}`,
-              `set_name.ilike.${inventoryQuery}`,
-              `card_number.ilike.${inventoryQuery}`,
-              `parallel_name.ilike.${inventoryQuery}`,
-              `team.ilike.${inventoryQuery}`,
-              `status.ilike.${inventoryQuery}`,
-              `item_type.ilike.${inventoryQuery}`,
-              `notes.ilike.${inventoryQuery}`,
-            ].join(',')
-          )
-          .limit(SECTION_LIMIT),
+        inventoryFilters.length > 0
+          ? supabase
+              .from('inventory_items')
+              .select(`
+                id,
+                source_break_id,
+                title,
+                player_name,
+                year,
+                brand,
+                set_name,
+                card_number,
+                parallel_name,
+                team,
+                quantity,
+                available_quantity,
+                cost_basis_total,
+                estimated_value_total,
+                status,
+                item_type,
+                notes,
+                source_type
+              `)
+              .eq('user_id', user.id)
+              .or(inventoryFilters.join(','))
+              .limit(SECTION_LIMIT * 4)
+          : Promise.resolve({ data: [], error: null }),
 
-        supabase
-          .from('inventory_items')
-          .select(`
-            id,
-            source_break_id,
-            title,
-            player_name,
-            year,
-            brand,
-            set_name,
-            card_number,
-            parallel_name,
-            team,
-            quantity,
-            available_quantity,
-            cost_basis_total,
-            estimated_value_total,
-            status,
-            item_type,
-            notes,
-            source_type
-          `)
-          .eq('user_id', user.id)
-          .eq('status', 'sold')
-          .or(
-            [
-              `title.ilike.${inventoryQuery}`,
-              `player_name.ilike.${inventoryQuery}`,
-              `brand.ilike.${inventoryQuery}`,
-              `set_name.ilike.${inventoryQuery}`,
-              `card_number.ilike.${inventoryQuery}`,
-              `parallel_name.ilike.${inventoryQuery}`,
-              `team.ilike.${inventoryQuery}`,
-              `item_type.ilike.${inventoryQuery}`,
-              `notes.ilike.${inventoryQuery}`,
-            ].join(',')
-          )
-          .limit(SECTION_LIMIT),
+        soldInventoryFilters.length > 0
+          ? supabase
+              .from('inventory_items')
+              .select(`
+                id,
+                source_break_id,
+                title,
+                player_name,
+                year,
+                brand,
+                set_name,
+                card_number,
+                parallel_name,
+                team,
+                quantity,
+                available_quantity,
+                cost_basis_total,
+                estimated_value_total,
+                status,
+                item_type,
+                notes,
+                source_type
+              `)
+              .eq('user_id', user.id)
+              .eq('status', 'sold')
+              .or(soldInventoryFilters.join(','))
+              .limit(SECTION_LIMIT * 4)
+          : Promise.resolve({ data: [], error: null }),
 
-        supabase
-          .from('sales')
-          .select(`
-            id,
-            sale_date,
-            quantity_sold,
-            gross_sale,
-            platform_fees,
-            shipping_cost,
-            other_costs,
-            net_proceeds,
-            cost_of_goods_sold,
-            profit,
-            platform,
-            notes,
-            reversed_at,
-            inventory_item_id
-          `)
-          .eq('user_id', user.id)
-          .is('reversed_at', null)
-          .or([`platform.ilike.${salesQuery}`, `notes.ilike.${salesQuery}`].join(','))
-          .order('sale_date', { ascending: false })
-          .limit(SECTION_LIMIT),
+        salesFilters.length > 0
+          ? supabase
+              .from('sales')
+              .select(`
+                id,
+                sale_date,
+                quantity_sold,
+                gross_sale,
+                platform_fees,
+                shipping_cost,
+                other_costs,
+                net_proceeds,
+                cost_of_goods_sold,
+                profit,
+                platform,
+                notes,
+                reversed_at,
+                inventory_item_id
+              `)
+              .eq('user_id', user.id)
+              .is('reversed_at', null)
+              .or(salesFilters.join(','))
+              .order('sale_date', { ascending: false })
+              .limit(SECTION_LIMIT * 4)
+          : Promise.resolve({ data: [], error: null }),
       ])
 
-      matchingOrders = (ordersResponse.data ?? []) as WhatnotOrderRow[]
-      matchingBreaks = (breaksResponse.data ?? []) as BreakRow[]
-      matchingInventory = (inventoryResponse.data ?? []) as InventoryItemRow[]
+      matchingOrders = filterAndRankByTokens({
+        rows: (ordersResponse.data ?? []) as WhatnotOrderRow[],
+        tokens: searchTokens,
+        getSearchableText: (order) =>
+          buildSearchableText([
+            order.order_id,
+            order.order_numeric_id,
+            order.buyer,
+            order.seller,
+            order.product_name,
+            order.order_status,
+            order.source_file_name,
+          ]),
+        getExactBoostText: (order) => buildSearchableText([order.product_name, order.order_numeric_id, order.order_id]),
+      })
+        .filter((order) => matchesOrderFilters(order, searchFilters))
+        .slice(0, SECTION_LIMIT)
 
-      const soldInventoryMatches = (soldInventoryResponse.data ?? []) as InventoryItemRow[]
+      matchingBreaks = filterAndRankByTokens({
+        rows: (breaksResponse.data ?? []) as BreakRow[],
+        tokens: searchTokens,
+        getSearchableText: (breakRow) =>
+          buildSearchableText([
+            breakRow.order_number,
+            breakRow.source_name,
+            breakRow.product_name,
+            breakRow.format_type,
+            breakRow.notes,
+          ]),
+        getExactBoostText: (breakRow) => buildSearchableText([breakRow.product_name, breakRow.order_number]),
+      })
+        .filter((breakRow) => matchesBreakFilters(breakRow, searchFilters))
+        .slice(0, SECTION_LIMIT)
+
+      matchingInventory = filterAndRankByTokens({
+        rows: (inventoryResponse.data ?? []) as InventoryItemRow[],
+        tokens: searchTokens,
+        getSearchableText: (item) =>
+          buildSearchableText([
+            item.title,
+            item.player_name,
+            item.year,
+            item.brand,
+            item.set_name,
+            item.card_number,
+            item.parallel_name,
+            item.team,
+            item.status,
+            item.item_type,
+            item.notes,
+          ]),
+        getExactBoostText: (item) => buildSearchableText([item.title, item.player_name, item.brand, item.set_name]),
+      })
+        .filter((item) => matchesInventoryFilters(item, searchFilters))
+        .slice(0, SECTION_LIMIT)
+
+      const soldInventoryMatches = filterAndRankByTokens({
+        rows: (soldInventoryResponse.data ?? []) as InventoryItemRow[],
+        tokens: searchTokens,
+        getSearchableText: (item) =>
+          buildSearchableText([
+            item.title,
+            item.player_name,
+            item.year,
+            item.brand,
+            item.set_name,
+            item.card_number,
+            item.parallel_name,
+            item.team,
+            item.item_type,
+            item.notes,
+          ]),
+        getExactBoostText: (item) => buildSearchableText([item.title, item.player_name, item.brand, item.set_name]),
+      })
+        .filter((item) => matchesInventoryFilters(item, searchFilters))
+        .slice(0, SECTION_LIMIT)
       const soldInventoryIds = soldInventoryMatches.map((item) => item.id)
 
-      const salesDirectMatches = (salesDirectResponse.data ?? []) as SaleSearchRow[]
+      const salesDirectMatches = filterAndRankByTokens({
+        rows: (salesDirectResponse.data ?? []) as SaleSearchRow[],
+        tokens: searchTokens,
+        getSearchableText: (sale) =>
+          buildSearchableText([sale.platform, sale.notes]),
+      })
+        .filter((sale) => matchesSaleFilters(sale, searchFilters))
+        .slice(0, SECTION_LIMIT)
       let salesFromInventoryMatches: SaleSearchRow[] = []
 
       if (soldInventoryIds.length > 0) {
@@ -1217,7 +1607,7 @@ export default async function GlobalSearchPage({
         <div>
           <h1 className="app-title">Search</h1>
           <p className="app-subtitle">
-            Paste order numbers, copied email text, or search across orders, breaks, inventory, and sold items.
+            Paste order numbers, copied email text, or search across orders, breaks, inventory, and sold items. Try filters like status:available, team:mariners, year:2024, or platform:ebay.
           </p>
         </div>
 
@@ -1277,7 +1667,7 @@ export default async function GlobalSearchPage({
                 : `Found ${totalHits} result(s) for "${qRaw}"`}
             </div>
             <div className="mt-1 text-xs text-zinc-500">
-              Use the global search bar at the top of the app to run a new search.
+              Search now supports any word order, punctuation-insensitive matching, simple aliases, and filters like status:available or team:mariners.
             </div>
             <div className="mt-3">
               <Link href="/app/search" className="app-button whitespace-nowrap">
@@ -1292,7 +1682,7 @@ export default async function GlobalSearchPage({
             Use the global search bar at the top of the app to search across orders, breaks, inventory, and sold items.
           </div>
           <div className="mt-1 text-xs text-zinc-500">
-            Multi-order paste search still works. Paste copied order text or a block of order numbers.
+            Multi-order paste search still works. You can also use filters like status:available, team:mariners, year:2024, platform:ebay, seller:whatnot, or order:123456.
           </div>
         </div>
       )}
@@ -1343,6 +1733,7 @@ export default async function GlobalSearchPage({
                     <th className="app-th">Date</th>
                     <th className="app-th">Purchased From</th>
                     <th className="app-th">Description</th>
+                    <th className="app-th min-w-[180px]">Source File</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Total</th>
                     <th className="app-th min-w-[220px]">Actions</th>
@@ -1353,6 +1744,7 @@ export default async function GlobalSearchPage({
                     const orderNumber = cleanText(order.order_numeric_id || order.order_id || '—')
                     const seller = cleanText(order.seller || '—')
                     const description = cleanText(order.product_name || 'Untitled order')
+                    const sourceFileName = cleanText(order.source_file_name || '')
                     const isLinked = Boolean(order.break_id)
                     const statusLabel = isLinked ? 'Linked' : 'Staging'
                     const orderHref = buildFocusHref(order)
@@ -1396,6 +1788,9 @@ export default async function GlobalSearchPage({
                               {description}
                             </div>
                           </Link>
+                        </td>
+                        <td className="app-td">
+                          <NotesPreview value={sourceFileName} />
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
@@ -1459,6 +1854,7 @@ export default async function GlobalSearchPage({
                     <th className="app-th">Break</th>
                     <th className="app-th">Source</th>
                     <th className="app-th">Order #</th>
+                    <th className="app-th min-w-[180px]">Notes</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Cost</th>
                     <th className="app-th min-w-[220px]">Actions</th>
@@ -1469,6 +1865,7 @@ export default async function GlobalSearchPage({
                     const breakLabel = buildBreakDisplay(breakRow)
                     const sourceLabel = cleanText(breakRow.source_name || '—')
                     const orderLabel = cleanText(breakRow.order_number || '—')
+                    const breakNotes = cleanText(breakRow.notes || '')
                     const statusLabel = breakRow.reversed_at ? 'Reversed' : 'Active'
                     const breakHref = `/app/breaks/${breakRow.id}`
 
@@ -1509,6 +1906,9 @@ export default async function GlobalSearchPage({
                               {orderLabel || '—'}
                             </div>
                           </Link>
+                        </td>
+                        <td className="app-td">
+                          <NotesPreview value={breakNotes} />
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel}</span>
@@ -1569,6 +1969,7 @@ export default async function GlobalSearchPage({
                       />
                     </th>
                     <th className="app-th">Item</th>
+                    <th className="app-th min-w-[180px]">Notes</th>
                     <th className="app-th">Status</th>
                     <th className="app-th">Qty</th>
                     <th className="app-th">Available</th>
@@ -1580,6 +1981,7 @@ export default async function GlobalSearchPage({
                 <tbody>
                   {matchingInventory.map((item) => {
                     const display = buildInventoryDisplay(item) || item.title || 'Untitled inventory item'
+                    const itemNotes = cleanText(item.notes || '')
                     const statusLabel = cleanText(item.status || '—')
                     const inventoryHref = `/app/inventory/${item.id}`
 
@@ -1601,6 +2003,9 @@ export default async function GlobalSearchPage({
                               {display}
                             </div>
                           </Link>
+                        </td>
+                        <td className="app-td">
+                          <NotesPreview value={itemNotes} />
                         </td>
                         <td className="app-td whitespace-nowrap">
                           <span className={statusBadgeClasses(statusLabel)}>{statusLabel || '—'}</span>
@@ -1656,6 +2061,7 @@ export default async function GlobalSearchPage({
                   <tr>
                     <th className="app-th">Date</th>
                     <th className="app-th">Item</th>
+                    <th className="app-th min-w-[180px]">Notes</th>
                     <th className="app-th">Platform</th>
                     <th className="app-th">Qty</th>
                     <th className="app-th text-right">Gross</th>
@@ -1666,6 +2072,7 @@ export default async function GlobalSearchPage({
                 <tbody>
                   {matchingSales.map((sale) => {
                     const display = buildSoldItemDisplay(sale)
+                    const saleNotes = cleanText([sale.notes, sale.inventory_items?.notes].filter(Boolean).join(' • '))
                     const platform = cleanText(sale.platform || '—')
                     const saleHref = sale.inventory_item_id
                       ? `/app/inventory/${sale.inventory_item_id}`
@@ -1682,6 +2089,9 @@ export default async function GlobalSearchPage({
                               {display}
                             </div>
                           </Link>
+                        </td>
+                        <td className="app-td">
+                          <NotesPreview value={saleNotes} />
                         </td>
                         <td className="app-td whitespace-nowrap">{platform || '—'}</td>
                         <td className="app-td whitespace-nowrap">{sale.quantity_sold ?? '—'}</td>
