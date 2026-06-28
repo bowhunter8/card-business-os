@@ -494,9 +494,6 @@ export default async function InventoryDetailPage({
 
   const isFinalizedDisposal = Boolean(finalizedDisposal)
 
-  const isGiveaway = item.status === 'giveaway'
-  const isLockedForBusinessEvent = isFinalizedDisposal || isGiveaway
-
   const activeSales = sales.filter((sale) => !sale.reversed_at)
 
   const totalGross = activeSales.reduce((sum, row) => sum + Number(row.gross_sale ?? 0), 0)
@@ -505,10 +502,14 @@ export default async function InventoryDetailPage({
   const totalQtySold = activeSales.reduce((sum, row) => sum + Number(row.quantity_sold ?? 0), 0)
 
   const availableQuantity = Number(item.available_quantity ?? 0)
+  const isGiveaway = item.status === 'giveaway'
+  const isFinalizedGiveaway = isGiveaway && (Boolean(giveawayAudit) || availableQuantity <= 0)
+  const isPlannedGiveaway = isGiveaway && !isFinalizedGiveaway
+  const isLockedForBusinessEvent = isFinalizedDisposal || isFinalizedGiveaway
   const effectiveStatus =
     availableQuantity <= 0 && totalQtySold > 0 ? 'sold' : item.status
 
-  const hasAvailableToSell = availableQuantity > 0
+  const hasAvailableToSell = availableQuantity > 0 && !isGiveaway
   const canDelete = activeSales.length === 0
   const itemFormId = 'inventory-inline-edit-form'
   const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
@@ -603,7 +604,11 @@ export default async function InventoryDetailPage({
             {buildDisplay(item) || item.title || 'Untitled item'}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            {renderStatusPill(effectiveStatus)}
+            {isPlannedGiveaway ? (
+              <span className="app-badge app-badge-warning">Planned Giveaway</span>
+            ) : (
+              renderStatusPill(effectiveStatus)
+            )}
 
             {!isLockedForBusinessEvent && hasAvailableToSell ? (
               <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
@@ -640,6 +645,13 @@ export default async function InventoryDetailPage({
             <div className="rounded-full border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-200">
               Locked For Tax Review
             </div>
+          ) : isPlannedGiveaway ? (
+            <Link
+              href={`/app/inventory/${item.id}/giveaway`}
+              className="app-button-warning"
+            >
+              Finalize Giveaway
+            </Link>
           ) : !isLockedForBusinessEvent && hasAvailableToSell ? (
             <Link
               href={`/app/inventory/${item.id}/giveaway`}
@@ -776,10 +788,19 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      {effectiveStatus === 'giveaway' ? (
+      {isPlannedGiveaway ? (
         <div className="app-alert-info">
           <div className="font-semibold">
-            This item has been marked as a Giveaway and recorded as a marketing expense.
+            This item is planned as a Giveaway, but it has not been finalized yet.
+          </div>
+          <div className="mt-1 text-sm">
+            It will stay under the Giveaway filter and cannot be sold accidentally. You can still edit item notes and details, then finalize it when the giveaway actually happens.
+          </div>
+        </div>
+      ) : isFinalizedGiveaway ? (
+        <div className="app-alert-info">
+          <div className="font-semibold">
+            This item has been finalized as a Giveaway and recorded as a marketing expense.
           </div>
           <div className="mt-1 text-sm">
             Selling, deletion, quantity changes, cost changes, and status changes are disabled to help preserve clean tax records.
@@ -787,7 +808,32 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      {effectiveStatus === 'giveaway' ? (
+      {isPlannedGiveaway ? (
+        <div className="app-section mt-0 p-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold leading-tight">
+                Planned Giveaway
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                This item was set aside for a future giveaway. Finalize it after the giveaway happens to create the Advertising / Marketing expense and tax audit trail.
+              </p>
+            </div>
+
+            <Link href={`/app/inventory/${item.id}/giveaway`} className="app-button-warning">
+              Finalize Giveaway
+            </Link>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <Detail label="Planned Quantity" value={String(item.available_quantity ?? 0)} />
+            <Detail label="Planned Cost Basis" value={money(item.cost_basis_total)} />
+            <Detail label="Source" value={buildSourceTypeLabel(item.source_type)} />
+          </div>
+        </div>
+      ) : null}
+
+      {isFinalizedGiveaway ? (
         <div className="app-section mt-0 p-4">
           <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
             <div>
@@ -879,8 +925,10 @@ export default async function InventoryDetailPage({
       <div className="grid gap-2 md:grid-cols-4">
         {isFinalizedDisposal ? (
           <ReadonlyMetric label="Status" value="Written Off - Tax Locked" />
-        ) : isGiveaway ? (
-          <ReadonlyMetric label="Status" value="Giveaway" />
+        ) : isFinalizedGiveaway ? (
+          <ReadonlyMetric label="Status" value="Giveaway - Tax Locked" />
+        ) : isPlannedGiveaway ? (
+          <ReadonlyMetric label="Status" value="Planned Giveaway" />
         ) : (
           <EditableSelect
             label="Status"
@@ -1087,7 +1135,7 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_price"
-              disabled={isLockedForBusinessEvent}
+              disabled={isLockedForBusinessEvent || isGiveaway}
               type="number"
               min={0}
               step="0.01"
@@ -1103,7 +1151,7 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_platform"
-              disabled={isLockedForBusinessEvent}
+              disabled={isLockedForBusinessEvent || isGiveaway}
               type="text"
               defaultValue={item.listed_platform ?? ''}
               placeholder="eBay, Whatnot, Facebook, local..."
@@ -1117,7 +1165,7 @@ export default async function InventoryDetailPage({
             </label>
             <input
               name="listed_date"
-              disabled={isLockedForBusinessEvent}
+              disabled={isLockedForBusinessEvent || isGiveaway}
               type="date"
               defaultValue={formatDateInput(item.listed_date)}
               className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
@@ -1125,7 +1173,7 @@ export default async function InventoryDetailPage({
           </div>
 
           <div className="md:col-span-3 flex justify-end pt-1">
-            {isLockedForBusinessEvent ? (
+            {isLockedForBusinessEvent || isGiveaway ? (
               <span className="app-button pointer-events-none opacity-60">
                 Listing Locked
               </span>

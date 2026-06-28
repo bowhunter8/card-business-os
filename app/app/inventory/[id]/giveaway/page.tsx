@@ -110,8 +110,12 @@ export default async function GiveawayItemPage({
         : totalCost
 
   const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
-  const alreadyGiveaway = item.status === 'giveaway'
-  const canRecordGiveaway = !alreadyGiveaway && availableQuantity > 0
+  const isGiveawayStatus = item.status === 'giveaway'
+  const isPlannedGiveaway = isGiveawayStatus && availableQuantity > 0
+  const isCompletedGiveaway = isGiveawayStatus && availableQuantity <= 0
+  const canRecordGiveaway = availableQuantity > 0
+  const pageTitle = isPlannedGiveaway ? 'Finalize Giveaway' : 'Record Giveaway'
+  const primaryButtonLabel = isPlannedGiveaway ? 'Finalize Giveaway' : 'Record Giveaway'
 
   return (
     <div className="app-page-wide space-y-4">
@@ -123,9 +127,11 @@ export default async function GiveawayItemPage({
             </Link>
           </div>
 
-          <h1 className="app-title">Record Giveaway</h1>
+          <h1 className="app-title">{pageTitle}</h1>
           <p className="app-subtitle">
-            Capture the business purpose before removing this item from sellable inventory.
+            {isPlannedGiveaway
+              ? 'Add the final giveaway details before creating the advertising / marketing record.'
+              : 'Capture the business purpose before removing this item from sellable inventory.'}
           </p>
         </div>
 
@@ -142,13 +148,19 @@ export default async function GiveawayItemPage({
         </div>
       ) : null}
 
-      {alreadyGiveaway ? (
+      {isPlannedGiveaway ? (
         <div className="app-alert-info">
-          This item has already been marked as a giveaway.
+          This item is marked as a planned giveaway. Finalize it when the giveaway actually happens.
         </div>
       ) : null}
 
-      {!alreadyGiveaway && availableQuantity <= 0 ? (
+      {isCompletedGiveaway ? (
+        <div className="app-alert-info">
+          This giveaway has already been finalized.
+        </div>
+      ) : null}
+
+      {!isCompletedGiveaway && availableQuantity <= 0 ? (
         <div className="app-alert-warning">
           This item has no available quantity to give away.
         </div>
@@ -158,7 +170,7 @@ export default async function GiveawayItemPage({
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="text-sm font-semibold text-zinc-100">
-              Ready to record this giveaway?
+              {isPlannedGiveaway ? 'Ready to finalize this planned giveaway?' : 'Ready to record this giveaway?'}
             </div>
             <div className="text-xs text-zinc-400">
               Save the giveaway details without scrolling to the bottom.
@@ -172,7 +184,7 @@ export default async function GiveawayItemPage({
               disabled={!canRecordGiveaway}
               className="app-button-warning disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Record Giveaway
+              {primaryButtonLabel}
             </button>
 
             <Link href={`/app/inventory/${item.id}`} className="app-button">
@@ -341,7 +353,7 @@ export default async function GiveawayItemPage({
           <div className="rounded-xl border border-amber-900/60 bg-amber-950/30 p-4 text-sm text-amber-100">
             <div className="font-semibold">Tax-safe reminder</div>
             <div className="mt-1 leading-6">
-              This will move the remaining cost basis into Advertising / Marketing. Do not also deduct this item as COGS, disposal, donation, or another separate expense.
+              Finalizing this giveaway will move the remaining cost basis into Advertising / Marketing. Do not also deduct this item as COGS, disposal, donation, or another separate expense.
             </div>
           </div>
 
@@ -355,7 +367,7 @@ export default async function GiveawayItemPage({
               disabled={!canRecordGiveaway}
               className="app-button-warning disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Record Giveaway
+              {primaryButtonLabel}
             </button>
           </div>
         </form>
@@ -374,7 +386,11 @@ export default async function GiveawayItemPage({
                 <div className="app-card-tight p-3">
                   <div className="text-xs uppercase tracking-wide text-zinc-400">Status</div>
                   <div className="mt-1 font-semibold capitalize">
-                    {(item.status || 'unknown').replaceAll('_', ' ')}
+                    {isPlannedGiveaway
+                      ? 'Planned Giveaway'
+                      : isCompletedGiveaway
+                        ? 'Completed Giveaway'
+                        : (item.status || 'unknown').replaceAll('_', ' ')}
                   </div>
                 </div>
 
@@ -401,10 +417,12 @@ export default async function GiveawayItemPage({
             </div>
           </section>
 
-          <section className="app-alert-info">
+          <section className={isPlannedGiveaway ? 'app-alert-warning' : 'app-alert-info'}>
             <div className="font-semibold">What happens next?</div>
             <div className="mt-1 text-sm leading-6">
-              HITS will mark this item as Giveaway, remove it from available inventory, create an Advertising / Marketing expense, and add an audit trail record.
+              {isCompletedGiveaway
+                ? 'This giveaway has already been finalized and should already have tax support records.'
+                : 'HITS will finalize this giveaway, remove it from available inventory, create an Advertising / Marketing expense, and add an audit trail record.'}
             </div>
           </section>
         </aside>

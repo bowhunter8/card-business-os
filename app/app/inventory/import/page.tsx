@@ -1,15 +1,16 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
-type UploadState = 'idle' | 'dragging' | 'ready' | 'importing' | 'success' | 'error'
+type UploadState = 'idle' | 'ready' | 'importing' | 'success' | 'error'
 
 type SkippedRow = {
   row: number
   item: string
   reason: string
 }
+
 type ImportResult = {
   imported: number
   skipped: number
@@ -17,7 +18,6 @@ type ImportResult = {
   duplicates: number
   warnings?: number
   skippedRows?: SkippedRow[]
-  
 }
 
 const MAX_FILE_SIZE_MB = 10
@@ -43,26 +43,123 @@ function isCsvFile(file: File) {
   return name.endsWith('.csv') || file.type === 'text/csv' || file.type === 'application/vnd.ms-excel'
 }
 
+function isDuplicateProtectionRow(row: SkippedRow) {
+  return row.reason.toLowerCase().includes('already imported')
+}
+
+function getRowsNeedingAttention(result: ImportResult) {
+  return (result.skippedRows ?? []).filter((row) => !isDuplicateProtectionRow(row))
+}
+
+function getNeedsAttentionCount(result: ImportResult) {
+  return getRowsNeedingAttention(result).length
+}
+
+function getResultTitle(result: ImportResult) {
+  const needsAttention = getNeedsAttentionCount(result)
+
+  if (result.imported > 0 && needsAttention === 0) {
+    return `Import complete: ${result.imported} row${result.imported === 1 ? '' : 's'} imported successfully.`
+  }
+
+  if (result.imported > 0 && needsAttention > 0) {
+    return `Import complete: ${result.imported} imported, ${needsAttention} need attention.`
+  }
+
+  if (result.duplicates > 0 && needsAttention === 0) {
+    return `Import complete: ${result.duplicates} already imported.`
+  }
+
+  return `Import finished with ${needsAttention} row${needsAttention === 1 ? '' : 's'} needing attention.`
+}
+
+function ImportResultSummary({ result }: { result: ImportResult }) {
+  const rowsNeedingAttention = getRowsNeedingAttention(result)
+  const needsAttention = rowsNeedingAttention.length
+
+  return (
+    <section className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-5 shadow-xl shadow-emerald-950/30">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-200">Import Results</p>
+          <h2 className="mt-2 text-2xl font-bold tracking-tight text-white">{getResultTitle(result)}</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-200">
+            HITS™ imported valid rows and automatically protected you from duplicate inventory. Only rows that need correction are listed below.
+          </p>
+        </div>
+
+        <div className="grid min-w-full gap-3 sm:grid-cols-3 lg:min-w-[420px]">
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 p-3">
+            <p className="text-xs uppercase tracking-wide text-emerald-200">Imported</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-100">{result.imported}</p>
+          </div>
+          <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/15 p-3">
+            <p className="text-xs uppercase tracking-wide text-cyan-200">Already Imported</p>
+            <p className="mt-1 text-3xl font-bold text-cyan-100">{result.duplicates}</p>
+          </div>
+          <div className="rounded-xl border border-red-500/40 bg-red-500/15 p-3">
+            <p className="text-xs uppercase tracking-wide text-red-200">Needs Attention</p>
+            <p className="mt-1 text-3xl font-bold text-red-100">{needsAttention}</p>
+          </div>
+        </div>
+      </div>
+
+      {result.duplicates > 0 ? (
+        <div className="mt-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm font-semibold text-cyan-100">
+          {result.duplicates} row{result.duplicates === 1 ? '' : 's'} were already imported, so HITS™ safely skipped them to prevent duplicate inventory.
+        </div>
+      ) : null}
+
+      {rowsNeedingAttention.length > 0 ? (
+        <div className="mt-5 rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
+          <h3 className="text-base font-bold text-red-100">Rows that need attention</h3>
+          <p className="mt-1 text-sm text-slate-200">
+            Fix these rows in the spreadsheet, save the CSV, and upload the corrected file again.
+          </p>
+
+          <div className="mt-4 overflow-x-auto rounded-xl border border-red-500/30">
+            <table className="w-full min-w-[560px] text-left text-sm">
+              <thead className="bg-red-500/15 text-xs uppercase tracking-wide text-red-200">
+                <tr>
+                  <th className="px-3 py-2">CSV Row</th>
+                  <th className="px-3 py-2">Item</th>
+                  <th className="px-3 py-2">Problem</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-red-500/20 bg-slate-950/40">
+                {rowsNeedingAttention.slice(0, 25).map((row, index) => (
+                  <tr key={`${row.row}-${index}`}>
+                    <td className="px-3 py-2 font-semibold text-red-100">{row.row}</td>
+                    <td className="px-3 py-2 text-slate-200">{row.item}</td>
+                    <td className="px-3 py-2 text-slate-300">{row.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export default function InventoryImportPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadState, setUploadState] = useState<UploadState>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [showResultModal, setShowResultModal] = useState(false)
 
   const canImport = Boolean(selectedFile) && uploadState === 'ready'
   const canClear = Boolean(selectedFile) || Boolean(errorMessage) || Boolean(importResult)
-
-  const helperText = useMemo(() => {
-    if (uploadState === 'dragging') return 'Drop your CSV file here.'
-    if (uploadState === 'importing') return 'Importing your inventory CSV...'
-    if (selectedFile) return 'CSV file selected and ready to import.'
-    return 'Choose a CSV file exported from your spreadsheet, or download the HITS™ template first.'
-  }, [selectedFile, uploadState])
+  const modalRowsNeedingAttention = importResult ? getRowsNeedingAttention(importResult) : []
+  const modalNeedsAttention = modalRowsNeedingAttention.length
 
   function validateAndSetFile(file: File | null) {
     setErrorMessage('')
     setImportResult(null)
+    setShowResultModal(false)
 
     if (!file) {
       setSelectedFile(null)
@@ -96,24 +193,6 @@ export default function InventoryImportPage() {
     validateAndSetFile(event.target.files?.[0] ?? null)
   }
 
-  function handleDragOver(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    if (uploadState !== 'dragging') setUploadState('dragging')
-  }
-
-  function handleDragLeave(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    setUploadState(selectedFile ? 'ready' : 'idle')
-  }
-
-  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault()
-    event.stopPropagation()
-    validateAndSetFile(event.dataTransfer.files?.[0] ?? null)
-  }
-
   function handleClearFile() {
     if (!canClear) return
 
@@ -121,6 +200,7 @@ export default function InventoryImportPage() {
     setUploadState('idle')
     setErrorMessage('')
     setImportResult(null)
+    setShowResultModal(false)
 
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -137,6 +217,7 @@ export default function InventoryImportPage() {
     setUploadState('importing')
     setErrorMessage('')
     setImportResult(null)
+    setShowResultModal(false)
 
     try {
       const formData = new FormData()
@@ -155,6 +236,7 @@ export default function InventoryImportPage() {
 
       setImportResult(result as ImportResult)
       setUploadState('success')
+      setShowResultModal(true)
     } catch (error) {
       setUploadState('error')
       setErrorMessage(error instanceof Error ? error.message : 'Inventory import failed.')
@@ -163,70 +245,181 @@ export default function InventoryImportPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 sm:px-6 lg:px-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+        {importResult && showResultModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm">
+            <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-emerald-400/40 bg-slate-950 p-5 shadow-2xl shadow-black">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-200">Import Complete</p>
+                  <h2 className="mt-2 text-2xl font-bold text-white">{getResultTitle(importResult)}</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowResultModal(false)}
+                  className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 p-4">
+                  <p className="text-xs uppercase tracking-wide text-emerald-200">Imported</p>
+                  <p className="mt-1 text-4xl font-bold text-emerald-100">{importResult.imported}</p>
+                </div>
+                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/15 p-4">
+                  <p className="text-xs uppercase tracking-wide text-cyan-200">Already Imported</p>
+                  <p className="mt-1 text-4xl font-bold text-cyan-100">{importResult.duplicates}</p>
+                </div>
+                <div className="rounded-xl border border-red-500/40 bg-red-500/15 p-4">
+                  <p className="text-xs uppercase tracking-wide text-red-200">Needs Attention</p>
+                  <p className="mt-1 text-4xl font-bold text-red-100">{modalNeedsAttention}</p>
+                </div>
+              </div>
+
+              {importResult.duplicates > 0 ? (
+                <div className="mt-5 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm font-semibold text-cyan-100">
+                  {importResult.duplicates} row{importResult.duplicates === 1 ? '' : 's'} were already imported, so HITS™ safely skipped them to prevent duplicate inventory.
+                </div>
+              ) : null}
+
+              {modalRowsNeedingAttention.length > 0 ? (
+                <div className="mt-5 rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
+                  <h3 className="text-base font-bold text-red-100">Rows that need attention</h3>
+                  <p className="mt-1 text-sm text-slate-200">
+                    Correct only these rows in the CSV and upload again. Already imported rows were safely skipped and do not need to be fixed.
+                  </p>
+
+                  <div className="mt-4 overflow-x-auto rounded-xl border border-red-500/30">
+                    <table className="w-full min-w-[560px] text-left text-sm">
+                      <thead className="bg-red-500/15 text-xs uppercase tracking-wide text-red-200">
+                        <tr>
+                          <th className="px-3 py-2">CSV Row</th>
+                          <th className="px-3 py-2">Item</th>
+                          <th className="px-3 py-2">Problem</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-red-500/20 bg-slate-950/40">
+                        {modalRowsNeedingAttention.slice(0, 25).map((row, index) => (
+                          <tr key={`${row.row}-${index}`}>
+                            <td className="px-3 py-2 font-semibold text-red-100">{row.row}</td>
+                            <td className="px-3 py-2 text-slate-200">{row.item}</td>
+                            <td className="px-3 py-2 text-slate-300">{row.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-semibold text-emerald-100">
+                  No rows need attention. Everything valid was imported, and any duplicates were safely skipped.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Inventory</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">Templates</p>
               <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
                 Add Inventory in Bulk
               </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-                Add inventory quickly from a spreadsheet. Use the HITS™ template for the safest import, then review any skipped rows after the import runs.
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
+                Choose a template, fill in your items, then use the import box at the end of the row.
               </p>
-
-              <div className="mt-4 rounded-xl border border-cyan-400/30 bg-cyan-500/10 p-4">
-                <p className="text-sm font-semibold text-cyan-100">
-                  Required: Item and Purchase Price
-                </p>
-                <p className="mt-2 text-sm leading-6 text-slate-200">
-                  Tip: The more information you import now, the less you'll need to enter later and the more accurate your reports and tax records will be.
-                </p>
-              </div>
             </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row md:justify-end">
-              <Link
+            <Link
+              href="/app/inventory"
+              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700"
+            >
+              Back to Inventory
+            </Link>
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-4 lg:grid-cols-2">
+            <div className="flex h-full flex-col rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-lg font-bold text-emerald-100">Quick Inventory Template</h3>
+                <span className="rounded-full border border-emerald-300/40 bg-emerald-400/15 px-2 py-1 text-xs font-semibold text-emerald-100">
+                  Recommended
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                The fastest way to get inventory into HITS™. Only Item and Purchase Price are required.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Best for most users, quick adds, card show buys, collections, breaks, and basement finds.
+              </p>
+              <a
                 href="/api/inventory/template"
-                className="inline-flex items-center justify-center rounded-xl border border-cyan-400/40 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20"
+                download
+                className="mt-auto inline-flex items-center justify-center rounded-xl border border-emerald-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
               >
                 Download Template
-              </Link>
-              <Link
-                href="/app/inventory"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700"
-              >
-                Back to Inventory
-              </Link>
+              </a>
             </div>
-          </div>
-        </section>
 
-        <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20">
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={handleBrowseClick}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  handleBrowseClick()
-                }
-              }}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center transition ${
-                uploadState === 'dragging'
-                  ? 'border-cyan-300 bg-cyan-400/10'
-                  : uploadState === 'error'
-                    ? 'border-red-400/70 bg-red-500/10'
-                    : selectedFile
-                      ? 'border-emerald-400/70 bg-emerald-500/10'
-                      : 'border-slate-700 bg-slate-950/60 hover:border-cyan-400/60 hover:bg-slate-950'
-              }`}
-            >
+            <div className="flex h-full flex-col rounded-2xl border border-cyan-400/40 bg-cyan-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-lg font-bold text-cyan-100">Advanced Inventory Template</h3>
+                <span className="rounded-full border border-cyan-300/40 bg-cyan-400/15 px-2 py-1 text-xs font-semibold text-cyan-100">
+                  More Details
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                Import extra fields like Brand, Year, Category, Card Number, Platform, Order Number, and Location.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Best for users migrating from a larger spreadsheet or who already track detailed inventory.
+              </p>
+              <a
+                href="/api/inventory/template?type=advanced"
+                download
+                className="mt-auto inline-flex items-center justify-center rounded-xl border border-cyan-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+              >
+                Download Template
+              </a>
+            </div>
+
+            <div className="flex h-full flex-col rounded-2xl border border-fuchsia-400/40 bg-fuchsia-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-lg font-bold text-fuchsia-100">Giveaway Template</h3>
+                <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-400/15 px-2 py-1 text-xs font-semibold text-fuchsia-100">
+                  Planned Giveaways
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                Import planned giveaway inventory for livestreams, card shows, promotions, and show prep.
+              </p>
+              <p className="mt-3 text-sm leading-6 text-slate-400">
+                Uses the same simple fields as Quick Inventory. Items imported with this template are handled as giveaway inventory.
+              </p>
+              <a
+                href="/api/inventory/template?type=giveaway"
+                download
+                className="mt-auto inline-flex items-center justify-center rounded-xl border border-fuchsia-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-fuchsia-100 transition hover:bg-fuchsia-500/20"
+              >
+                Download Template
+              </a>
+            </div>
+
+            <div className="flex h-full flex-col rounded-2xl border border-amber-400/40 bg-amber-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <h3 className="text-lg font-bold text-amber-100">Import Completed CSV</h3>
+                <span className="rounded-full border border-amber-300/40 bg-amber-400/15 px-2 py-1 text-xs font-semibold text-amber-100">
+                  Final Step
+                </span>
+              </div>
+
+              <p className="mt-3 text-sm leading-6 text-slate-200">
+                Choose your completed CSV file, then click Import CSV.
+              </p>
+
               <input
                 ref={fileInputRef}
                 type="file"
@@ -235,120 +428,79 @@ export default function InventoryImportPage() {
                 onChange={handleFileChange}
               />
 
-              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900 text-2xl">
-                {selectedFile ? '✓' : '↑'}
+              <button
+                type="button"
+                onClick={handleBrowseClick}
+                className="mt-4 inline-flex items-center justify-center rounded-xl border border-amber-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20"
+              >
+                Choose CSV File
+              </button>
+
+              <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+                {selectedFile ? (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">Selected File</p>
+                    <p className="mt-1 break-all text-sm font-bold text-white">{selectedFile.name}</p>
+                    <p className="mt-1 text-xs text-slate-400">File size: {formatBytes(selectedFile.size)}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">No CSV selected</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">CSV only · Max {MAX_FILE_SIZE_MB} MB</p>
+                  </div>
+                )}
               </div>
 
-              <h2 className="text-xl font-bold text-white">
-                {selectedFile ? selectedFile.name : 'Drop CSV here or click to browse'}
-              </h2>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">{helperText}</p>
-
-              {selectedFile ? (
-                <div className="mt-5 rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-sm text-slate-200">
-                  <span className="font-semibold text-slate-100">File size:</span> {formatBytes(selectedFile.size)}
-                </div>
-              ) : null}
-
               {errorMessage ? (
-                <div className="mt-5 rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100">
+                <div className="mt-3 rounded-xl border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-100">
                   {errorMessage}
                 </div>
               ) : null}
+
+              <div className="mt-auto flex flex-col gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={handleImport}
+                  aria-disabled={!canImport}
+                  className={`rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 ${canImport ? '' : 'cursor-not-allowed opacity-50'}`}
+                >
+                  {uploadState === 'importing' ? 'Importing...' : 'Import CSV'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearFile}
+                  aria-disabled={!canClear}
+                  className={`rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800 ${canClear ? '' : 'cursor-not-allowed opacity-50'}`}
+                >
+                  Clear
+                </button>
+              </div>
             </div>
-
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <button
-                type="button"
-                onClick={handleClearFile}
-                aria-disabled={!canClear}
-                className={`rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 ${canClear ? '' : 'cursor-not-allowed opacity-50'}`}
-              >
-                Clear
-              </button>
-
-              <button
-                type="button"
-                onClick={handleImport}
-                aria-disabled={!canImport}
-                className={`rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-5 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30 ${canImport ? '' : 'cursor-not-allowed opacity-50'}`}
-              >
-                {uploadState === 'importing' ? 'Importing...' : 'Import CSV'}
-              </button>
-            </div>
-
-            {importResult ? (
-              <section className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                <h2 className="text-lg font-bold text-white">Import Results</h2>
-
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
-                    <p className="text-xs uppercase tracking-wide text-emerald-200">Imported</p>
-                    <p className="mt-1 text-2xl font-bold text-emerald-100">{importResult.imported}</p>
-                  </div>
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
-                    <p className="text-xs uppercase tracking-wide text-amber-200">Skipped</p>
-                    <p className="mt-1 text-2xl font-bold text-amber-100">{importResult.skipped}</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
-                    <p className="text-xs uppercase tracking-wide text-slate-400">Duplicates</p>
-                    <p className="mt-1 text-2xl font-bold text-slate-100">{importResult.duplicates}</p>
-                  </div>
-                </div>
-
-                {(importResult.skippedRows ?? []).length > 0 ? (
-                  <div className="mt-5">
-                    <h3 className="text-sm font-semibold text-amber-100">Skipped Rows</h3>
-                    <div className="mt-2 overflow-x-auto rounded-xl border border-amber-500/30">
-                      <table className="w-full min-w-[520px] text-left text-sm">
-                        <thead className="bg-amber-500/10 text-xs uppercase tracking-wide text-amber-200">
-                          <tr>
-                            <th className="px-3 py-2">CSV Row</th>
-                            <th className="px-3 py-2">Item</th>
-                            <th className="px-3 py-2">Reason</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-amber-500/20">
-                          {(importResult.skippedRows ?? []).slice(0, 25).map((row, index) => (
-                            <tr key={`${row.row}-${index}`}>
-                              <td className="px-3 py-2 text-amber-100">{row.row}</td>
-                              <td className="px-3 py-2 text-slate-200">{row.item}</td>
-                              <td className="px-3 py-2 text-slate-300">{row.reason}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ) : null}
-
-             </section>
-            ) : null}
           </div>
-
-          <aside className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20">
-            <h2 className="text-lg font-bold text-white">Import basics</h2>
-            <div className="mt-4 space-y-4 text-sm leading-6 text-slate-300">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-semibold text-slate-100">Required Fields</p>
-                <p className="mt-1">
-                  Only Item and Purchase Price are required. Additional information improves reporting,
-                  inventory tracking, and tax records.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-semibold text-slate-100">After import</p>
-                <p className="mt-1">HITS™ imports valid rows and lists only skipped rows that require correction.</p>
-              </div>
-
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="font-semibold text-slate-100">Perfect For</p>
-                <p className="mt-1">Useful for Whatnot buys, card shows, collections, basement finds, and quick inventory adds.</p>
-              </div>
-            </div>
-          </aside>
         </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20">
+          <h2 className="text-lg font-bold text-white">Import basics</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
+              <p className="font-semibold text-slate-100">Required Fields</p>
+              <p className="mt-1">Only Item and Purchase Price are required. Quantity defaults to 1 if left blank.</p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
+              <p className="font-semibold text-slate-100">After import</p>
+              <p className="mt-1">HITS™ imports valid rows and lists only skipped rows that require correction.</p>
+            </div>
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
+              <p className="font-semibold text-slate-100">Perfect For</p>
+              <p className="mt-1">Useful for Whatnot buys, card shows, collections, basement finds, giveaways, and quick inventory adds.</p>
+            </div>
+          </div>
+        </section>
+
+        {importResult ? <ImportResultSummary result={importResult} /> : null}
       </div>
     </main>
   )

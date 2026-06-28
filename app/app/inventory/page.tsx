@@ -54,6 +54,15 @@ type FinalizedDisposalTransactionRow = {
   notes: string | null
 }
 
+type GiveawayAuditTransactionRow = {
+  inventory_item_id: string | null
+  created_at: string | null
+  event_date: string | null
+  amount: number | null
+  quantity_change: number | null
+  notes: string | null
+}
+
 type SortKey =
   | 'created_at'
   | 'card'
@@ -216,6 +225,47 @@ function renderStatusPill(status: string | null) {
       {(status || '—').replaceAll('_', ' ')}
     </span>
   )
+}
+
+function isFinalizedGiveawayItem(
+  item: Pick<InventoryRow, 'status' | 'available_quantity'>,
+  giveawayAudit: GiveawayAuditTransactionRow | null
+) {
+  if (item.status !== 'giveaway') return false
+  return Boolean(giveawayAudit) || Number(item.available_quantity ?? 0) <= 0
+}
+
+function isPlannedGiveawayItem(
+  item: Pick<InventoryRow, 'status' | 'available_quantity'>,
+  giveawayAudit: GiveawayAuditTransactionRow | null
+) {
+  if (item.status !== 'giveaway') return false
+  return !isFinalizedGiveawayItem(item, giveawayAudit)
+}
+
+function renderInventoryStatusPill(
+  item: Pick<InventoryRow, 'status' | 'available_quantity'>,
+  giveawayAudit: GiveawayAuditTransactionRow | null
+) {
+  if (isPlannedGiveawayItem(item, giveawayAudit)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800/80 bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+        <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.75)]" />
+        <span>Planned Giveaway</span>
+      </span>
+    )
+  }
+
+  if (isFinalizedGiveawayItem(item, giveawayAudit)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-900/70 bg-purple-950/40 px-2 py-0.5 text-[11px] font-medium text-purple-200">
+        <span className="h-2 w-2 rounded-full bg-purple-300 shadow-[0_0_8px_rgba(216,180,254,0.75)]" />
+        <span>Giveaway</span>
+      </span>
+    )
+  }
+
+  return renderStatusPill(item.status)
 }
 
 function remainingCostBasis(item: Pick<InventoryRow, 'available_quantity' | 'quantity' | 'cost_basis_unit' | 'cost_basis_total'>) {
@@ -2720,29 +2770,55 @@ export default async function InventoryPage({
 
   const visibleItemIds = items.map((item) => item.id)
   const finalizedDisposalByItemId = new Map<string, FinalizedDisposalTransactionRow>()
+  const giveawayAuditByItemId = new Map<string, GiveawayAuditTransactionRow>()
 
   if (visibleItemIds.length > 0) {
-    const finalizedDisposalResponse = await supabase
-      .from('inventory_transactions')
-      .select(`
-        inventory_item_id,
-        created_at,
-        disposal_reason,
-        disposal_notes,
-        notes
-      `)
-      .eq('user_id', user.id)
-      .eq('transaction_type', 'disposal_writeoff_review')
-      .eq('finalized_for_tax', true)
-      .in('inventory_item_id', visibleItemIds)
-      .order('created_at', { ascending: false })
+    const [finalizedDisposalResponse, giveawayAuditResponse] = await Promise.all([
+      supabase
+        .from('inventory_transactions')
+        .select(`
+          inventory_item_id,
+          created_at,
+          disposal_reason,
+          disposal_notes,
+          notes
+        `)
+        .eq('user_id', user.id)
+        .eq('transaction_type', 'disposal_writeoff_review')
+        .eq('finalized_for_tax', true)
+        .in('inventory_item_id', visibleItemIds)
+        .order('created_at', { ascending: false }),
+
+      supabase
+        .from('inventory_transactions')
+        .select(`
+          inventory_item_id,
+          created_at,
+          event_date,
+          amount,
+          quantity_change,
+          notes
+        `)
+        .eq('user_id', user.id)
+        .eq('transaction_type', 'adjustment')
+        .eq('to_status', 'giveaway')
+        .in('inventory_item_id', visibleItemIds)
+        .order('created_at', { ascending: false }),
+    ])
 
     const finalizedRows = (finalizedDisposalResponse.data ?? []) as FinalizedDisposalTransactionRow[]
+    const giveawayRows = (giveawayAuditResponse.data ?? []) as GiveawayAuditTransactionRow[]
 
     for (const row of finalizedRows) {
       if (!row.inventory_item_id) continue
       if (finalizedDisposalByItemId.has(row.inventory_item_id)) continue
       finalizedDisposalByItemId.set(row.inventory_item_id, row)
+    }
+
+    for (const row of giveawayRows) {
+      if (!row.inventory_item_id) continue
+      if (giveawayAuditByItemId.has(row.inventory_item_id)) continue
+      giveawayAuditByItemId.set(row.inventory_item_id, row)
     }
   }
 
@@ -3064,7 +3140,10 @@ export default async function InventoryPage({
                   const isLotLike = quantity > 1 || available > 1
                   const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
                   const finalizedDisposal = finalizedDisposalByItemId.get(item.id) ?? null
+                  const giveawayAudit = giveawayAuditByItemId.get(item.id) ?? null
                   const isFinalizedDisposal = Boolean(finalizedDisposal)
+                  const isPlannedGiveaway = isPlannedGiveawayItem(item, giveawayAudit)
+                  const isFinalizedGiveaway = isFinalizedGiveawayItem(item, giveawayAudit)
                   const itemName = `${getPrimaryTitle(item)}${itemLine ? ` • ${itemLine}` : ''}`
 
                   return (
@@ -3103,6 +3182,11 @@ export default async function InventoryPage({
                           >
                             {itemLine || 'Open details'}
                           </Link>
+                          {isPlannedGiveaway ? (
+                            <div className="mt-1 inline-flex rounded-full border border-amber-800/70 bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+                              Ready to finalize
+                            </div>
+                          ) : null}
                           {isFinalizedDisposal ? (
                             <div className="mt-1 inline-flex rounded-full border border-amber-900/60 bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-200">
                               Finalized for write-off review
@@ -3111,7 +3195,7 @@ export default async function InventoryPage({
                         </div>
                       </td>
 
-                      <td data-inventory-status-cell="true" className="app-td whitespace-nowrap">{renderStatusPill(item.status)}</td>
+                      <td data-inventory-status-cell="true" className="app-td whitespace-nowrap">{renderInventoryStatusPill(item, giveawayAudit)}</td>
                       <td className="app-td whitespace-nowrap">{item.quantity ?? 0}</td>
 
                       <td className="app-td whitespace-nowrap">
@@ -3163,10 +3247,18 @@ export default async function InventoryPage({
                             </form>
                           ) : null}
 
-                          {item.status === 'giveaway' ? (
+                          {isPlannedGiveaway ? (
+                            <Link
+                              href={`/app/inventory/${item.id}/giveaway`}
+                              className="rounded-full border border-amber-800/70 bg-amber-950/40 px-2.5 py-1 text-xs font-medium text-amber-100 hover:bg-amber-900/50"
+                              title="Finalize this planned giveaway and record the tax support details."
+                            >
+                              Finalize
+                            </Link>
+                          ) : isFinalizedGiveaway ? (
                             <span
                               className="rounded-full border border-purple-900/60 bg-purple-950/30 px-2.5 py-1 text-xs font-medium text-purple-200"
-                              title="Giveaway records are locked to preserve tax support."
+                              title="Finalized giveaway records are locked to preserve tax support."
                             >
                               Locked
                             </span>

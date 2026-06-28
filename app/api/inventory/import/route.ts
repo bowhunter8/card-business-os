@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server'
 
 type CsvRow = Record<string, string>
 
+type ImportTemplateType = 'inventory' | 'giveaway'
+
 type SkippedRow = {
   row: number
   item: string
@@ -24,6 +26,7 @@ type ImportResult = {
   warnings: number
   skippedRows: SkippedRow[]
   warningRows: WarningRow[]
+  templateType: ImportTemplateType
 }
 
 function normalizeHeader(value: string) {
@@ -119,6 +122,23 @@ function getPurchasePrice(row: CsvRow) {
   return toNumber(firstValue(row, ['purchase_price', 'cost_basis', 'cost', 'price_paid']))
 }
 
+function getImportTemplateType(formData: FormData, file: File): ImportTemplateType {
+  const rawTemplateType = String(formData.get('templateType') || formData.get('importType') || '')
+    .trim()
+    .toLowerCase()
+  const fileName = file.name.toLowerCase()
+
+  if (rawTemplateType === 'giveaway' || rawTemplateType === 'giveaways') {
+    return 'giveaway'
+  }
+
+  if (fileName.includes('giveaway') || fileName.includes('giveaways') || fileName.includes('givvy')) {
+    return 'giveaway'
+  }
+
+  return 'inventory'
+}
+
 function addSkipped(result: ImportResult, row: number, item: string, reason: string) {
   result.skipped += 1
   result.errors.push(`Row ${row}: ${reason}`)
@@ -139,20 +159,20 @@ function addDuplicateSkipped(result: ImportResult, row: number, item: string) {
   })
 }
 
-function buildCsvRowFingerprint(row: CsvRow) {
+function buildCsvRowFingerprint(row: CsvRow, templateType: ImportTemplateType) {
   const normalizedRow = Object.keys(row)
     .sort()
     .map((key) => `${key}:${cleanText(row[key]).toLowerCase()}`)
     .join('|')
 
   return createHash('sha256')
-    .update(normalizedRow)
+    .update(`${templateType}|${normalizedRow}`)
     .digest('hex')
     .slice(0, 24)
 }
 
-function buildSourceReference(row: CsvRow) {
-  return `csv-row:${buildCsvRowFingerprint(row)}`
+function buildSourceReference(row: CsvRow, templateType: ImportTemplateType) {
+  return `csv-row:${buildCsvRowFingerprint(row, templateType)}`
 }
 
 function getInventoryItemType(row: CsvRow, quantity: number) {
@@ -199,7 +219,7 @@ function getInventoryItemType(row: CsvRow, quantity: number) {
   return 'single_card'
 }
 
-function buildNotes(row: CsvRow) {
+function buildNotes(row: CsvRow, templateType: ImportTemplateType) {
   const notes = cleanText(row.notes)
   const purchaseDate = cleanText(row.purchase_date || row.date_purchased)
   const category = cleanText(row.category)
@@ -208,6 +228,7 @@ function buildNotes(row: CsvRow) {
   const orderNumber = cleanText(row.order_number)
 
   const extras = [
+    templateType === 'giveaway' ? 'Template: Giveaway Import' : '',
     purchaseDate ? `Purchase Date: ${purchaseDate}` : '',
     category ? `Category: ${category}` : '',
     subcategory ? `Subcategory: ${subcategory}` : '',
@@ -244,6 +265,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'CSV file is required.' }, { status: 400 })
   }
 
+  const templateType = getImportTemplateType(formData, file)
   const text = await file.text()
   const { headers, rows } = parseCsv(text)
 
@@ -280,6 +302,7 @@ export async function POST(request: NextRequest) {
     warnings: 0,
     skippedRows: [],
     warningRows: [],
+    templateType,
   }
 
   for (const [index, row] of rows.entries()) {
@@ -302,7 +325,7 @@ export async function POST(request: NextRequest) {
       continue
     }
 
-    const sourceReference = buildSourceReference(row)
+    const sourceReference = buildSourceReference(row, templateType)
 
     const { data: existingImportRow, error: duplicateCheckError } = await supabase
       .from('inventory_items')
@@ -326,13 +349,14 @@ export async function POST(request: NextRequest) {
     const costBasisTotal = purchasePrice * quantity
     const purchaseSource = firstValue(row, ['purchased_from', 'purchase_source', 'source', 'platform'])
     const now = new Date().toISOString()
+    const status = templateType === 'giveaway' ? 'giveaway' : cleanText(row.status) || 'available'
 
     const insertPayload = {
       user_id: user.id,
       source_type: 'csv_import',
       source_reference: sourceReference,
       item_type: getInventoryItemType(row, quantity),
-      status: cleanText(row.status) || 'available',
+      status,
       quantity,
       available_quantity: quantity,
       title: itemName,
@@ -345,14 +369,14 @@ export async function POST(request: NextRequest) {
       variation: cleanText(row.variation) || null,
       team: cleanText(row.team) || null,
       condition_note: cleanText(row.condition || row.condition_note) || null,
-      purchase_source: purchaseSource || 'CSV Import',
+      purchase_source: purchaseSource || (templateType === 'giveaway' ? 'CSV Giveaway Import' : 'CSV Import'),
       cost_basis_unit: purchasePrice,
       cost_basis_total: costBasisTotal,
       estimated_value_unit: null,
       estimated_value_total: null,
       storage_location: cleanText(row.location || row.storage_location) || null,
       tax_lot_method: cleanText(row.tax_lot_method) || 'specific',
-      notes: buildNotes(row),
+      notes: buildNotes(row, templateType),
       created_at: now,
       updated_at: now,
     }
