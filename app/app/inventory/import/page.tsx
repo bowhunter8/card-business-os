@@ -342,6 +342,29 @@ export default function InventoryImportPage() {
           </div>
 
           <div className="mt-4 grid gap-4 xl:grid-cols-4 lg:grid-cols-2">
+
+            <div className="flex h-full flex-col rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-100">Before You Start</h3>
+              </div>
+
+              <div className="mt-3 space-y-3 text-sm leading-6 text-slate-300">
+                <div>
+                  <p className="font-semibold text-slate-100">Required Fields</p>
+                  <p className="mt-1 text-slate-400">Only Item and Purchase Price are required. Quantity defaults to 1 if left blank.</p>
+                </div>
+
+                <div>
+                  <p className="font-semibold text-slate-100">After import</p>
+                  <p className="mt-1 text-slate-400">HITS™ imports valid rows and lists only skipped rows that require correction.</p>
+                </div>
+
+                <div>
+                  <p className="font-semibold text-slate-100">Perfect For</p>
+                  <p className="mt-1 text-slate-400">Whatnot buys, card shows, collections, basement finds, giveaways, and quick inventory adds.</p>
+                </div>
+              </div>
+            </div>
             <div className="flex h-full flex-col rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-lg font-bold text-emerald-100">Quick Inventory Template</h3>
@@ -359,28 +382,6 @@ export default function InventoryImportPage() {
                 href="/api/inventory/template"
                 download
                 className="mt-auto inline-flex items-center justify-center rounded-xl border border-emerald-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/20"
-              >
-                Download Template
-              </a>
-            </div>
-
-            <div className="flex h-full flex-col rounded-2xl border border-cyan-400/40 bg-cyan-500/10 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-lg font-bold text-cyan-100">Advanced Inventory Template</h3>
-                <span className="rounded-full border border-cyan-300/40 bg-cyan-400/15 px-2 py-1 text-xs font-semibold text-cyan-100">
-                  More Details
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-slate-200">
-                Import extra fields like Brand, Year, Category, Card Number, Platform, Order Number, and Location.
-              </p>
-              <p className="mt-3 text-sm leading-6 text-slate-400">
-                Best for users migrating from a larger spreadsheet or who already track detailed inventory.
-              </p>
-              <a
-                href="/api/inventory/template?type=advanced"
-                download
-                className="mt-auto inline-flex items-center justify-center rounded-xl border border-cyan-300/40 bg-slate-950/60 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
               >
                 Download Template
               </a>
@@ -476,26 +477,6 @@ export default function InventoryImportPage() {
                   Clear
                 </button>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20">
-          <h2 className="text-lg font-bold text-white">Import basics</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
-              <p className="font-semibold text-slate-100">Required Fields</p>
-              <p className="mt-1">Only Item and Purchase Price are required. Quantity defaults to 1 if left blank.</p>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
-              <p className="font-semibold text-slate-100">After import</p>
-              <p className="mt-1">HITS™ imports valid rows and lists only skipped rows that require correction.</p>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm leading-6 text-slate-300">
-              <p className="font-semibold text-slate-100">Perfect For</p>
-              <p className="mt-1">Useful for Whatnot buys, card shows, collections, basement finds, giveaways, and quick inventory adds.</p>
             </div>
           </div>
         </section>
