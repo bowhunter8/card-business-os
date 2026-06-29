@@ -390,12 +390,9 @@ export default function InventoryImportPage() {
             <div className="flex h-full flex-col rounded-2xl border border-fuchsia-400/40 bg-fuchsia-500/10 p-4">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-lg font-bold text-fuchsia-100">Giveaway Template</h3>
-                <span className="rounded-full border border-fuchsia-300/40 bg-fuchsia-400/15 px-2 py-1 text-xs font-semibold text-fuchsia-100">
-                  Planned Giveaways
-                </span>
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-200">
-                Import planned giveaway inventory for livestreams, card shows, promotions, and show prep.
+                Import giveaway inventory for livestreams, card shows, promotions, customer appreciation, and other marketing giveaways.
               </p>
               <p className="mt-3 text-sm leading-6 text-slate-400">
                 Uses the same simple fields as Quick Inventory. Items imported with this template are handled as giveaway inventory.
