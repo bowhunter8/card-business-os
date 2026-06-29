@@ -827,7 +827,7 @@ export default async function InventoryDetailPage({
 
           <div className="mt-3 grid gap-2 md:grid-cols-3">
             <Detail label="Planned Quantity" value={String(item.available_quantity ?? 0)} />
-            <Detail label="Planned Cost Basis" value={money(item.cost_basis_total)} />
+            <Detail label="Planned Cost Basis" value={money(Number(item.available_quantity ?? 0) * Number(item.cost_basis_unit ?? 0))} />
             <Detail label="Source" value={buildSourceTypeLabel(item.source_type)} />
           </div>
         </div>

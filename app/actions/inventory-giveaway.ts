@@ -35,28 +35,32 @@ function safeDate(value: FormDataEntryValue | null) {
   return raw.slice(0, 10)
 }
 
+function safePositiveInteger(value: FormDataEntryValue | null) {
+  const raw = safeText(value)
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed)) return Number.NaN
+
+  return Math.floor(parsed)
+}
+
 function labelFromValue(value: string) {
   return value
     .replaceAll('_', ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
-function giveawayCostBasis(item: GiveawayInventoryItem) {
+function giveawayUnitCost(item: GiveawayInventoryItem) {
   const quantity = Number(item.quantity ?? 0)
-  const availableQuantity = Number(item.available_quantity ?? 0)
   const unitCost = Number(item.cost_basis_unit ?? 0)
   const totalCost = Number(item.cost_basis_total ?? 0)
 
-  if (availableQuantity > 0 && unitCost > 0) {
-    return roundMoney(availableQuantity * unitCost)
+  if (unitCost > 0) {
+    return roundMoney(unitCost)
   }
 
-  if (availableQuantity > 0 && quantity > 0 && totalCost > 0) {
-    return roundMoney((totalCost / quantity) * availableQuantity)
-  }
-
-  if (totalCost > 0) {
-    return roundMoney(totalCost)
+  if (quantity > 0 && totalCost > 0) {
+    return roundMoney(totalCost / quantity)
   }
 
   return 0
@@ -133,17 +137,36 @@ export async function markAsGiveawayAction(formData: FormData) {
     )
   }
 
-  const amount = giveawayCostBasis(item)
+  const availableQuantity = Math.max(0, Number(item.available_quantity ?? 0))
+  const requestedGiveawayQuantity = safePositiveInteger(formData.get('giveaway_quantity'))
+  const givenAwayQuantity = Number.isFinite(requestedGiveawayQuantity)
+    ? requestedGiveawayQuantity
+    : availableQuantity
+
+  if (availableQuantity <= 0) {
+    giveawayErrorRedirect(inventoryItemId, 'This item has no available quantity to give away.')
+  }
+
+  if (givenAwayQuantity <= 0) {
+    giveawayErrorRedirect(inventoryItemId, 'Quantity given away must be at least 1.')
+  }
+
+  if (givenAwayQuantity > availableQuantity) {
+    giveawayErrorRedirect(
+      inventoryItemId,
+      `Quantity given away cannot be more than the available quantity (${availableQuantity}).`
+    )
+  }
+
+  const unitCost = giveawayUnitCost(item)
+  const amount = roundMoney(givenAwayQuantity * unitCost)
+  const remainingQuantity = Math.max(0, availableQuantity - givenAwayQuantity)
   const itemName = item.title || item.player_name || 'Inventory Item'
-  const givenAwayQuantity = Math.max(0, Number(item.available_quantity ?? 0))
   const updatedAt = new Date().toISOString()
   const giveawayTypeLabel = labelFromValue(giveawayType)
   const recipientTypeLabel = labelFromValue(recipientType)
   const giveawayExpenseCategory = buildGiveawayExpenseCategory(giveawayTypeLabel)
-
-  if (givenAwayQuantity <= 0) {
-    giveawayErrorRedirect(inventoryItemId, 'This item has no available quantity to give away.')
-  }
+  const isFullyGivenAway = remainingQuantity <= 0
 
   const detailLines = [
     `Giveaway Type: ${giveawayTypeLabel}`,
@@ -158,8 +181,12 @@ export async function markAsGiveawayAction(formData: FormData) {
     `Inventory giveaway recorded for advertising / marketing support.`,
     `Item: ${itemName}.`,
     `Quantity given away: ${givenAwayQuantity}.`,
+    `Quantity remaining after giveaway: ${remainingQuantity}.`,
     `Cost basis recorded: ${amount.toFixed(2)}.`,
     ...detailLines,
+    isFullyGivenAway
+      ? `This giveaway item is now fully given away and locked for tax support.`
+      : `This item remains a planned giveaway until all available quantity has been finalized.`,
     `Do not also deduct this item as COGS, disposal, donation, or another separate expense.`,
   ].join(' ')
 
@@ -167,7 +194,7 @@ export async function markAsGiveawayAction(formData: FormData) {
     .from('inventory_items')
     .update({
       status: 'giveaway',
-      available_quantity: 0,
+      available_quantity: remainingQuantity,
       updated_at: updatedAt,
     })
     .eq('id', inventoryItemId)
@@ -196,7 +223,7 @@ export async function markAsGiveawayAction(formData: FormData) {
       inventory_item_id: inventoryItemId,
       transaction_type: 'adjustment',
       quantity_change: -Math.abs(givenAwayQuantity),
-      to_status: 'giveaway',
+      to_status: isFullyGivenAway ? 'giveaway' : 'planned_giveaway',
       amount,
       event_date: giveawayDate,
       notes: sharedAuditNote,
@@ -217,7 +244,9 @@ export async function markAsGiveawayAction(formData: FormData) {
 
   redirect(
     `/app/inventory/${inventoryItemId}?success=${encodeURIComponent(
-      'Giveaway recorded with tax support details'
+      isFullyGivenAway
+        ? 'Giveaway recorded with tax support details'
+        : `Partial giveaway recorded. ${remainingQuantity} remaining.`
     )}&giveaway=${Date.now()}`
   )
 }
