@@ -2046,6 +2046,7 @@ function BulkSelectionScript({
       const fieldName = 'selected_inventory_ids';
       const storageKey = 'card_business_os_inventory_bulk_selection_v2';
       let isBulkSubmitting = false;
+      let lastHref = window.location.href;
 
       const form = () => document.getElementById(formId);
       const deleteForm = () => document.getElementById(deleteFormId);
@@ -2081,9 +2082,13 @@ function BulkSelectionScript({
         } catch (_error) {}
       }
 
-      try {
-        window.sessionStorage.removeItem(storageKey);
-      } catch (_error) {}
+      function removeStoredSelection() {
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch (_error) {}
+      }
+
+      removeStoredSelection();
 
       let selectedIdsSet = new Set();
 
@@ -2139,6 +2144,30 @@ function BulkSelectionScript({
             targetForm.appendChild(input);
           });
         });
+      }
+
+      function clearBulkSelectionState() {
+        isBulkSubmitting = false;
+        selectedIdsSet = new Set();
+        removeStoredSelection();
+        allSelectionCheckboxes().forEach((checkbox) => {
+          checkbox.checked = false;
+          checkbox.indeterminate = false;
+        });
+        [form(), deleteForm(), statusForm(), finalizeForm()].forEach((targetForm) => {
+          if (!targetForm) return;
+          targetForm.querySelectorAll('input[data-bulk-persisted-selection="true"]').forEach((input) => input.remove());
+        });
+        pendingNodes().forEach((node) => {
+          node.classList.add('hidden');
+        });
+        const overlay = pendingOverlay();
+        if (overlay) {
+          overlay.classList.add('hidden');
+          overlay.classList.remove('flex');
+        }
+        document.body.classList.remove('overflow-hidden');
+        updateBulkState();
       }
 
       function syncPageCheckboxesFromStoredSelection() {
@@ -2309,6 +2338,7 @@ function BulkSelectionScript({
       }
 
       function setSubmitting(button) {
+        lastHref = window.location.href;
         isBulkSubmitting = true;
         const count = selectedCount();
         const ids = selectedIds();
@@ -2479,15 +2509,18 @@ function BulkSelectionScript({
         }
       });
 
-      rowCheckboxes().forEach((checkbox) => {
-        checkbox.checked = false;
+      window.setInterval(() => {
+        if (window.location.href !== lastHref) {
+          lastHref = window.location.href;
+          clearBulkSelectionState();
+        }
+      }, 250);
+
+      window.addEventListener('pageshow', () => {
+        clearBulkSelectionState();
       });
-      pageToggleCheckboxes().forEach((checkbox) => {
-        checkbox.checked = false;
-        checkbox.indeterminate = false;
-      });
-      syncStoredInputs();
-      updateBulkState();
+
+      clearBulkSelectionState();
     })();
   `.replace('${FORM_ID_PLACEHOLDER}', formId).replace('${DELETE_FORM_ID_PLACEHOLDER}', deleteFormId).replace('${STATUS_FORM_ID_PLACEHOLDER}', statusFormId).replace('${FINALIZE_FORM_ID_PLACEHOLDER}', finalizeFormId)
 
