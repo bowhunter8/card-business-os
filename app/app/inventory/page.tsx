@@ -36,7 +36,15 @@ type InventoryStatusSummary = {
   value: number
 }
 
-type InventoryStatusFilter = 'available' | 'listed' | 'junk' | 'disposed' | 'sold' | 'personal' | 'giveaway'
+type InventoryStatusFilter =
+  | 'available'
+  | 'partially_sold'
+  | 'listed'
+  | 'junk'
+  | 'disposed'
+  | 'sold'
+  | 'personal'
+  | 'giveaway'
 
 type SaleRow = {
   id: string
@@ -92,6 +100,7 @@ const BULK_SUCCESS_OVERLAY_ID = 'bulk-inventory-success-overlay'
 
 const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
+  partially_sold: 'Partially Sold',
   listed: 'Listed',
   junk: 'Junk',
   disposed: 'Written Off',
@@ -102,6 +111,7 @@ const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
 
 const STATUS_FILTERS: InventoryStatusFilter[] = [
   'available',
+  'partially_sold',
   'listed',
   'junk',
   'disposed',
@@ -243,10 +253,28 @@ function isPlannedGiveawayItem(
   return !isFinalizedGiveawayItem(item, giveawayAudit)
 }
 
+function isPartiallySoldItem(
+  item: Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity'>
+) {
+  const quantity = Number(item.quantity ?? 0)
+  const available = Number(item.available_quantity ?? 0)
+
+  return item.status === 'available' && quantity > 0 && available > 0 && available < quantity
+}
+
 function renderInventoryStatusPill(
-  item: Pick<InventoryRow, 'status' | 'available_quantity'>,
+  item: Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity'>,
   giveawayAudit: GiveawayAuditTransactionRow | null
 ) {
+  if (isPartiallySoldItem(item)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-yellow-800/80 bg-yellow-950/40 px-2 py-0.5 text-[11px] font-medium text-yellow-200">
+        <span className="h-2 w-2 rounded-full bg-yellow-300 shadow-[0_0_8px_rgba(253,224,71,0.75)]" />
+        <span>Partially Sold</span>
+      </span>
+    )
+  }
+
   if (isPlannedGiveawayItem(item, giveawayAudit)) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-800/80 bg-amber-950/40 px-2 py-0.5 text-[11px] font-medium text-amber-200">
@@ -1554,7 +1582,9 @@ function StatusSummaryCard({
   const toneClass =
     status === 'available'
       ? 'hover:border-emerald-800/70 hover:bg-emerald-950/20'
-      : status === 'listed'
+      : status === 'partially_sold'
+        ? 'hover:border-yellow-800/70 hover:bg-yellow-950/20'
+        : status === 'listed'
         ? 'hover:border-sky-800/70 hover:bg-sky-950/20'
         : status === 'junk'
           ? 'hover:border-zinc-600 hover:bg-zinc-800/70'
@@ -1569,7 +1599,9 @@ function StatusSummaryCard({
   const activeClass =
     status === 'available'
       ? 'border-emerald-800 bg-emerald-950/20'
-      : status === 'listed'
+      : status === 'partially_sold'
+        ? 'border-yellow-800 bg-yellow-950/20'
+        : status === 'listed'
         ? 'border-sky-800 bg-sky-950/20'
         : status === 'junk'
           ? 'border-zinc-600 bg-zinc-800/60'
@@ -1898,6 +1930,12 @@ function BulkActionsPanel({
               className={`app-chip ${q === 'available' ? 'app-chip-active' : 'app-chip-idle'}`}
             >
               Available
+            </Link>
+            <Link
+              href={getFilterHref('partially_sold', sortKey, sortDir, limit)}
+              className={`app-chip ${q === 'partially_sold' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Partially Sold
             </Link>
             <Link
               href={getFilterHref('listed', sortKey, sortDir, limit)}
@@ -2722,6 +2760,8 @@ export default async function InventoryPage({
 
   if (qNormalized === 'available') {
     query = query.eq('status', 'available')
+  } else if (qNormalized === 'partially_sold') {
+    query = query.eq('status', 'available').gt('available_quantity', 0)
   } else if (qNormalized === 'listed') {
     query = query.eq('status', 'listed')
   } else if (qNormalized === 'junk') {
@@ -2769,7 +2809,11 @@ export default async function InventoryPage({
   const [response, summaryResponse] = await Promise.all([inventoryRowsPromise, summaryRowsPromise])
 
   const rawItems = (response.data ?? []) as InventoryRow[]
-  const items = sortKey === 'card' ? sortRows(rawItems, sortKey, sortDir) : rawItems
+  const filteredItems =
+    qNormalized === 'partially_sold'
+      ? rawItems.filter((item) => isPartiallySoldItem(item))
+      : rawItems
+  const items = sortKey === 'card' ? sortRows(filteredItems, sortKey, sortDir) : filteredItems
   const error = response.error || summaryResponse.error
 
   const soldOutItemIds = items
@@ -2862,8 +2906,10 @@ export default async function InventoryPage({
   const pageDescription =
     qNormalized === 'available'
       ? 'Showing available inventory items.'
-      : qNormalized === 'listed'
-        ? 'Showing listed inventory items.'
+      : qNormalized === 'partially_sold'
+        ? 'Showing partially sold multi-quantity inventory items that still have quantity remaining.'
+        : qNormalized === 'listed'
+          ? 'Showing listed inventory items.'
         : qNormalized === 'junk'
           ? 'Showing junk items you are not planning to sell.'
         : qNormalized === 'disposed'
@@ -2885,6 +2931,12 @@ export default async function InventoryPage({
   for (const item of (summaryResponse.data ?? []) as Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'>[]) {
     const status = String(item.status ?? '') as InventoryStatusFilter
     if (!STATUS_FILTERS.includes(status)) continue
+
+    if (isPartiallySoldItem(item)) {
+      statusSummaries.partially_sold.quantity += Number(item.quantity ?? 0) - Number(item.available_quantity ?? 0)
+      statusSummaries.partially_sold.cost += remainingCostBasis(item)
+      statusSummaries.partially_sold.value += Number(item.estimated_value_total ?? 0)
+    }
 
     const quantity =
       status === 'sold' ||
@@ -3008,7 +3060,7 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-7">
+      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-8">
         {STATUS_FILTERS.map((status) => (
           <StatusSummaryCard
             key={status}
@@ -3170,6 +3222,8 @@ export default async function InventoryPage({
                     item.status !== 'personal' &&
                     item.status !== 'junk' &&
                     item.status !== 'giveaway'
+                  const soldQty = Math.max(quantity - available, 0)
+                  const isPartialSold = isPartiallySoldItem(item)
                   const isLotLike = quantity > 1 || available > 1
                   const latestActiveSale = latestActiveSaleByItemId.get(item.id) ?? null
                   const finalizedDisposal = finalizedDisposalByItemId.get(item.id) ?? null
@@ -3207,6 +3261,11 @@ export default async function InventoryPage({
                             {isLotLike ? (
                               <span className="app-badge app-badge-warning shrink-0">Lot / Multi Qty</span>
                             ) : null}
+                            {isPartialSold ? (
+                              <span className="shrink-0 rounded-full border border-yellow-800/70 bg-yellow-950/40 px-2 py-0.5 text-[11px] font-medium text-yellow-200">
+                                {soldQty} sold
+                              </span>
+                            ) : null}
                           </div>
                           <Link
                             href={`/app/inventory/${item.id}`}
@@ -3233,7 +3292,11 @@ export default async function InventoryPage({
 
                       <td className="app-td whitespace-nowrap">
                         <div className="font-medium leading-tight">{item.available_quantity ?? 0}</div>
-                        {hasAvailable && isLotLike ? (
+                        {isPartialSold ? (
+                          <div className="mt-0.5 text-[11px] text-yellow-300">
+                            {soldQty} sold • {available} remaining
+                          </div>
+                        ) : hasAvailable && isLotLike ? (
                           <div className="mt-0.5 text-[11px] text-zinc-500">partial sell ready</div>
                         ) : null}
                       </td>
