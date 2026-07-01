@@ -92,6 +92,39 @@ type SaleSearchRow = {
 }
 
 const SECTION_LIMIT = 50
+
+type InventoryStatusFilter =
+  | 'available'
+  | 'partially_sold'
+  | 'listed'
+  | 'junk'
+  | 'disposed'
+  | 'sold'
+  | 'personal'
+  | 'giveaway'
+
+const INVENTORY_STATUS_LABELS: Record<InventoryStatusFilter, string> = {
+  available: 'Available',
+  partially_sold: 'Partially Sold',
+  listed: 'Listed',
+  junk: 'Junk',
+  disposed: 'Written Off',
+  sold: 'Sold',
+  personal: 'Personal',
+  giveaway: 'Giveaway',
+}
+
+const INVENTORY_STATUS_FILTERS: InventoryStatusFilter[] = [
+  'available',
+  'partially_sold',
+  'listed',
+  'junk',
+  'disposed',
+  'sold',
+  'personal',
+  'giveaway',
+]
+
 const BULK_ORDERS_FORM_ID = 'bulk-delete-orders-form'
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-form'
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-form'
@@ -120,6 +153,24 @@ function buildSearchRedirect(q: string, statusKey: string, statusValue: string) 
   params.set(statusKey, statusValue)
 
   return `/app/search?${params.toString()}#search-status`
+}
+
+function normalizeInventoryStatusFilter(value: string | null | undefined): InventoryStatusFilter | null {
+  const normalized = String(value ?? '').trim().toLowerCase()
+
+  return INVENTORY_STATUS_FILTERS.includes(normalized as InventoryStatusFilter)
+    ? (normalized as InventoryStatusFilter)
+    : null
+}
+
+function buildSearchInventoryStatusHref(q: string, status: InventoryStatusFilter | '') {
+  const params = new URLSearchParams()
+
+  if (q.trim()) params.set('q', q.trim())
+  if (status) params.set('inventory_status', status)
+
+  const query = params.toString()
+  return query ? `/app/search?${query}#matching-inventory-items` : '/app/search'
 }
 
 function readFormIds(formData: FormData, fieldName: string) {
@@ -677,6 +728,20 @@ function matchesInventoryFilters(item: InventoryItemRow, filters: SearchFilters)
   )
 }
 
+function isSearchPartiallySoldItem(item: InventoryItemRow) {
+  const quantity = Number(item.quantity ?? 0)
+  const available = Number(item.available_quantity ?? 0)
+
+  return item.status === 'available' && quantity > 0 && available > 0 && available < quantity
+}
+
+function matchesInventoryStatusFilter(item: InventoryItemRow, status: InventoryStatusFilter | null) {
+  if (!status) return true
+  if (status === 'partially_sold') return isSearchPartiallySoldItem(item)
+
+  return String(item.status ?? '').toLowerCase() === status
+}
+
 function matchesBreakFilters(breakRow: BreakRow, filters: SearchFilters) {
   return (
     filterTextMatches(breakRow.source_name, [...filters.source, ...filters.seller]) &&
@@ -869,18 +934,20 @@ function NotesPreview({ value }: { value: string | null | undefined }) {
 }
 
 function ResultSection({
+  id,
   title,
   subtitle,
   count,
   children,
 }: {
+  id?: string
   title: string
   subtitle: string
   count: number
   children: React.ReactNode
 }) {
   return (
-    <div className="app-section">
+    <div id={id} className="app-section scroll-mt-28">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -1108,6 +1175,46 @@ function BulkDeleteConfirmControl({
   )
 }
 
+function InventorySearchStatusFilters({
+  q,
+  activeStatus,
+}: {
+  q: string
+  activeStatus: InventoryStatusFilter | null
+}) {
+  return (
+    <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-zinc-200">Inventory filters</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Narrow these inventory search results without changing your search term.
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={buildSearchInventoryStatusHref(q, '')}
+            className={`app-chip ${!activeStatus ? 'app-chip-active' : 'app-chip-idle'}`}
+          >
+            All
+          </Link>
+
+          {INVENTORY_STATUS_FILTERS.map((status) => (
+            <Link
+              key={status}
+              href={buildSearchInventoryStatusHref(q, status)}
+              className={`app-chip ${activeStatus === status ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              {INVENTORY_STATUS_LABELS[status]}
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default async function GlobalSearchPage({
   searchParams,
 }: {
@@ -1117,10 +1224,12 @@ export default async function GlobalSearchPage({
     deleted_count?: string
     delete_error?: string
     combine_error?: string
+    inventory_status?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim()
+  const activeInventoryStatusFilter = normalizeInventoryStatusFilter(params?.inventory_status)
   const parsedSearch = parseSearchQuery(qRaw)
   const searchTokens = buildSearchTokens(parsedSearch.searchTextForMatching || qRaw)
   const searchFilters = parsedSearch.filters
@@ -1441,7 +1550,7 @@ export default async function GlobalSearchPage({
         .filter((breakRow) => matchesBreakFilters(breakRow, searchFilters))
         .slice(0, SECTION_LIMIT)
 
-      matchingInventory = filterAndRankByTokens({
+      const rankedInventoryMatches = filterAndRankByTokens({
         rows: (inventoryResponse.data ?? []) as InventoryItemRow[],
         tokens: searchTokens,
         getSearchableText: (item) =>
@@ -1461,6 +1570,9 @@ export default async function GlobalSearchPage({
         getExactBoostText: (item) => buildSearchableText([item.title, item.player_name, item.brand, item.set_name]),
       })
         .filter((item) => matchesInventoryFilters(item, searchFilters))
+
+      matchingInventory = rankedInventoryMatches
+        .filter((item) => matchesInventoryStatusFilter(item, activeInventoryStatusFilter))
         .slice(0, SECTION_LIMIT)
 
       const soldInventoryMatches = filterAndRankByTokens({
@@ -1944,8 +2056,9 @@ export default async function GlobalSearchPage({
         </ResultSection>
       ) : null}
 
-      {!isMultiOrderSearch && matchingInventory.length > 0 ? (
+      {!isMultiOrderSearch && (matchingInventory.length > 0 || activeInventoryStatusFilter) ? (
         <ResultSection
+          id="matching-inventory-items"
           title="Matching Inventory Items"
           subtitle="Search hits from title, player, set, number, team, notes, and related inventory fields."
           count={matchingInventory.length}
@@ -1953,6 +2066,8 @@ export default async function GlobalSearchPage({
           <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction} className="hidden">
             <input type="hidden" name="q" value={qRaw} />
           </form>
+
+          <InventorySearchStatusFilters q={qRaw} activeStatus={activeInventoryStatusFilter} />
 
           <BulkDeleteConfirmControl label="inventory items" formId={BULK_INVENTORY_FORM_ID} />
 
@@ -2041,6 +2156,14 @@ export default async function GlobalSearchPage({
                       </tr>
                     )
                   })}
+
+                  {matchingInventory.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-4 py-8 text-center text-zinc-400">
+                        No inventory items match the selected inventory filter.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
