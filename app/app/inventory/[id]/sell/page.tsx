@@ -326,6 +326,7 @@ export default async function SellInventoryPage({
                 type="submit"
                 className="app-button-primary"
                 disabled={availableQty <= 0}
+                data-pending-text="Selling..."
               >
                 Quick Sell 1
               </button>
@@ -354,6 +355,7 @@ export default async function SellInventoryPage({
                 type="submit"
                 className="app-button"
                 disabled={availableQty <= 0}
+                data-pending-text="Selling..."
               >
                 Quick Sell All
               </button>
@@ -386,6 +388,7 @@ export default async function SellInventoryPage({
             form="sell-item-form"
             className="app-button-primary"
             disabled={availableQty <= 0}
+            data-pending-text="Recording..."
           >
             Record Sale
           </button>
@@ -1127,6 +1130,55 @@ export default async function SellInventoryPage({
               if (!input) return;
               input.addEventListener('input', updatePreview);
               input.addEventListener('change', updatePreview);
+            });
+
+
+            const setSubmittingState = (submittedForm, submitter) => {
+              if (!submittedForm) return;
+
+              if (!document.getElementById('hits-submit-spinner-style')) {
+                const style = document.createElement('style');
+                style.id = 'hits-submit-spinner-style';
+                style.textContent = '@keyframes hitsButtonSpin { to { transform: rotate(360deg); } }';
+                document.head.appendChild(style);
+              }
+
+              const formId = submittedForm.getAttribute('id');
+              const buttons = [
+                ...submittedForm.querySelectorAll('button[type="submit"]'),
+                ...(formId ? document.querySelectorAll('button[type="submit"][form="' + formId + '"]') : []),
+              ];
+
+              const clickedButton =
+                submitter && submitter.matches && submitter.matches('button[type="submit"]')
+                  ? submitter
+                  : buttons[0];
+
+              buttons.forEach((button) => {
+                button.disabled = true;
+                button.setAttribute('aria-disabled', 'true');
+              });
+
+              if (clickedButton) {
+                const pendingText =
+                  clickedButton.getAttribute('data-pending-text') ||
+                  clickedButton.textContent?.trim() ||
+                  'Working...';
+
+                clickedButton.innerHTML =
+                  '<span aria-hidden="true" style="display:inline-block;width:1rem;height:1rem;margin-right:0.5rem;border:2px solid currentColor;border-top-color:transparent;border-radius:9999px;animation:hitsButtonSpin 0.8s linear infinite;vertical-align:-0.125em;"></span>' +
+                  pendingText;
+              }
+            };
+
+            document.addEventListener('submit', (event) => {
+              const submittedForm = event.target;
+              if (!submittedForm || !submittedForm.matches || !submittedForm.matches('form')) return;
+
+              const pageRoot = document.querySelector('.app-page-wide');
+              if (pageRoot && !pageRoot.contains(submittedForm)) return;
+
+              setSubmittingState(submittedForm, event.submitter);
             });
 
             updatePulseSubcategoryOptions();
