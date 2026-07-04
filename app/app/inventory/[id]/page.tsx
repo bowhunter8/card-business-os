@@ -1,132 +1,134 @@
-import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { reverseSaleAction } from '@/app/actions/sale-safety'
-import { updateInventoryListingAction } from '@/app/actions/inventory-listing'
-import { updateInventoryItemAction } from '@/app/actions/inventory'
-import DeleteInventoryItemButton from '../DeleteInventoryItemButton'
-import EstimateValueHelper from './EstimateValueHelper'
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import { reverseSaleAction } from "@/app/actions/sale-safety";
+import { updateInventoryListingAction } from "@/app/actions/inventory-listing";
+import { updateInventoryItemAction } from "@/app/actions/inventory";
+import DeleteInventoryItemButton from "../DeleteInventoryItemButton";
+import EstimateValueHelper from "./EstimateValueHelper";
+import { AppLoadingButton } from "../../components/AppLoadingButton";
 
 type InventoryItem = {
-  id: string
-  status: string | null
-  item_type: string | null
-  title: string | null
-  player_name: string | null
-  year: number | null
-  brand: string | null
-  set_name: string | null
-  card_number: string | null
-  parallel_name: string | null
-  team: string | null
-  quantity: number | null
-  available_quantity: number | null
-  cost_basis_unit: number | null
-  cost_basis_total: number | null
-  estimated_value_unit: number | null
-  estimated_value_total: number | null
-  storage_location: string | null
-  notes: string | null
-  source_type?: string | null
-  source_break_id?: string | null
-  created_at?: string | null
-  updated_at?: string | null
-  listed_price?: number | null
-  listed_platform?: string | null
-  listed_date?: string | null
-}
+  id: string;
+  status: string | null;
+  item_type: string | null;
+  title: string | null;
+  player_name: string | null;
+  year: number | null;
+  brand: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  parallel_name: string | null;
+  team: string | null;
+  quantity: number | null;
+  available_quantity: number | null;
+  cost_basis_unit: number | null;
+  cost_basis_total: number | null;
+  estimated_value_unit: number | null;
+  estimated_value_total: number | null;
+  storage_location: string | null;
+  notes: string | null;
+  source_type?: string | null;
+  source_break_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  listed_price?: number | null;
+  listed_platform?: string | null;
+  listed_date?: string | null;
+};
 
 type SaleRow = {
-  id: string
-  sale_date: string | null
-  quantity_sold: number | null
-  gross_sale: number | null
-  platform_fees: number | null
-  shipping_cost: number | null
-  other_costs: number | null
-  net_proceeds: number | null
-  cost_of_goods_sold: number | null
-  profit: number | null
-  platform: string | null
-  notes: string | null
-  reversed_at?: string | null
-  reversal_reason?: string | null
-}
+  id: string;
+  sale_date: string | null;
+  quantity_sold: number | null;
+  gross_sale: number | null;
+  platform_fees: number | null;
+  shipping_cost: number | null;
+  other_costs: number | null;
+  net_proceeds: number | null;
+  cost_of_goods_sold: number | null;
+  profit: number | null;
+  platform: string | null;
+  notes: string | null;
+  reversed_at?: string | null;
+  reversal_reason?: string | null;
+};
 
 type FinalizedDisposalRow = {
-  id: string
-  created_at: string | null
-  disposal_reason: string | null
-  disposal_notes: string | null
-  notes: string | null
-}
+  id: string;
+  created_at: string | null;
+  disposal_reason: string | null;
+  disposal_notes: string | null;
+  notes: string | null;
+};
 
 type GiveawayAuditRow = {
-  id: string
-  created_at: string | null
-  event_date: string | null
-  amount: number | null
-  quantity_change: number | null
-  notes: string | null
-}
+  id: string;
+  created_at: string | null;
+  event_date: string | null;
+  amount: number | null;
+  quantity_change: number | null;
+  notes: string | null;
+};
 
 type RelatedSourceInventoryItem = {
-  id: string
-  status: string | null
-  title: string | null
-  player_name: string | null
-  year: number | null
-  brand: string | null
-  set_name: string | null
-  card_number: string | null
-  parallel_name: string | null
-  team: string | null
-  quantity: number | null
-  cost_basis_total: number | null
-}
+  id: string;
+  status: string | null;
+  title: string | null;
+  player_name: string | null;
+  year: number | null;
+  brand: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  parallel_name: string | null;
+  team: string | null;
+  quantity: number | null;
+  cost_basis_total: number | null;
+};
 
 type RelatedBreakRow = {
-  id: string
-  break_date: string | null
-  source_name: string | null
-  product_name: string | null
-  format_type: string | null
-  order_number: string | null
-  cards_received: number | null
-  created_at: string | null
-}
+  id: string;
+  break_date: string | null;
+  source_name: string | null;
+  product_name: string | null;
+  format_type: string | null;
+  order_number: string | null;
+  cards_received: number | null;
+  created_at: string | null;
+};
 
 function money(value: number | null | undefined) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(Number(value ?? 0))
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(Number(value ?? 0));
 }
 
 function moneyInput(value: number | null | undefined) {
-  const amount = Number(value ?? 0)
-  return Number.isFinite(amount) ? amount.toFixed(2) : '0.00'
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount.toFixed(2) : "0.00";
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString()
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString();
 }
 
 function formatDateInput(value: string | null | undefined) {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toISOString().slice(0, 10)
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toISOString().slice(0, 10);
 }
 
 function formatDateTime(value: string | null | undefined) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString()
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString();
 }
 
 function buildDisplay(item: InventoryItem) {
@@ -136,13 +138,13 @@ function buildDisplay(item: InventoryItem) {
     item.card_number ? `#${item.card_number}` : null,
     item.parallel_name,
     item.notes,
-  ]
+  ];
 
-  return parts.filter(Boolean).join(' • ')
+  return parts.filter(Boolean).join(" • ");
 }
 
 function buildRelatedSourceItemDisplay(item: RelatedSourceInventoryItem) {
-  const primary = item.title || item.player_name || 'Untitled item'
+  const primary = item.title || item.player_name || "Untitled item";
   const details = [
     item.year,
     item.brand,
@@ -152,100 +154,233 @@ function buildRelatedSourceItemDisplay(item: RelatedSourceInventoryItem) {
     item.team,
   ]
     .filter(Boolean)
-    .join(' • ')
+    .join(" • ");
 
-  return details ? `${primary} • ${details}` : primary
+  return details ? `${primary} • ${details}` : primary;
 }
 
 function buildSourceTypeLabel(value: string | null | undefined) {
-  if (!value) return 'Manual / Unknown'
+  if (!value) return "Manual / Unknown";
 
   return value
-    .replaceAll('_', ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function buildBreakTitle(breakRow: RelatedBreakRow | null, fallbackId: string | null | undefined) {
-  if (!breakRow) return fallbackId ? `Break ${fallbackId.slice(0, 8)}` : 'Related Break'
+function buildBreakTitle(
+  breakRow: RelatedBreakRow | null,
+  fallbackId: string | null | undefined,
+) {
+  if (!breakRow)
+    return fallbackId ? `Break ${fallbackId.slice(0, 8)}` : "Related Break";
 
-  const pieces = [breakRow.product_name, breakRow.source_name, breakRow.break_date]
-    .map((piece) => String(piece || '').trim())
-    .filter(Boolean)
+  const pieces = [
+    breakRow.product_name,
+    breakRow.source_name,
+    breakRow.break_date,
+  ]
+    .map((piece) => String(piece || "").trim())
+    .filter(Boolean);
 
-  return pieces.length > 0 ? pieces.join(' • ') : `Break ${breakRow.id.slice(0, 8)}`
+  return pieces.length > 0
+    ? pieces.join(" • ")
+    : `Break ${breakRow.id.slice(0, 8)}`;
 }
 
 function readGiveawayDetail(notes: string | null | undefined, label: string) {
-  if (!notes) return '—'
+  if (!notes) return "—";
 
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const nextLabels =
-    'Giveaway Type|Business Purpose|Recipient Type|Campaign / Event|Related Order / Sale #|Notes|Do not also deduct'
-  const pattern = new RegExp(`${escapedLabel}:\\s*(.*?)(?=\\s+(?:${nextLabels}):|\\s+Do not also deduct|$)`)
-  const match = notes.match(pattern)
+    "Giveaway Type|Business Purpose|Recipient Type|Campaign / Event|Related Order / Sale #|Notes|Do not also deduct";
+  const pattern = new RegExp(
+    `${escapedLabel}:\\s*(.*?)(?=\\s+(?:${nextLabels}):|\\s+Do not also deduct|$)`,
+  );
+  const match = notes.match(pattern);
 
-  return match?.[1]?.trim() || '—'
+  return match?.[1]?.trim() || "—";
 }
 
 function giveawayQuantity(row: GiveawayAuditRow | null) {
-  const quantity = Math.abs(Number(row?.quantity_change ?? 0))
-  return Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '—'
+  const quantity = Math.abs(Number(row?.quantity_change ?? 0));
+  return Number.isFinite(quantity) && quantity > 0 ? String(quantity) : "—";
 }
 
 function renderStatusPill(status: string | null) {
-  if (status === 'available') {
-    return <span className="app-badge app-badge-success">For Sale</span>
+  if (status === "available") {
+    return <span className="app-badge app-badge-success">For Sale</span>;
   }
 
-  if (status === 'listed') {
-    return <span className="app-badge app-badge-info">Listed</span>
+  if (status === "listed") {
+    return <span className="app-badge app-badge-info">Listed</span>;
   }
 
-  if (status === 'sold') {
-    return <span className="app-badge app-badge-danger">Sold</span>
+  if (status === "sold") {
+    return <span className="app-badge app-badge-danger">Sold</span>;
   }
 
-  if (status === 'personal') {
-    return <span className="app-badge app-badge-info">Personal</span>
+  if (status === "personal") {
+    return <span className="app-badge app-badge-info">Personal</span>;
   }
 
-  if (status === 'junk') {
-    return <span className="app-badge app-badge-neutral">Junk</span>
+  if (status === "junk") {
+    return <span className="app-badge app-badge-neutral">Junk</span>;
   }
 
-  if (status === 'giveaway') {
-    return <span className="app-badge app-badge-warning">Giveaway</span>
+  if (status === "giveaway") {
+    return <span className="app-badge app-badge-warning">Giveaway</span>;
   }
 
   return (
     <span className="app-badge app-badge-neutral capitalize">
-      {(status || 'unknown').replaceAll('_', ' ')}
+      {(status || "unknown").replaceAll("_", " ")}
     </span>
-  )
+  );
+}
+
+async function inventoryMovementAction(formData: FormData) {
+  "use server";
+
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const itemId = String(formData.get("inventory_item_id") || "").trim();
+  const actionType = String(formData.get("action_type") || "").trim();
+  const quantityRaw = Number(formData.get("quantity_to_move") || 1);
+  const reason = String(formData.get("reason") || "").trim();
+  const notes = String(formData.get("movement_notes") || "").trim();
+
+  const actionMap: Record<string, { status: string; label: string }> = {
+    personal: { status: "personal", label: "Moved to Personal Collection" },
+    giveaway: { status: "giveaway", label: "Marked as Giveaway" },
+    junk: { status: "junk", label: "Disposed / Junked" },
+  };
+
+  const action = actionMap[actionType];
+
+  if (!itemId || !action) {
+    redirect("/app/inventory?error=Invalid inventory action.");
+  }
+
+  const { data: item, error: itemError } = await supabase
+    .from("inventory_items")
+    .select("id, status, available_quantity, cost_basis_unit")
+    .eq("id", itemId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (itemError || !item) {
+    redirect(
+      `/app/inventory/${itemId}?error=Inventory item could not be found.`,
+    );
+  }
+
+  const availableQuantity = Math.max(0, Number(item.available_quantity ?? 0));
+  const quantityToMove = Math.max(
+    1,
+    Math.floor(Number.isFinite(quantityRaw) ? quantityRaw : 1),
+  );
+
+  if (availableQuantity <= 0) {
+    redirect(
+      `/app/inventory/${itemId}?error=No available quantity remains to move.`,
+    );
+  }
+
+  if (quantityToMove > availableQuantity) {
+    redirect(
+      `/app/inventory/${itemId}?error=Quantity cannot be greater than available quantity.`,
+    );
+  }
+
+  const nextAvailableQuantity = availableQuantity - quantityToMove;
+  const nextStatus =
+    nextAvailableQuantity > 0 ? item.status || "available" : action.status;
+  const unitCost = Number(item.cost_basis_unit ?? 0);
+  const movedCostBasis = Number((unitCost * quantityToMove).toFixed(2));
+
+  const { error: updateError } = await supabase
+    .from("inventory_items")
+    .update({
+      available_quantity: nextAvailableQuantity,
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", itemId)
+    .eq("user_id", user.id);
+
+  if (updateError) {
+    redirect(
+      `/app/inventory/${itemId}?error=${encodeURIComponent(updateError.message)}`,
+    );
+  }
+
+  const auditNotes = [
+    action.label,
+    reason ? `Reason: ${reason}` : "",
+    notes ? `Notes: ${notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { error: transactionError } = await supabase
+    .from("inventory_transactions")
+    .insert({
+      user_id: user.id,
+      inventory_item_id: itemId,
+      transaction_type: "adjustment",
+      quantity_change: -quantityToMove,
+      from_status: item.status || "available",
+      to_status: action.status,
+      amount: movedCostBasis,
+      notes: auditNotes || action.label,
+    });
+
+  if (transactionError) {
+    redirect(
+      `/app/inventory/${itemId}?error=${encodeURIComponent(transactionError.message)}`,
+    );
+  }
+
+  revalidatePath("/app/inventory");
+  revalidatePath(`/app/inventory/${itemId}`);
+  redirect(
+    `/app/inventory/${itemId}?success=${encodeURIComponent(`${action.label} recorded successfully.`)}`,
+  );
 }
 
 function EditableField({
   label,
   name,
   defaultValue,
-  type = 'text',
+  type = "text",
   step,
   min,
   formId,
   disabled = false,
 }: {
-  label: string
-  name: string
-  defaultValue: string | number
-  type?: 'text' | 'number'
-  step?: string | number
-  min?: string | number
-  formId: string
-  disabled?: boolean
+  label: string;
+  name: string;
+  defaultValue: string | number;
+  type?: "text" | "number";
+  step?: string | number;
+  min?: string | number;
+  formId: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="app-metric-card p-3">
-      <label className="text-xs font-medium uppercase tracking-wide text-zinc-400" htmlFor={name}>
+      <label
+        className="text-xs font-medium uppercase tracking-wide text-zinc-400"
+        htmlFor={name}
+      >
         {label}
       </label>
       <input
@@ -257,25 +392,27 @@ function EditableField({
         min={min}
         defaultValue={defaultValue}
         disabled={disabled}
-        className={`app-input mt-1.5 ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
+        className={`app-input mt-1.5 ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
       />
     </div>
-  )
+  );
 }
 
 function ReadonlyMetric({
   label,
   value,
 }: {
-  label: string
-  value: string | number
+  label: string;
+  value: string | number;
 }) {
   return (
     <div className="app-metric-card p-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+        {label}
+      </div>
       <div className="mt-1 text-lg font-semibold leading-tight">{value}</div>
     </div>
-  )
+  );
 }
 
 function EditableSelect({
@@ -285,15 +422,18 @@ function EditableSelect({
   formId,
   disabled = false,
 }: {
-  label: string
-  name: string
-  defaultValue: string
-  formId: string
-  disabled?: boolean
+  label: string;
+  name: string;
+  defaultValue: string;
+  formId: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="app-metric-card p-3">
-      <label className="text-xs font-medium uppercase tracking-wide text-zinc-400" htmlFor={name}>
+      <label
+        className="text-xs font-medium uppercase tracking-wide text-zinc-400"
+        htmlFor={name}
+      >
         {label}
       </label>
       <select
@@ -302,7 +442,7 @@ function EditableSelect({
         name={name}
         defaultValue={defaultValue}
         disabled={disabled}
-        className={`app-select mt-1.5 ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
+        className={`app-select mt-1.5 ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
       >
         <option value="available">For Sale</option>
         <option value="listed">Listed</option>
@@ -312,15 +452,15 @@ function EditableSelect({
         <option value="giveaway">Giveaway</option>
       </select>
     </div>
-  )
+  );
 }
 
 function EstimateValueMetric({
   item,
   formId,
 }: {
-  item: InventoryItem
-  formId: string
+  item: InventoryItem;
+  formId: string;
 }) {
   return (
     <div className="app-metric-card p-3 md:col-span-2">
@@ -359,41 +499,54 @@ function EstimateValueMetric({
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default async function InventoryDetailPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ id: string }>
-  searchParams?: Promise<{ error?: string; success?: string; saleRecorded?: string; savedSale?: string; updatedSale?: string; deletedSale?: string }>
+  params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    error?: string;
+    success?: string;
+    saleRecorded?: string;
+    savedSale?: string;
+    updatedSale?: string;
+    deletedSale?: string;
+  }>;
 }) {
-  const { id } = await params
-  const query = searchParams ? await searchParams : undefined
-  const errorMessage = query?.error
+  const { id } = await params;
+  const query = searchParams ? await searchParams : undefined;
+  const errorMessage = query?.error;
 
   const successMessage =
-    query?.saleRecorded === '1' || query?.savedSale === '1'
-      ? 'Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated.'
-      : query?.updatedSale === '1'
-        ? 'Sale updated successfully.'
-        : query?.deletedSale === '1'
-          ? 'Sale reversed successfully.'
-          : query?.success
+    query?.saleRecorded === "1" || query?.savedSale === "1"
+      ? "Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated."
+      : query?.updatedSale === "1"
+        ? "Sale updated successfully."
+        : query?.deletedSale === "1"
+          ? "Sale reversed successfully."
+          : query?.success;
 
-  const supabase = await createClient()
+  const supabase = await createClient();
 
   const {
     data: { user },
-  } = await supabase.auth.getUser()
+  } = await supabase.auth.getUser();
 
-  if (!user) return null
+  if (!user) return null;
 
-  const [itemResponse, salesResponse, finalizedDisposalResponse, giveawayAuditResponse] = await Promise.all([
+  const [
+    itemResponse,
+    salesResponse,
+    finalizedDisposalResponse,
+    giveawayAuditResponse,
+  ] = await Promise.all([
     supabase
-      .from('inventory_items')
-      .select(`
+      .from("inventory_items")
+      .select(
+        `
         id,
         status,
         item_type,
@@ -420,14 +573,16 @@ export default async function InventoryDetailPage({
         listed_price,
         listed_platform,
         listed_date
-      `)
-      .eq('id', id)
-      .eq('user_id', user.id)
+      `,
+      )
+      .eq("id", id)
+      .eq("user_id", user.id)
       .single(),
 
     supabase
-      .from('sales')
-      .select(`
+      .from("sales")
+      .select(
+        `
         id,
         sale_date,
         quantity_sold,
@@ -442,94 +597,119 @@ export default async function InventoryDetailPage({
         notes,
         reversed_at,
         reversal_reason
-      `)
-      .eq('user_id', user.id)
-      .eq('inventory_item_id', id)
-      .order('sale_date', { ascending: false }),
+      `,
+      )
+      .eq("user_id", user.id)
+      .eq("inventory_item_id", id)
+      .order("sale_date", { ascending: false }),
 
     supabase
-      .from('inventory_transactions')
-      .select(`
+      .from("inventory_transactions")
+      .select(
+        `
         id,
         created_at,
         disposal_reason,
         disposal_notes,
         notes
-      `)
-      .eq('user_id', user.id)
-      .eq('inventory_item_id', id)
-      .eq('transaction_type', 'disposal_writeoff_review')
-      .eq('finalized_for_tax', true)
-      .order('created_at', { ascending: false })
+      `,
+      )
+      .eq("user_id", user.id)
+      .eq("inventory_item_id", id)
+      .eq("transaction_type", "disposal_writeoff_review")
+      .eq("finalized_for_tax", true)
+      .order("created_at", { ascending: false })
       .limit(1),
 
     supabase
-      .from('inventory_transactions')
-      .select(`
+      .from("inventory_transactions")
+      .select(
+        `
         id,
         created_at,
         event_date,
         amount,
         quantity_change,
         notes
-      `)
-      .eq('user_id', user.id)
-      .eq('inventory_item_id', id)
-      .eq('transaction_type', 'adjustment')
-      .eq('to_status', 'giveaway')
-      .order('created_at', { ascending: false })
+      `,
+      )
+      .eq("user_id", user.id)
+      .eq("inventory_item_id", id)
+      .eq("transaction_type", "adjustment")
+      .eq("to_status", "giveaway")
+      .order("created_at", { ascending: false })
       .limit(1),
-  ])
+  ]);
 
   if (itemResponse.error || !itemResponse.data) {
-    notFound()
+    notFound();
   }
 
-  const item = itemResponse.data as InventoryItem
-  const sales: SaleRow[] = (salesResponse.data ?? []) as SaleRow[]
+  const item = itemResponse.data as InventoryItem;
+  const sales: SaleRow[] = (salesResponse.data ?? []) as SaleRow[];
   const finalizedDisposal =
-    ((finalizedDisposalResponse.data ?? [])[0] as FinalizedDisposalRow | undefined) ?? null
+    ((finalizedDisposalResponse.data ?? [])[0] as
+      FinalizedDisposalRow | undefined) ?? null;
   const giveawayAudit =
-    ((giveawayAuditResponse.data ?? [])[0] as GiveawayAuditRow | undefined) ?? null
+    ((giveawayAuditResponse.data ?? [])[0] as GiveawayAuditRow | undefined) ??
+    null;
 
-  const isFinalizedDisposal = Boolean(finalizedDisposal)
+  const isFinalizedDisposal = Boolean(finalizedDisposal);
 
-  const activeSales = sales.filter((sale) => !sale.reversed_at)
+  const activeSales = sales.filter((sale) => !sale.reversed_at);
 
-  const totalGross = activeSales.reduce((sum, row) => sum + Number(row.gross_sale ?? 0), 0)
-  const totalNet = activeSales.reduce((sum, row) => sum + Number(row.net_proceeds ?? 0), 0)
-  const totalProfit = activeSales.reduce((sum, row) => sum + Number(row.profit ?? 0), 0)
-  const totalQtySold = activeSales.reduce((sum, row) => sum + Number(row.quantity_sold ?? 0), 0)
+  const totalGross = activeSales.reduce(
+    (sum, row) => sum + Number(row.gross_sale ?? 0),
+    0,
+  );
+  const totalNet = activeSales.reduce(
+    (sum, row) => sum + Number(row.net_proceeds ?? 0),
+    0,
+  );
+  const totalProfit = activeSales.reduce(
+    (sum, row) => sum + Number(row.profit ?? 0),
+    0,
+  );
+  const totalQtySold = activeSales.reduce(
+    (sum, row) => sum + Number(row.quantity_sold ?? 0),
+    0,
+  );
 
-  const availableQuantity = Number(item.available_quantity ?? 0)
-  const isGiveaway = item.status === 'giveaway'
-  const isFinalizedGiveaway = isGiveaway && (Boolean(giveawayAudit) || availableQuantity <= 0)
-  const isPlannedGiveaway = isGiveaway && !isFinalizedGiveaway
-  const isLockedForBusinessEvent = isFinalizedDisposal || isFinalizedGiveaway
+  const availableQuantity = Number(item.available_quantity ?? 0);
+  const isGiveaway = item.status === "giveaway";
+  const isFinalizedGiveaway =
+    isGiveaway && (Boolean(giveawayAudit) || availableQuantity <= 0);
+  const isPlannedGiveaway = isGiveaway && !isFinalizedGiveaway;
+  const isLockedForBusinessEvent = isFinalizedDisposal || isFinalizedGiveaway;
   const effectiveStatus =
-    availableQuantity <= 0 && totalQtySold > 0 ? 'sold' : item.status
+    availableQuantity <= 0 && totalQtySold > 0 ? "sold" : item.status;
 
-  const hasAvailableToSell = availableQuantity > 0 && !isGiveaway
-  const canDelete = activeSales.length === 0
-  const itemFormId = 'inventory-inline-edit-form'
-  const itemName = buildDisplay(item) || item.title || item.player_name || 'Untitled item'
-  const hasActiveSales = activeSales.length > 0
-  const relatedBreakHref = item.source_break_id ? `/app/breaks/${item.source_break_id}` : ''
+  const hasAvailableToSell = availableQuantity > 0 && !isGiveaway;
+  const canDelete = activeSales.length === 0;
+  const itemFormId = "inventory-inline-edit-form";
+  const itemName =
+    buildDisplay(item) || item.title || item.player_name || "Untitled item";
+  const hasActiveSales = activeSales.length > 0;
+  const relatedBreakHref = item.source_break_id
+    ? `/app/breaks/${item.source_break_id}`
+    : "";
   const relatedBreakAddItemsHref = item.source_break_id
     ? `/app/breaks/${item.source_break_id}/add-cards`
-    : ''
+    : "";
   const relatedBreakItemsHref = item.source_break_id
     ? `/app/breaks/${item.source_break_id}#break-items`
-    : ''
+    : "";
 
-  let relatedBreak: RelatedBreakRow | null = null
-  let relatedSourceItems: RelatedSourceInventoryItem[] = []
+  let relatedBreak: RelatedBreakRow | null = null;
+  let relatedSourceItems: RelatedSourceInventoryItem[] = [];
 
   if (item.source_break_id) {
-    const [relatedBreakResponse, relatedSourceItemsResponse] = await Promise.all([
-      supabase
-        .from('breaks')
-        .select(`
+    const [relatedBreakResponse, relatedSourceItemsResponse] =
+      await Promise.all([
+        supabase
+          .from("breaks")
+          .select(
+            `
           id,
           break_date,
           source_name,
@@ -538,14 +718,16 @@ export default async function InventoryDetailPage({
           order_number,
           cards_received,
           created_at
-        `)
-        .eq('user_id', user.id)
-        .eq('id', item.source_break_id)
-        .maybeSingle(),
+        `,
+          )
+          .eq("user_id", user.id)
+          .eq("id", item.source_break_id)
+          .maybeSingle(),
 
-      supabase
-        .from('inventory_items')
-        .select(`
+        supabase
+          .from("inventory_items")
+          .select(
+            `
           id,
           status,
           title,
@@ -558,20 +740,23 @@ export default async function InventoryDetailPage({
           team,
           quantity,
           cost_basis_total
-        `)
-        .eq('user_id', user.id)
-        .eq('source_break_id', item.source_break_id)
-        .is('deleted_at', null)
-        .neq('id', item.id)
-        .order('created_at', { ascending: true })
-        .limit(25),
-    ])
+        `,
+          )
+          .eq("user_id", user.id)
+          .eq("source_break_id", item.source_break_id)
+          .is("deleted_at", null)
+          .neq("id", item.id)
+          .order("created_at", { ascending: true })
+          .limit(25),
+      ]);
 
-    relatedBreak = (relatedBreakResponse.data as RelatedBreakRow | null) ?? null
-    relatedSourceItems = (relatedSourceItemsResponse.data ?? []) as RelatedSourceInventoryItem[]
+    relatedBreak =
+      (relatedBreakResponse.data as RelatedBreakRow | null) ?? null;
+    relatedSourceItems = (relatedSourceItemsResponse.data ??
+      []) as RelatedSourceInventoryItem[];
   }
 
-  const relatedBreakTitle = buildBreakTitle(relatedBreak, item.source_break_id)
+  const relatedBreakTitle = buildBreakTitle(relatedBreak, item.source_break_id);
 
   return (
     <div className="app-page-wide min-h-[calc(100vh-6.5rem)] space-y-3 pb-8">
@@ -582,39 +767,41 @@ export default async function InventoryDetailPage({
       <div className="app-page-header gap-3">
         <div className="min-w-0">
           <div className="mb-1 flex flex-wrap items-center gap-1 text-xs text-zinc-400">
-            <Link href="/app/inventory" className="hover:text-zinc-200 hover:underline">
+            <Link
+              href="/app/inventory"
+              className="hover:text-zinc-200 hover:underline"
+            >
               Inventory
             </Link>
             {item.source_break_id ? (
               <>
                 <span>/</span>
-                <Link href={relatedBreakHref} className="max-w-[20rem] truncate hover:text-zinc-200 hover:underline">
+                <Link
+                  href={relatedBreakHref}
+                  className="max-w-[20rem] truncate hover:text-zinc-200 hover:underline"
+                >
                   {relatedBreakTitle}
                 </Link>
               </>
             ) : null}
             <span>/</span>
             <span className="max-w-[20rem] truncate text-zinc-500">
-              {item.title || item.player_name || 'Inventory Item'}
+              {item.title || item.player_name || "Inventory Item"}
             </span>
           </div>
 
           <h1 className="app-title text-2xl leading-tight">Inventory Item</h1>
           <p className="app-subtitle mt-1 text-sm leading-snug">
-            {buildDisplay(item) || item.title || 'Untitled item'}
+            {buildDisplay(item) || item.title || "Untitled item"}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             {isPlannedGiveaway ? (
-              <span className="app-badge app-badge-warning">Planned Giveaway</span>
+              <span className="app-badge app-badge-warning">
+                Planned Giveaway
+              </span>
             ) : (
               renderStatusPill(effectiveStatus)
             )}
-
-            {!isLockedForBusinessEvent && hasAvailableToSell ? (
-              <Link href={`/app/inventory/${item.id}/sell`} className="app-button-primary">
-                Sell Item
-              </Link>
-            ) : null}
 
             {!isLockedForBusinessEvent && hasActiveSales ? (
               <a href="#sales-history" className="app-button">
@@ -631,44 +818,247 @@ export default async function InventoryDetailPage({
             </span>
           ) : (
             <>
-              <button type="submit" form={itemFormId} className="app-button">
+              <AppLoadingButton
+                type="submit"
+                form={itemFormId}
+                loadingText="Saving..."
+                className="app-button disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 Save Changes
-              </button>
+              </AppLoadingButton>
 
-              <Link href={`/app/inventory/${item.id}/edit`} className="app-button">
+              <Link
+                href={`/app/inventory/${item.id}/edit`}
+                className="app-button"
+              >
                 Edit Page
               </Link>
             </>
           )}
-
-          {isFinalizedDisposal ? (
-            <div className="rounded-full border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-200">
-              Locked For Tax Review
-            </div>
-          ) : isPlannedGiveaway ? (
-            <Link
-              href={`/app/inventory/${item.id}/giveaway`}
-              className="app-button-warning"
-            >
-              Finalize Giveaway
-            </Link>
-          ) : !isLockedForBusinessEvent && hasAvailableToSell ? (
-            <Link
-              href={`/app/inventory/${item.id}/giveaway`}
-              className="app-button-warning"
-            >
-              Mark as Giveaway
-            </Link>
-          ) : null}
-
-          {canDelete && !isLockedForBusinessEvent ? (
-            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
-          ) : null}
         </div>
       </div>
 
-      {errorMessage ? <div className="app-alert-error">{errorMessage}</div> : null}
-      {successMessage ? <div className="app-alert-success">{successMessage}</div> : null}
+      {errorMessage ? (
+        <div className="app-alert-error">{errorMessage}</div>
+      ) : null}
+      {successMessage ? (
+        <div className="app-alert-success">{successMessage}</div>
+      ) : null}
+
+      <div className="app-section mt-0 p-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold leading-tight">
+              Inventory Actions
+            </h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Use these actions to move quantity out of sellable inventory while
+              preserving the audit trail.
+            </p>
+          </div>
+          <div className="text-xs text-zinc-500">
+            Available: {availableQuantity}
+          </div>
+        </div>
+
+        {isLockedForBusinessEvent ? (
+          <div className="app-alert-warning mt-3">
+            This item is locked because it has already been finalized for
+            giveaway or tax review.
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-3 lg:grid-cols-4">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+              <div className="text-sm font-semibold text-zinc-100">Sell</div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Record a sale and reduce available quantity through the sales
+                workflow.
+              </p>
+              {hasAvailableToSell ? (
+                <Link
+                  href={`/app/inventory/${item.id}/sell`}
+                  className="app-button-primary mt-3 w-full justify-center"
+                >
+                  Sell Item
+                </Link>
+              ) : (
+                <span className="app-button mt-3 w-full justify-center pointer-events-none opacity-60">
+                  Not Available
+                </span>
+              )}
+            </div>
+
+            <form
+              action={inventoryMovementAction}
+              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="personal" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Move to Personal
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Keep one or more items for your personal collection.
+              </p>
+              <div className="mt-3 grid gap-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Moving..."
+                  className="app-button mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Move to Personal
+                </AppLoadingButton>
+              </div>
+            </form>
+
+            <form
+              action={inventoryMovementAction}
+              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="giveaway" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Giveaway
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Move quantity out of inventory for a giveaway or buyer bonus.
+              </p>
+              <div className="mt-3 grid gap-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Reason
+                </label>
+                <select name="reason" className="app-select">
+                  <option value="Customer Appreciation">
+                    Customer Appreciation
+                  </option>
+                  <option value="Package Insert / Buyer Bonus">
+                    Package Insert / Buyer Bonus
+                  </option>
+                  <option value="Streamer Giveaway">Streamer Giveaway</option>
+                  <option value="Marketing">Marketing</option>
+                  <option value="Other">Other</option>
+                </select>
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Recording..."
+                  className="app-button-warning mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Record Giveaway
+                </AppLoadingButton>
+              </div>
+            </form>
+
+            <form
+              action={inventoryMovementAction}
+              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="junk" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Dispose / Junk
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Remove damaged, lost, or unsellable quantity from active
+                inventory.
+              </p>
+              <div className="mt-3 grid gap-2">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Reason
+                </label>
+                <select name="reason" className="app-select">
+                  <option value="Damaged">Damaged</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Destroyed">Destroyed</option>
+                  <option value="Unsellable">Unsellable</option>
+                  <option value="Other">Other</option>
+                </select>
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Recording..."
+                  className="app-button-danger mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Dispose / Junk
+                </AppLoadingButton>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {!isLockedForBusinessEvent && canDelete ? (
+          <div className="mt-3 flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-zinc-100">
+                Delete Item
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Only delete records that were entered by mistake. Use Dispose /
+                Junk when the item physically existed but is no longer sellable.
+              </p>
+            </div>
+            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
+          </div>
+        ) : null}
+      </div>
 
       {item.source_break_id ? (
         <div className="app-section mt-0 p-4">
@@ -681,7 +1071,9 @@ export default async function InventoryDetailPage({
                 {relatedBreakTitle}
               </h2>
               <p className="mt-1 text-sm text-zinc-400">
-                This item was created from a saved break. Use these links to review the original break, continue entering items, or jump to the other items from the same break.
+                This item was created from a saved break. Use these links to
+                review the original break, continue entering items, or jump to
+                the other items from the same break.
               </p>
             </div>
 
@@ -689,7 +1081,10 @@ export default async function InventoryDetailPage({
               <Link href={relatedBreakHref} className="app-button">
                 Open Break Details
               </Link>
-              <Link href={relatedBreakAddItemsHref} className="app-button-primary">
+              <Link
+                href={relatedBreakAddItemsHref}
+                className="app-button-primary"
+              >
                 Continue Entering Items
               </Link>
               <Link href={relatedBreakItemsHref} className="app-button">
@@ -699,12 +1094,24 @@ export default async function InventoryDetailPage({
           </div>
 
           <div className="mt-3 grid gap-2 md:grid-cols-4">
-            <Detail label="Created From" value={buildSourceTypeLabel(item.source_type)} />
-            <Detail label="Break Date" value={formatDate(relatedBreak?.break_date)} />
-            <Detail label="Breaker / Source" value={relatedBreak?.source_name || '—'} />
-            <Detail label="Order #" value={relatedBreak?.order_number || '—'} />
-            <Detail label="Format" value={relatedBreak?.format_type || '—'} />
-            <Detail label="Items Received" value={String(relatedBreak?.cards_received ?? '—')} />
+            <Detail
+              label="Created From"
+              value={buildSourceTypeLabel(item.source_type)}
+            />
+            <Detail
+              label="Break Date"
+              value={formatDate(relatedBreak?.break_date)}
+            />
+            <Detail
+              label="Breaker / Source"
+              value={relatedBreak?.source_name || "—"}
+            />
+            <Detail label="Order #" value={relatedBreak?.order_number || "—"} />
+            <Detail label="Format" value={relatedBreak?.format_type || "—"} />
+            <Detail
+              label="Items Received"
+              value={String(relatedBreak?.cards_received ?? "—")}
+            />
             <Detail label="Created" value={formatDate(item.created_at)} />
             <Detail label="Last Updated" value={formatDate(item.updated_at)} />
           </div>
@@ -716,7 +1123,9 @@ export default async function InventoryDetailPage({
                   Item History
                 </div>
                 <div className="mt-1 text-sm text-zinc-300">
-                  Created from break inventory entry. Cost basis and quantity are preserved on this item for sale, giveaway, personal, junk, or write-off tracking.
+                  Created from break inventory entry. Cost basis and quantity
+                  are preserved on this item for sale, giveaway, personal, junk,
+                  or write-off tracking.
                 </div>
               </div>
               <div className="text-xs text-zinc-500">
@@ -747,7 +1156,8 @@ export default async function InventoryDetailPage({
                         {buildRelatedSourceItemDisplay(relatedItem)}
                       </div>
                       <div className="mt-0.5 text-xs text-zinc-500">
-                        Qty {relatedItem.quantity ?? 0} • Cost {money(relatedItem.cost_basis_total)}
+                        Qty {relatedItem.quantity ?? 0} • Cost{" "}
+                        {money(relatedItem.cost_basis_total)}
                       </div>
                     </div>
                     <div className="shrink-0">
@@ -759,51 +1169,63 @@ export default async function InventoryDetailPage({
             </div>
           ) : (
             <div className="app-alert-info mt-3">
-              No other active inventory items were found with this same source break ID.
+              No other active inventory items were found with this same source
+              break ID.
             </div>
           )}
         </div>
       ) : (
         <div className="app-alert-info">
-          This item does not have a saved source break ID. It may have been created manually, imported, or created before source linking was added.
+          This item does not have a saved source break ID. It may have been
+          created manually, imported, or created before source linking was
+          added.
         </div>
       )}
 
-      {(effectiveStatus === 'personal' || effectiveStatus === 'giveaway' || effectiveStatus === 'junk') ? (
+      {effectiveStatus === "personal" ||
+      effectiveStatus === "giveaway" ||
+      effectiveStatus === "junk" ? (
         <div className="app-alert-warning">
-          This status change affects tax reporting. Ensure this item is not also counted as an expense or inventory elsewhere to avoid double counting.
+          This status change affects tax reporting. Ensure this item is not also
+          counted as an expense or inventory elsewhere to avoid double counting.
         </div>
       ) : null}
 
-
-      {effectiveStatus === 'junk' ? (
+      {effectiveStatus === "junk" ? (
         <div className="app-alert-info">
-          This item is marked as Junk and is being kept for recordkeeping, not active selling.
+          This item is marked as Junk and is being kept for recordkeeping, not
+          active selling.
         </div>
       ) : null}
 
-      {effectiveStatus === 'personal' ? (
+      {effectiveStatus === "personal" ? (
         <div className="app-alert-info">
-          This item is marked as Personal Collection and is not currently part of your active sell inventory.
+          This item is marked as Personal Collection and is not currently part
+          of your active sell inventory.
         </div>
       ) : null}
 
       {isPlannedGiveaway ? (
         <div className="app-alert-info">
           <div className="font-semibold">
-            This item is planned as a Giveaway, but it has not been finalized yet.
+            This item is planned as a Giveaway, but it has not been finalized
+            yet.
           </div>
           <div className="mt-1 text-sm">
-            It will stay under the Giveaway filter and cannot be sold accidentally. You can still edit item notes and details, then finalize it when the giveaway actually happens.
+            It will stay under the Giveaway filter and cannot be sold
+            accidentally. You can still edit item notes and details, then
+            finalize it when the giveaway actually happens.
           </div>
         </div>
       ) : isFinalizedGiveaway ? (
         <div className="app-alert-info">
           <div className="font-semibold">
-            This item has been finalized as a Giveaway and recorded as a marketing expense.
+            This item has been finalized as a Giveaway and recorded as a
+            marketing expense.
           </div>
           <div className="mt-1 text-sm">
-            Selling, deletion, quantity changes, cost changes, and status changes are disabled to help preserve clean tax records.
+            Selling, deletion, quantity changes, cost changes, and status
+            changes are disabled to help preserve clean tax records.
           </div>
         </div>
       ) : null}
@@ -816,19 +1238,36 @@ export default async function InventoryDetailPage({
                 Planned Giveaway
               </h2>
               <p className="mt-1 text-sm text-zinc-400">
-                This item was set aside for a future giveaway. Finalize it after the giveaway happens to create the Advertising / Marketing expense and tax audit trail.
+                This item was set aside for a future giveaway. Finalize it after
+                the giveaway happens to create the Advertising / Marketing
+                expense and tax audit trail.
               </p>
             </div>
 
-            <Link href={`/app/inventory/${item.id}/giveaway`} className="app-button-warning">
+            <Link
+              href={`/app/inventory/${item.id}/giveaway`}
+              className="app-button-warning"
+            >
               Finalize Giveaway
             </Link>
           </div>
 
           <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <Detail label="Planned Quantity" value={String(item.available_quantity ?? 0)} />
-            <Detail label="Planned Cost Basis" value={money(Number(item.available_quantity ?? 0) * Number(item.cost_basis_unit ?? 0))} />
-            <Detail label="Source" value={buildSourceTypeLabel(item.source_type)} />
+            <Detail
+              label="Planned Quantity"
+              value={String(item.available_quantity ?? 0)}
+            />
+            <Detail
+              label="Planned Cost Basis"
+              value={money(
+                Number(item.available_quantity ?? 0) *
+                  Number(item.cost_basis_unit ?? 0),
+              )}
+            />
+            <Detail
+              label="Source"
+              value={buildSourceTypeLabel(item.source_type)}
+            />
           </div>
         </div>
       ) : null}
@@ -851,15 +1290,51 @@ export default async function InventoryDetailPage({
           </div>
 
           <div className="mt-3 grid gap-2 md:grid-cols-3">
-            <Detail label="Giveaway Date" value={formatDate(giveawayAudit?.event_date)} />
-            <Detail label="Giveaway Type" value={readGiveawayDetail(giveawayAudit?.notes, 'Giveaway Type')} />
-            <Detail label="Recipient Type" value={readGiveawayDetail(giveawayAudit?.notes, 'Recipient Type')} />
-            <Detail label="Business Purpose" value={readGiveawayDetail(giveawayAudit?.notes, 'Business Purpose')} />
-            <Detail label="Campaign / Event" value={readGiveawayDetail(giveawayAudit?.notes, 'Campaign / Event')} />
-            <Detail label="Related Order / Sale #" value={readGiveawayDetail(giveawayAudit?.notes, 'Related Order / Sale #')} />
-            <Detail label="Quantity Given Away" value={giveawayQuantity(giveawayAudit)} />
-            <Detail label="Recorded Cost Basis" value={money(giveawayAudit?.amount)} />
-            <Detail label="Recorded" value={formatDateTime(giveawayAudit?.created_at)} />
+            <Detail
+              label="Giveaway Date"
+              value={formatDate(giveawayAudit?.event_date)}
+            />
+            <Detail
+              label="Giveaway Type"
+              value={readGiveawayDetail(giveawayAudit?.notes, "Giveaway Type")}
+            />
+            <Detail
+              label="Recipient Type"
+              value={readGiveawayDetail(giveawayAudit?.notes, "Recipient Type")}
+            />
+            <Detail
+              label="Business Purpose"
+              value={readGiveawayDetail(
+                giveawayAudit?.notes,
+                "Business Purpose",
+              )}
+            />
+            <Detail
+              label="Campaign / Event"
+              value={readGiveawayDetail(
+                giveawayAudit?.notes,
+                "Campaign / Event",
+              )}
+            />
+            <Detail
+              label="Related Order / Sale #"
+              value={readGiveawayDetail(
+                giveawayAudit?.notes,
+                "Related Order / Sale #",
+              )}
+            />
+            <Detail
+              label="Quantity Given Away"
+              value={giveawayQuantity(giveawayAudit)}
+            />
+            <Detail
+              label="Recorded Cost Basis"
+              value={money(giveawayAudit?.amount)}
+            />
+            <Detail
+              label="Recorded"
+              value={formatDateTime(giveawayAudit?.created_at)}
+            />
           </div>
 
           {giveawayAudit?.notes ? (
@@ -873,7 +1348,9 @@ export default async function InventoryDetailPage({
             </div>
           ) : (
             <div className="app-alert-warning mt-3">
-              No detailed giveaway audit note was found for this item. Older giveaway records may only show the Giveaway status and related expense entry.
+              No detailed giveaway audit note was found for this item. Older
+              giveaway records may only show the Giveaway status and related
+              expense entry.
             </div>
           )}
         </div>
@@ -886,7 +1363,9 @@ export default async function InventoryDetailPage({
           </div>
 
           <div className="mt-1 text-sm">
-            Selling, giveaway conversion, deletion, status changes, quantity changes, cost changes, and sale reversal actions are disabled to preserve audit-safe records.
+            Selling, giveaway conversion, deletion, status changes, quantity
+            changes, cost changes, and sale reversal actions are disabled to
+            preserve audit-safe records.
           </div>
 
           <div className="mt-2 grid gap-2 md:grid-cols-3">
@@ -904,7 +1383,7 @@ export default async function InventoryDetailPage({
                 Write-Off Reason
               </div>
               <div className="mt-1 text-sm">
-                {finalizedDisposal?.disposal_reason || '—'}
+                {finalizedDisposal?.disposal_reason || "—"}
               </div>
             </div>
 
@@ -915,7 +1394,7 @@ export default async function InventoryDetailPage({
               <div className="mt-1 whitespace-pre-wrap text-sm">
                 {finalizedDisposal?.disposal_notes ||
                   finalizedDisposal?.notes ||
-                  '—'}
+                  "—"}
               </div>
             </div>
           </div>
@@ -930,11 +1409,9 @@ export default async function InventoryDetailPage({
         ) : isPlannedGiveaway ? (
           <ReadonlyMetric label="Status" value="Planned Giveaway" />
         ) : (
-          <EditableSelect
+          <ReadonlyMetric
             label="Status"
-            name="status"
-            defaultValue={effectiveStatus ?? 'available'}
-            formId={itemFormId}
+            value={(effectiveStatus || "available").replaceAll("_", " ")}
           />
         )}
 
@@ -948,13 +1425,17 @@ export default async function InventoryDetailPage({
           disabled={isLockedForBusinessEvent}
         />
 
-        <ReadonlyMetric label="Available" value={item.available_quantity ?? 0} />
+        <ReadonlyMetric
+          label="Available"
+          value={item.available_quantity ?? 0}
+        />
         <ReadonlyMetric label="Qty Sold" value={totalQtySold} />
       </div>
 
       {hasActiveSales ? (
         <div className="app-alert-info">
-          This item has active sale history. To reverse a sale, use the Sales History section below and reverse the specific sale row.
+          This item has active sale history. To reverse a sale, use the Sales
+          History section below and reverse the specific sale row.
         </div>
       ) : null}
 
@@ -969,22 +1450,32 @@ export default async function InventoryDetailPage({
           formId={itemFormId}
           disabled={isLockedForBusinessEvent}
         />
-        <ReadonlyMetric label="Total Cost" value={money(item.cost_basis_total)} />
+        <ReadonlyMetric
+          label="Total Cost"
+          value={money(item.cost_basis_total)}
+        />
         <EstimateValueMetric item={item} formId={itemFormId} />
       </div>
 
       <div className="app-section mt-0 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-base font-semibold leading-tight">Quick Edit Item</h2>
+          <h2 className="text-base font-semibold leading-tight">
+            Quick Edit Item
+          </h2>
 
           {isLockedForBusinessEvent ? (
             <span className="app-button pointer-events-none opacity-60">
               Locked
             </span>
           ) : (
-            <button type="submit" form={itemFormId} className="app-button">
+            <AppLoadingButton
+              type="submit"
+              form={itemFormId}
+              loadingText="Saving..."
+              className="app-button disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Save Changes
-            </button>
+            </AppLoadingButton>
           )}
         </div>
 
@@ -998,8 +1489,8 @@ export default async function InventoryDetailPage({
               name="title"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.title ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.title ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1012,8 +1503,8 @@ export default async function InventoryDetailPage({
               name="player_name"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.player_name ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.player_name ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1026,8 +1517,8 @@ export default async function InventoryDetailPage({
               name="year"
               disabled={isLockedForBusinessEvent}
               type="number"
-              defaultValue={item.year ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.year ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1040,8 +1531,8 @@ export default async function InventoryDetailPage({
               name="card_number"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.card_number ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.card_number ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1054,8 +1545,8 @@ export default async function InventoryDetailPage({
               name="brand"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.brand ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.brand ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1068,8 +1559,8 @@ export default async function InventoryDetailPage({
               name="parallel_name"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.parallel_name ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.parallel_name ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1082,8 +1573,8 @@ export default async function InventoryDetailPage({
               name="team"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.team ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.team ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1096,8 +1587,8 @@ export default async function InventoryDetailPage({
               name="storage_location"
               disabled={isLockedForBusinessEvent}
               type="text"
-              defaultValue={item.storage_location ?? ''}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.storage_location ?? ""}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1110,23 +1601,31 @@ export default async function InventoryDetailPage({
               name="notes"
               disabled={isLockedForBusinessEvent}
               rows={3}
-              defaultValue={item.notes ?? ''}
-              className={`app-textarea ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              defaultValue={item.notes ?? ""}
+              className={`app-textarea ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
         </div>
       </div>
 
       <div className="app-section mt-0 p-4">
-        <h2 className="text-base font-semibold leading-tight">Listing Details</h2>
+        <h2 className="text-base font-semibold leading-tight">
+          Listing Details
+        </h2>
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <Detail label="Listed Price" value={item.listed_price != null ? money(item.listed_price) : '—'} />
-          <Detail label="Listed Platform" value={item.listed_platform || '—'} />
+          <Detail
+            label="Listed Price"
+            value={item.listed_price != null ? money(item.listed_price) : "—"}
+          />
+          <Detail label="Listed Platform" value={item.listed_platform || "—"} />
           <Detail label="Listed Date" value={formatDate(item.listed_date)} />
         </div>
 
-        <form action={updateInventoryListingAction} className="mt-3 grid gap-2.5 md:grid-cols-3">
+        <form
+          action={updateInventoryListingAction}
+          className="mt-3 grid gap-2.5 md:grid-cols-3"
+        >
           <input type="hidden" name="inventory_item_id" value={item.id} />
 
           <div>
@@ -1139,9 +1638,13 @@ export default async function InventoryDetailPage({
               type="number"
               min={0}
               step="0.01"
-              defaultValue={item.listed_price != null ? Number(item.listed_price).toFixed(2) : ''}
+              defaultValue={
+                item.listed_price != null
+                  ? Number(item.listed_price).toFixed(2)
+                  : ""
+              }
               placeholder="0.00"
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1153,9 +1656,9 @@ export default async function InventoryDetailPage({
               name="listed_platform"
               disabled={isLockedForBusinessEvent || isGiveaway}
               type="text"
-              defaultValue={item.listed_platform ?? ''}
+              defaultValue={item.listed_platform ?? ""}
               placeholder="eBay, Whatnot, Facebook, local..."
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1168,7 +1671,7 @@ export default async function InventoryDetailPage({
               disabled={isLockedForBusinessEvent || isGiveaway}
               type="date"
               defaultValue={formatDateInput(item.listed_date)}
-              className={`app-input ${isLockedForBusinessEvent ? 'cursor-not-allowed opacity-70' : ''}`}
+              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
           </div>
 
@@ -1178,9 +1681,13 @@ export default async function InventoryDetailPage({
                 Listing Locked
               </span>
             ) : (
-              <button type="submit" className="app-button">
+              <AppLoadingButton
+                type="submit"
+                loadingText="Saving..."
+                className="app-button disabled:cursor-not-allowed disabled:opacity-50"
+              >
                 Save Listing Details
-              </button>
+              </AppLoadingButton>
             )}
           </div>
         </form>
@@ -1190,19 +1697,21 @@ export default async function InventoryDetailPage({
         <h2 className="text-base font-semibold leading-tight">Item Details</h2>
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <Detail label="Year" value={item.year?.toString() || '—'} />
-          <Detail label="Player / Item Name" value={item.player_name || '—'} />
-          <Detail label="#" value={item.card_number || '—'} />
-          <Detail label="Brand" value={item.brand || '—'} />
-          <Detail label="Parallel" value={item.parallel_name || '—'} />
-          <Detail label="Team" value={item.team || '—'} />
-          <Detail label="Item Type" value={item.item_type || '—'} />
-          <Detail label="Location" value={item.storage_location || '—'} />
+          <Detail label="Year" value={item.year?.toString() || "—"} />
+          <Detail label="Player / Item Name" value={item.player_name || "—"} />
+          <Detail label="#" value={item.card_number || "—"} />
+          <Detail label="Brand" value={item.brand || "—"} />
+          <Detail label="Parallel" value={item.parallel_name || "—"} />
+          <Detail label="Team" value={item.team || "—"} />
+          <Detail label="Item Type" value={item.item_type || "—"} />
+          <Detail label="Location" value={item.storage_location || "—"} />
         </div>
 
         {item.notes ? (
           <div className="mt-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">Notes</div>
+            <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+              Notes
+            </div>
             <div className="mt-1.5 whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-sm leading-relaxed">
               {item.notes}
             </div>
@@ -1213,7 +1722,9 @@ export default async function InventoryDetailPage({
       <div className="app-section mt-0 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-base font-semibold leading-tight">Record Trail</h2>
+            <h2 className="text-base font-semibold leading-tight">
+              Record Trail
+            </h2>
             <p className="mt-1 text-sm text-zinc-400">
               System record details for this inventory item.
             </p>
@@ -1224,7 +1735,10 @@ export default async function InventoryDetailPage({
               <Link href={relatedBreakHref} className="app-button">
                 Break Details
               </Link>
-              <Link href={relatedBreakAddItemsHref} className="app-button-primary">
+              <Link
+                href={relatedBreakAddItemsHref}
+                className="app-button-primary"
+              >
                 Add More Items
               </Link>
               <Link href={relatedBreakItemsHref} className="app-button">
@@ -1235,23 +1749,38 @@ export default async function InventoryDetailPage({
         </div>
 
         <div className="mt-3 grid gap-2 md:grid-cols-4">
-          <Detail label="Source Type" value={buildSourceTypeLabel(item.source_type)} />
-          <Detail label="Source Break" value={item.source_break_id ? relatedBreakTitle : '—'} />
+          <Detail
+            label="Source Type"
+            value={buildSourceTypeLabel(item.source_type)}
+          />
+          <Detail
+            label="Source Break"
+            value={item.source_break_id ? relatedBreakTitle : "—"}
+          />
           <Detail label="Created" value={formatDate(item.created_at)} />
           <Detail label="Updated" value={formatDate(item.updated_at)} />
         </div>
       </div>
 
-      <div id="sales-history" className="app-table-wrap mt-0 overflow-hidden scroll-mt-24">
+      <div
+        id="sales-history"
+        className="app-table-wrap mt-0 overflow-hidden scroll-mt-24"
+      >
         <div className="border-b border-zinc-800 px-4 py-2.5">
-          <h2 className="text-base font-semibold leading-tight">Sales History</h2>
+          <h2 className="text-base font-semibold leading-tight">
+            Sales History
+          </h2>
           <p className="mt-1 text-xs leading-snug text-zinc-400">
-            Reverse individual sales here. This is safest for partial quantity lots because each sale may belong to a different buyer or transaction.
+            Reverse individual sales here. This is safest for partial quantity
+            lots because each sale may belong to a different buyer or
+            transaction.
           </p>
         </div>
 
         {sales.length === 0 ? (
-          <div className="px-4 py-5 text-sm text-zinc-400">No sales recorded for this item.</div>
+          <div className="px-4 py-5 text-sm text-zinc-400">
+            No sales recorded for this item.
+          </div>
         ) : (
           <div className="app-table-scroll">
             <table className="app-table">
@@ -1270,7 +1799,7 @@ export default async function InventoryDetailPage({
               </thead>
               <tbody>
                 {sales.map((sale) => {
-                  const reversed = !!sale.reversed_at
+                  const reversed = !!sale.reversed_at;
 
                   return (
                     <tr key={sale.id} className="app-tr">
@@ -1286,26 +1815,45 @@ export default async function InventoryDetailPage({
                           <span className="text-emerald-300">Active</span>
                         )}
                       </td>
-                      <td className="app-td py-2.5">{sale.sale_date || '—'}</td>
-                      <td className="app-td py-2.5">{sale.quantity_sold ?? 0}</td>
-                      <td className="app-td py-2.5">{money(sale.gross_sale)}</td>
-                      <td className="app-td py-2.5">{money(sale.net_proceeds)}</td>
-                      <td className="app-td py-2.5">{money(sale.cost_of_goods_sold)}</td>
+                      <td className="app-td py-2.5">{sale.sale_date || "—"}</td>
+                      <td className="app-td py-2.5">
+                        {sale.quantity_sold ?? 0}
+                      </td>
+                      <td className="app-td py-2.5">
+                        {money(sale.gross_sale)}
+                      </td>
+                      <td className="app-td py-2.5">
+                        {money(sale.net_proceeds)}
+                      </td>
+                      <td className="app-td py-2.5">
+                        {money(sale.cost_of_goods_sold)}
+                      </td>
                       <td className="app-td py-2.5">{money(sale.profit)}</td>
-                      <td className="app-td py-2.5">{sale.platform || '—'}</td>
+                      <td className="app-td py-2.5">{sale.platform || "—"}</td>
                       <td className="app-td py-2.5">
                         {reversed ? (
                           <div className="text-xs text-zinc-500">
-                            {sale.reversal_reason || 'Already reversed'}
+                            {sale.reversal_reason || "Already reversed"}
                           </div>
                         ) : isLockedForBusinessEvent ? (
                           <div className="text-xs text-amber-300">
                             Locked after giveaway or write-off review
                           </div>
                         ) : (
-                          <form action={reverseSaleAction} className="space-y-1.5">
-                            <input type="hidden" name="sale_id" value={sale.id} />
-                            <input type="hidden" name="inventory_item_id" value={item.id} />
+                          <form
+                            action={reverseSaleAction}
+                            className="space-y-1.5"
+                          >
+                            <input
+                              type="hidden"
+                              name="sale_id"
+                              value={sale.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="inventory_item_id"
+                              value={item.id}
+                            />
                             <textarea
                               name="reversal_reason"
                               rows={2}
@@ -1319,7 +1867,7 @@ export default async function InventoryDetailPage({
                         )}
                       </td>
                     </tr>
-                  )
+                  );
                 })}
               </tbody>
             </table>
@@ -1333,14 +1881,16 @@ export default async function InventoryDetailPage({
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="app-card-tight p-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+        {label}
+      </div>
       <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
     </div>
-  )
+  );
 }

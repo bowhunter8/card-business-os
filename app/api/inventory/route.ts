@@ -37,6 +37,10 @@ type CreateInventoryPayload = {
   quantity?: number;
   unitCost?: number;
   totalCost?: number;
+  shippingPaid?: number;
+  salesTaxPaid?: number;
+  otherPurchaseFees?: number;
+  totalPurchaseCost?: number;
   estimatedValue?: number;
   source?: string;
   breakId?: string;
@@ -68,6 +72,10 @@ type InventoryRowInsert = {
   available_quantity: number;
   cost_basis_unit: number;
   cost_basis_total: number;
+  shipping_paid: number;
+  sales_tax_paid: number;
+  other_purchase_fees: number;
+  total_purchase_cost: number;
   source_type: string;
   source_break_id: string | null;
 };
@@ -79,6 +87,11 @@ function toSafeString(value: unknown): string {
 function toSafeNumber(value: unknown, fallback = 0): number {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function toMoneyNumber(value: unknown): number {
+  const num = Math.max(0, toSafeNumber(value, 0));
+  return Number(num.toFixed(2));
 }
 
 function toSafeBool(value: unknown): boolean {
@@ -199,6 +212,10 @@ function buildBaseRow({
   quantity,
   unitCost,
   totalCost,
+  shippingPaid = 0,
+  salesTaxPaid = 0,
+  otherPurchaseFees = 0,
+  totalPurchaseCost = totalCost,
   itemType,
   status,
   notes,
@@ -216,6 +233,10 @@ function buildBaseRow({
   quantity: number;
   unitCost: number;
   totalCost: number;
+  shippingPaid?: number;
+  salesTaxPaid?: number;
+  otherPurchaseFees?: number;
+  totalPurchaseCost?: number;
   itemType: string;
   status: string;
   notes: string | null;
@@ -247,6 +268,10 @@ function buildBaseRow({
     available_quantity: quantity,
     cost_basis_unit: unitCost,
     cost_basis_total: totalCost,
+    shipping_paid: shippingPaid,
+    sales_tax_paid: salesTaxPaid,
+    other_purchase_fees: otherPurchaseFees,
+    total_purchase_cost: totalPurchaseCost,
     source_type: breakUuid ? "break" : "manual",
     source_break_id: breakUuid,
   };
@@ -325,6 +350,12 @@ export async function POST(req: NextRequest) {
         0,
         toSafeNumber(body.totalCost, unitCost * quantity)
       );
+      const shippingPaid = toMoneyNumber(body.shippingPaid);
+      const salesTaxPaid = toMoneyNumber(body.salesTaxPaid);
+      const otherPurchaseFees = toMoneyNumber(body.otherPurchaseFees);
+      const totalPurchaseCost = toMoneyNumber(
+        totalCost + shippingPaid + salesTaxPaid + otherPurchaseFees
+      );
 
       const parentNotes = buildNotes([
         toSafeString(body.notes),
@@ -344,6 +375,10 @@ export async function POST(req: NextRequest) {
         quantity,
         unitCost,
         totalCost,
+        shippingPaid,
+        salesTaxPaid,
+        otherPurchaseFees,
+        totalPurchaseCost,
         itemType: "single_card",
         status: "available",
         notes: parentNotes,
@@ -455,6 +490,12 @@ export async function POST(req: NextRequest) {
     const quantity = Math.max(1, Math.floor(toSafeNumber(body.quantity, 1)));
     const unitCost = Math.max(0, toSafeNumber(body.unitCost, 0));
     const totalCost = Math.max(0, toSafeNumber(body.totalCost, unitCost * quantity));
+    const shippingPaid = toMoneyNumber(body.shippingPaid);
+    const salesTaxPaid = toMoneyNumber(body.salesTaxPaid);
+    const otherPurchaseFees = toMoneyNumber(body.otherPurchaseFees);
+    const totalPurchaseCost = toMoneyNumber(
+      totalCost + shippingPaid + salesTaxPaid + otherPurchaseFees
+    );
 
     const notes = buildNotes([
       toSafeString(body.notes),
@@ -482,6 +523,10 @@ export async function POST(req: NextRequest) {
       quantity,
       unitCost,
       totalCost,
+      shippingPaid,
+      salesTaxPaid,
+      otherPurchaseFees,
+      totalPurchaseCost,
       itemType: "single_card",
       status: "available",
       notes,

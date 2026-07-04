@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AppLoadingButton } from "../../components/AppLoadingButton";
 
 type InventoryStatus =
   | "inventory"
@@ -48,6 +49,9 @@ type FormState = {
 
   quantity: string;
   unitCost: string;
+  shippingPaid: string;
+  salesTaxPaid: string;
+  otherPurchaseFees: string;
   estimatedValue: string;
   source: string;
   breakId: string;
@@ -88,12 +92,35 @@ function money(value: number): string {
   return value.toFixed(2);
 }
 
+function buildSingleTitleFromForm(form: FormState): string {
+  return [
+    form.year,
+    form.brand,
+    form.setName,
+    form.player,
+    form.cardNumber ? `#${form.cardNumber}` : "",
+    form.parallel,
+    form.variation,
+  ]
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildLotTitleFromForm(form: FormState): string {
+  return [form.lotName || "Bulk Lot", form.year, form.brand, form.setName]
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .join(" - ");
+}
+
 export default function NewInventoryPage() {
   const router = useRouter();
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  const [titleManuallyEdited, setTitleManuallyEdited] = useState(false);
 
   const [form, setForm] = useState<FormState>({
     entryMode: "single_card",
@@ -115,6 +142,9 @@ export default function NewInventoryPage() {
 
     quantity: "1",
     unitCost: "0",
+    shippingPaid: "0",
+    salesTaxPaid: "0",
+    otherPurchaseFees: "0",
     estimatedValue: "0",
     source: "",
     breakId: "",
@@ -137,6 +167,22 @@ export default function NewInventoryPage() {
     return asNumber(form.unitCost) * quantityNumber;
   }, [form.unitCost, quantityNumber]);
 
+  const shippingPaid = useMemo(() => {
+    return asNumber(form.shippingPaid);
+  }, [form.shippingPaid]);
+
+  const salesTaxPaid = useMemo(() => {
+    return asNumber(form.salesTaxPaid);
+  }, [form.salesTaxPaid]);
+
+  const otherPurchaseFees = useMemo(() => {
+    return asNumber(form.otherPurchaseFees);
+  }, [form.otherPurchaseFees]);
+
+  const totalPurchaseCost = useMemo(() => {
+    return totalCost + shippingPaid + salesTaxPaid + otherPurchaseFees;
+  }, [totalCost, shippingPaid, salesTaxPaid, otherPurchaseFees]);
+
   const totalEstimatedValue = useMemo(() => {
     if (!isBulkLot) {
       return asNumber(form.estimatedValue) * quantityNumber;
@@ -154,13 +200,54 @@ export default function NewInventoryPage() {
     return totalEstimatedValue / quantityNumber;
   }, [isBulkLot, totalEstimatedValue, quantityNumber]);
 
+  function buildAutoTitle(nextForm: FormState): string {
+    if (nextForm.entryMode === "bulk_lot") {
+      return [
+        nextForm.lotName || "Bulk Lot",
+        nextForm.year,
+        nextForm.brand,
+        nextForm.setName,
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(" - ");
+    }
+
+    return [
+      nextForm.year,
+      nextForm.brand,
+      nextForm.setName,
+      nextForm.player,
+      nextForm.cardNumber ? `#${nextForm.cardNumber}` : "",
+      nextForm.parallel,
+      nextForm.variation,
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(" ");
+  }
+
   function updateForm<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "title") {
+      setTitleManuallyEdited(true);
+      setForm((prev) => ({ ...prev, [key]: value }));
+      return;
+    }
+
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+
+      if (!titleManuallyEdited) {
+        next.title = buildAutoTitle(next);
+      }
+
+      return next;
+    });
   }
 
   function updateBulkItem(id: string, patch: Partial<BulkLotItem>) {
     setBulkItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...patch } : item))
+      prev.map((item) => (item.id === id ? { ...item, ...patch } : item)),
     );
   }
 
@@ -194,34 +281,6 @@ export default function NewInventoryPage() {
     setBulkItems([createBulkItem()]);
   }
 
-  function autoFillTitleForSingleCard() {
-    const parts = [
-      form.year,
-      form.brand,
-      form.setName,
-      form.player,
-      form.cardNumber ? `#${form.cardNumber}` : "",
-      form.parallel,
-      form.variation,
-    ]
-      .map((v) => v.trim())
-      .filter(Boolean);
-
-    updateForm("title", parts.join(" "));
-  }
-
-  function autoFillTitleForLot() {
-    const parts = [
-      form.lotName || "Bulk Lot",
-      form.year,
-      form.brand,
-      form.setName,
-    ]
-      .map((v) => v.trim())
-      .filter(Boolean);
-
-    updateForm("title", parts.join(" - "));
-  }
 
   function validate(): string | null {
     if (isBulkLot) {
@@ -242,7 +301,7 @@ export default function NewInventoryPage() {
           item.setName.trim() ||
           item.parallel.trim() ||
           item.notes.trim() ||
-          item.estimatedValue.trim()
+          item.estimatedValue.trim(),
       );
 
       if (!hasAnyFilledItem) {
@@ -259,7 +318,19 @@ export default function NewInventoryPage() {
     }
 
     if (asNumber(form.unitCost) < 0) {
-      return "Unit cost cannot be negative.";
+      return "Item cost cannot be negative.";
+    }
+
+    if (asNumber(form.shippingPaid) < 0) {
+      return "Shipping paid cannot be negative.";
+    }
+
+    if (asNumber(form.salesTaxPaid) < 0) {
+      return "Sales tax paid cannot be negative.";
+    }
+
+    if (asNumber(form.otherPurchaseFees) < 0) {
+      return "Other purchase fees cannot be negative.";
     }
 
     return null;
@@ -281,7 +352,9 @@ export default function NewInventoryPage() {
     try {
       const payload = {
         entryMode: form.entryMode,
-        status: isBulkLot ? ("bulk_lot" as InventoryStatus) : ("inventory" as InventoryStatus),
+        status: isBulkLot
+          ? ("bulk_lot" as InventoryStatus)
+          : ("inventory" as InventoryStatus),
 
         title: form.title.trim(),
         player: form.player.trim(),
@@ -300,8 +373,14 @@ export default function NewInventoryPage() {
 
         quantity: quantityNumber,
         unitCost: asNumber(form.unitCost),
+        shippingPaid,
+        salesTaxPaid,
+        otherPurchaseFees,
         totalCost,
-        estimatedValue: isBulkLot ? totalEstimatedValue : asNumber(form.estimatedValue),
+        totalPurchaseCost,
+        estimatedValue: isBulkLot
+          ? totalEstimatedValue
+          : asNumber(form.estimatedValue),
         source: form.source.trim(),
         breakId: form.breakId.trim(),
         acquiredDate: form.acquiredDate,
@@ -324,7 +403,7 @@ export default function NewInventoryPage() {
                     item.setName.trim() ||
                     item.parallel.trim() ||
                     item.notes.trim() ||
-                    item.estimatedValue.trim()
+                    item.estimatedValue.trim(),
                 )
                 .map((item) => ({
                   player: item.player.trim(),
@@ -389,23 +468,21 @@ export default function NewInventoryPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
+            <AppLoadingButton
               type="submit"
               form="new-inventory-form"
-              disabled={saving}
+              loading={saving}
+              loadingText="Saving..."
               className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving
-                ? "Saving..."
-                : isBulkLot
-                ? "Create Bulk Lot"
-                : "Create Inventory Item"}
-            </button>
+              {isBulkLot ? "Create Bulk Lot" : "Create Inventory Item"}
+            </AppLoadingButton>
 
             <button
               type="button"
+              disabled={saving}
               onClick={() => router.push("/app/inventory")}
-              className="app-button"
+              className="app-button disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
@@ -413,11 +490,17 @@ export default function NewInventoryPage() {
         </div>
       </div>
 
-      <form id="new-inventory-form" onSubmit={handleSubmit} className="space-y-4">
+      <form
+        id="new-inventory-form"
+        onSubmit={handleSubmit}
+        className="space-y-4"
+      >
         <section className="app-section">
           <div className="grid gap-3 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm text-zinc-400">Entry Mode</label>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Entry Mode *
+              </label>
               <select
                 className="app-select"
                 value={form.entryMode}
@@ -432,7 +515,7 @@ export default function NewInventoryPage() {
 
             <div>
               <label className="mb-1 block text-sm text-zinc-400">
-                Acquired Date
+                Acquired Date *
               </label>
               <input
                 type="date"
@@ -455,7 +538,9 @@ export default function NewInventoryPage() {
 
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm text-zinc-400">Break ID</label>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Break ID
+              </label>
               <input
                 className="app-input"
                 value={form.breakId}
@@ -465,7 +550,9 @@ export default function NewInventoryPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-zinc-400">Unit Cost</label>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Item Cost *
+              </label>
               <input
                 type="number"
                 step="0.01"
@@ -490,24 +577,65 @@ export default function NewInventoryPage() {
               />
             </div>
           </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Shipping Paid
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="app-input"
+                value={form.shippingPaid}
+                onChange={(e) => updateForm("shippingPaid", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Sales Tax Paid
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="app-input"
+                value={form.salesTaxPaid}
+                onChange={(e) => updateForm("salesTaxPaid", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm text-zinc-400">
+                Other Fees
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="app-input"
+                value={form.otherPurchaseFees}
+                onChange={(e) =>
+                  updateForm("otherPurchaseFees", e.target.value)
+                }
+              />
+            </div>
+          </div>
         </section>
 
         {!isBulkLot ? (
           <section className="app-section">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold">Single Item Details</h2>
-              <button
-                type="button"
-                onClick={autoFillTitleForSingleCard}
-                className="app-button"
-              >
-                Auto Fill Title
-              </button>
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="md:col-span-3">
-                <label className="mb-1 block text-sm text-zinc-400">Title</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Title
+                </label>
                 <input
                   className="app-input"
                   value={form.title}
@@ -517,7 +645,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Player / Item Name</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Player / Item Name *
+                </label>
                 <input
                   className="app-input"
                   value={form.player}
@@ -535,7 +665,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Brand</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Brand
+                </label>
                 <input
                   className="app-input"
                   value={form.brand}
@@ -544,9 +676,7 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">
-                  #
-                </label>
+                <label className="mb-1 block text-sm text-zinc-400">#</label>
                 <input
                   className="app-input"
                   value={form.cardNumber}
@@ -564,7 +694,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Parallel</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Parallel
+                </label>
                 <input
                   className="app-input"
                   value={form.parallel}
@@ -573,7 +705,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Variation</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Variation
+                </label>
                 <input
                   className="app-input"
                   value={form.variation}
@@ -594,7 +728,9 @@ export default function NewInventoryPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm text-zinc-400">Grade</label>
+                <label className="mb-1 block text-sm text-zinc-400">
+                  Grade
+                </label>
                 <input
                   className="app-input"
                   value={form.grade}
@@ -652,18 +788,13 @@ export default function NewInventoryPage() {
             <section className="app-section">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-semibold">Bulk Lot Details</h2>
-                <button
-                  type="button"
-                  onClick={autoFillTitleForLot}
-                  className="app-button"
-                >
-                  Auto Fill Title
-                </button>
               </div>
 
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="md:col-span-2">
-                  <label className="mb-1 block text-sm text-zinc-400">Lot Name</label>
+                  <label className="mb-1 block text-sm text-zinc-400">
+                    Lot Name
+                  </label>
                   <input
                     className="app-input"
                     value={form.lotName}
@@ -673,7 +804,9 @@ export default function NewInventoryPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm text-zinc-400">Title</label>
+                  <label className="mb-1 block text-sm text-zinc-400">
+                    Title
+                  </label>
                   <input
                     className="app-input"
                     value={form.title}
@@ -683,7 +816,9 @@ export default function NewInventoryPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm text-zinc-400">Year</label>
+                  <label className="mb-1 block text-sm text-zinc-400">
+                    Year
+                  </label>
                   <input
                     className="app-input"
                     value={form.year}
@@ -692,7 +827,9 @@ export default function NewInventoryPage() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm text-zinc-400">Brand</label>
+                  <label className="mb-1 block text-sm text-zinc-400">
+                    Brand
+                  </label>
                   <input
                     className="app-input"
                     value={form.brand}
@@ -707,7 +844,9 @@ export default function NewInventoryPage() {
                   <textarea
                     className="app-textarea min-h-[96px]"
                     value={form.lotDescription}
-                    onChange={(e) => updateForm("lotDescription", e.target.value)}
+                    onChange={(e) =>
+                      updateForm("lotDescription", e.target.value)
+                    }
                     placeholder="Example: Commons from Break B041, grouped for kid lots or donation review later."
                   />
                 </div>
@@ -744,10 +883,7 @@ export default function NewInventoryPage() {
 
               <div className="space-y-3">
                 {bulkItems.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="app-card-tight"
-                  >
+                  <div key={item.id} className="app-card-tight">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <h3 className="font-medium">Item #{index + 1}</h3>
                       <div className="flex gap-2">
@@ -849,7 +985,9 @@ export default function NewInventoryPage() {
                           className="app-input"
                           value={item.parallel}
                           onChange={(e) =>
-                            updateBulkItem(item.id, { parallel: e.target.value })
+                            updateBulkItem(item.id, {
+                              parallel: e.target.value,
+                            })
                           }
                         />
                       </div>
@@ -859,7 +997,9 @@ export default function NewInventoryPage() {
                           type="checkbox"
                           checked={item.rookie}
                           onChange={(e) =>
-                            updateBulkItem(item.id, { rookie: e.target.checked })
+                            updateBulkItem(item.id, {
+                              rookie: e.target.checked,
+                            })
                           }
                         />
                         <span className="text-sm">Rookie</span>
@@ -899,7 +1039,7 @@ export default function NewInventoryPage() {
         <section className="app-section">
           <h2 className="mb-3 text-lg font-semibold">Summary</h2>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <div className="app-metric-card py-2 px-3">
               <div className="text-sm text-zinc-400">Mode</div>
               <div className="mt-1 font-semibold">
@@ -913,8 +1053,15 @@ export default function NewInventoryPage() {
             </div>
 
             <div className="app-metric-card py-2 px-3">
-              <div className="text-sm text-zinc-400">Total Cost</div>
+              <div className="text-sm text-zinc-400">Inventory Cost</div>
               <div className="mt-1 font-semibold">${money(totalCost)}</div>
+            </div>
+
+            <div className="app-metric-card py-2 px-3">
+              <div className="text-sm text-zinc-400">Total Purchase</div>
+              <div className="mt-1 font-semibold">
+                ${money(totalPurchaseCost)}
+              </div>
             </div>
 
             <div className="app-metric-card py-2 px-3">
@@ -925,56 +1072,80 @@ export default function NewInventoryPage() {
             </div>
           </div>
 
+          <div className="app-card-tight mt-4 text-sm">
+            <div className="mb-2 font-semibold text-zinc-100">
+              Purchase Breakdown
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-400">Inventory Cost</span>
+                <span className="font-semibold">${money(totalCost)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-400">Shipping Paid</span>
+                <span className="font-semibold">${money(shippingPaid)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-400">Sales Tax Paid</span>
+                <span className="font-semibold">${money(salesTaxPaid)}</span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span className="text-zinc-400">Other Fees</span>
+                <span className="font-semibold">
+                  ${money(otherPurchaseFees)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4 border-t border-zinc-800 pt-2 md:col-span-2">
+                <span className="text-zinc-300">Total Purchase</span>
+                <span className="font-semibold">
+                  ${money(totalPurchaseCost)}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {isBulkLot && (
             <div className="app-card-tight mt-4 text-sm">
               <div>
-                Lot quantity: <span className="font-semibold">{quantityNumber}</span>
+                Lot quantity:{" "}
+                <span className="font-semibold">{quantityNumber}</span>
               </div>
               <div className="mt-1">
-                Child detail rows: <span className="font-semibold">{bulkItems.length}</span>
+                Child detail rows:{" "}
+                <span className="font-semibold">{bulkItems.length}</span>
               </div>
               <div className="mt-1">
-                Avg est. value per lot item: {" "}
+                Avg est. value per lot item:{" "}
                 <span className="font-semibold">
                   ${money(bulkEstimatedPerCard)}
                 </span>
               </div>
               <div className="mt-1 text-zinc-400">
-                Parent record will save as a bulk lot, with child items included in
-                the POST payload for backend creation.
+                Parent record will save as a bulk lot, with child items included
+                in the POST payload for backend creation.
               </div>
             </div>
           )}
 
-          {!!error && (
-            <div className="app-alert-error mt-4">
-              {error}
-            </div>
-          )}
+          {!!error && <div className="app-alert-error mt-4">{error}</div>}
 
-          {!!success && (
-            <div className="app-alert-success mt-4">
-              {success}
-            </div>
-          )}
+          {!!success && <div className="app-alert-success mt-4">{success}</div>}
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button
+            <AppLoadingButton
               type="submit"
-              disabled={saving}
+              loading={saving}
+              loadingText="Saving..."
               className="app-button-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving
-                ? "Saving..."
-                : isBulkLot
-                ? "Create Bulk Lot"
-                : "Create Inventory Item"}
-            </button>
+              {isBulkLot ? "Create Bulk Lot" : "Create Inventory Item"}
+            </AppLoadingButton>
 
             <button
               type="button"
+              disabled={saving}
               onClick={() => router.push("/app/inventory")}
-              className="app-button"
+              className="app-button disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
