@@ -332,3 +332,190 @@ export async function updateInventoryItemAction(formData: FormData) {
     )}`
   )
 }
+
+type InventoryMovementType = 'personal' | 'giveaway' | 'junk'
+
+type InventoryMovementConfig = {
+  status: 'personal' | 'giveaway' | 'junk'
+  label: string
+  backupSource: string
+  defaultNotes: string
+}
+
+const INVENTORY_MOVEMENT_CONFIG: Record<InventoryMovementType, InventoryMovementConfig> = {
+  personal: {
+    status: 'personal',
+    label: 'Moved to Personal Collection',
+    backupSource: 'moveToPersonalAction',
+    defaultNotes: 'Inventory moved to personal collection. Treated as owner withdrawal, not deductible.',
+  },
+  giveaway: {
+    status: 'giveaway',
+    label: 'Marked as Giveaway',
+    backupSource: 'markAsGiveawayAction',
+    defaultNotes: 'Inventory moved to giveaway/marketing use. Review advertising or marketing expense treatment separately.',
+  },
+  junk: {
+    status: 'junk',
+    label: 'Disposed / Junked',
+    backupSource: 'disposeInventoryAction',
+    defaultNotes: 'Inventory removed from active inventory as damaged, lost, destroyed, or unsellable.',
+  },
+}
+
+function buildInventoryMovementNotes({
+  config,
+  reason,
+  notes,
+}: {
+  config: InventoryMovementConfig
+  reason: string
+  notes: string
+}) {
+  return [
+    config.defaultNotes,
+    reason ? `Reason: ${reason}` : '',
+    notes ? `Notes: ${notes}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+async function inventoryMovementActionBase(
+  formData: FormData,
+  movementType: InventoryMovementType
+) {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const config = INVENTORY_MOVEMENT_CONFIG[movementType]
+  const inventoryItemId = String(formData.get('inventory_item_id') ?? '').trim()
+  const quantityRaw = Number(formData.get('quantity_to_move') ?? 1)
+  const reason = String(formData.get('reason') ?? '').trim()
+  const notes = String(formData.get('movement_notes') ?? '').trim()
+
+  if (!inventoryItemId) {
+    redirect('/app/inventory?error=Missing inventory item id')
+  }
+
+  const itemResponse = await supabase
+    .from('inventory_items')
+    .select('id, user_id, status, available_quantity, cost_basis_unit')
+    .eq('id', inventoryItemId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (itemResponse.error || !itemResponse.data) {
+    redirect(
+      `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(
+        itemResponse.error?.message ?? 'Inventory item could not be found.'
+      )}`
+    )
+  }
+
+  const item = itemResponse.data
+  const availableQuantity = Math.max(0, Number(item.available_quantity ?? 0))
+  const quantityToMove = Math.max(
+    1,
+    Math.floor(Number.isFinite(quantityRaw) ? quantityRaw : 1)
+  )
+
+  if (availableQuantity <= 0) {
+    redirect(
+      `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(
+        'No available quantity remains to move.'
+      )}`
+    )
+  }
+
+  if (quantityToMove > availableQuantity) {
+    redirect(
+      `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(
+        'Quantity cannot be greater than available quantity.'
+      )}`
+    )
+  }
+
+  const currentStatus = normalizeInventoryStatus(String(item.status ?? 'available'))
+  const nextAvailableQuantity = availableQuantity - quantityToMove
+  const nextStatus = nextAvailableQuantity > 0 ? currentStatus : config.status
+  const unitCost = Number(item.cost_basis_unit ?? 0)
+  const movedCostBasis = Number((unitCost * quantityToMove).toFixed(2))
+  const eventDate = new Date().toISOString().slice(0, 10)
+
+  await createAutomaticRestorePoint({
+    userId: user.id,
+    backupName: `Before Inventory Movement ${new Date().toLocaleString()}`,
+    backupType: 'automatic',
+    metadata: {
+      source: config.backupSource,
+      inventory_item_id: inventoryItemId,
+      movement_type: movementType,
+      quantity_to_move: quantityToMove,
+    },
+  })
+
+  const updateResponse = await supabase
+    .from('inventory_items')
+    .update({
+      available_quantity: nextAvailableQuantity,
+      status: nextStatus,
+    })
+    .eq('id', inventoryItemId)
+    .eq('user_id', user.id)
+
+  if (updateResponse.error) {
+    redirect(
+      `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(updateResponse.error.message)}`
+    )
+  }
+
+  const transactionNotes = buildInventoryMovementNotes({
+    config,
+    reason,
+    notes,
+  })
+
+  const transactionResponse = await supabase.from('inventory_transactions').insert({
+    user_id: user.id,
+    inventory_item_id: inventoryItemId,
+    transaction_type: 'adjustment',
+    quantity_change: -quantityToMove,
+    to_status: config.status,
+    amount: movedCostBasis,
+    event_date: eventDate,
+    notes: transactionNotes,
+  })
+
+  if (transactionResponse.error) {
+    redirect(
+      `/app/inventory/${inventoryItemId}?error=${encodeURIComponent(transactionResponse.error.message)}`
+    )
+  }
+
+  redirect(
+    `/app/inventory/${inventoryItemId}?success=${encodeURIComponent(
+      `${config.label} recorded successfully.`
+    )}`
+  )
+}
+
+export async function moveToPersonalAction(formData: FormData) {
+  await inventoryMovementActionBase(formData, 'personal')
+}
+
+export async function markAsGiveawayAction(formData: FormData) {
+  await inventoryMovementActionBase(formData, 'giveaway')
+}
+
+export async function disposeInventoryAction(formData: FormData) {
+  await inventoryMovementActionBase(formData, 'junk')
+}
+

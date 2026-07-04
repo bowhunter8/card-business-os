@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
 import { reverseSaleAction } from "@/app/actions/sale-safety";
 import { updateInventoryListingAction } from "@/app/actions/inventory-listing";
-import { updateInventoryItemAction } from "@/app/actions/inventory";
+import {
+  disposeInventoryAction,
+  markAsGiveawayAction,
+  moveToPersonalAction,
+  updateInventoryItemAction,
+} from "@/app/actions/inventory";
 import DeleteInventoryItemButton from "../DeleteInventoryItemButton";
 import EstimateValueHelper from "./EstimateValueHelper";
 import { AppLoadingButton } from "../../components/AppLoadingButton";
@@ -235,124 +239,6 @@ function renderStatusPill(status: string | null) {
     <span className="app-badge app-badge-neutral capitalize">
       {(status || "unknown").replaceAll("_", " ")}
     </span>
-  );
-}
-
-async function inventoryMovementAction(formData: FormData) {
-  "use server";
-
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const itemId = String(formData.get("inventory_item_id") || "").trim();
-  const actionType = String(formData.get("action_type") || "").trim();
-  const quantityRaw = Number(formData.get("quantity_to_move") || 1);
-  const reason = String(formData.get("reason") || "").trim();
-  const notes = String(formData.get("movement_notes") || "").trim();
-
-  const actionMap: Record<string, { status: string; label: string }> = {
-    personal: { status: "personal", label: "Moved to Personal Collection" },
-    giveaway: { status: "giveaway", label: "Marked as Giveaway" },
-    junk: { status: "junk", label: "Disposed / Junked" },
-  };
-
-  const action = actionMap[actionType];
-
-  if (!itemId || !action) {
-    redirect("/app/inventory?error=Invalid inventory action.");
-  }
-
-  const { data: item, error: itemError } = await supabase
-    .from("inventory_items")
-    .select("id, status, available_quantity, cost_basis_unit")
-    .eq("id", itemId)
-    .eq("user_id", user.id)
-    .single();
-
-  if (itemError || !item) {
-    redirect(
-      `/app/inventory/${itemId}?error=Inventory item could not be found.`,
-    );
-  }
-
-  const availableQuantity = Math.max(0, Number(item.available_quantity ?? 0));
-  const quantityToMove = Math.max(
-    1,
-    Math.floor(Number.isFinite(quantityRaw) ? quantityRaw : 1),
-  );
-
-  if (availableQuantity <= 0) {
-    redirect(
-      `/app/inventory/${itemId}?error=No available quantity remains to move.`,
-    );
-  }
-
-  if (quantityToMove > availableQuantity) {
-    redirect(
-      `/app/inventory/${itemId}?error=Quantity cannot be greater than available quantity.`,
-    );
-  }
-
-  const nextAvailableQuantity = availableQuantity - quantityToMove;
-  const nextStatus =
-    nextAvailableQuantity > 0 ? item.status || "available" : action.status;
-  const unitCost = Number(item.cost_basis_unit ?? 0);
-  const movedCostBasis = Number((unitCost * quantityToMove).toFixed(2));
-
-  const { error: updateError } = await supabase
-    .from("inventory_items")
-    .update({
-      available_quantity: nextAvailableQuantity,
-      status: nextStatus,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", itemId)
-    .eq("user_id", user.id);
-
-  if (updateError) {
-    redirect(
-      `/app/inventory/${itemId}?error=${encodeURIComponent(updateError.message)}`,
-    );
-  }
-
-  const auditNotes = [
-    action.label,
-    reason ? `Reason: ${reason}` : "",
-    notes ? `Notes: ${notes}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const { error: transactionError } = await supabase
-    .from("inventory_transactions")
-    .insert({
-      user_id: user.id,
-      inventory_item_id: itemId,
-      transaction_type: "adjustment",
-      quantity_change: -quantityToMove,
-      from_status: item.status || "available",
-      to_status: action.status,
-      amount: movedCostBasis,
-      notes: auditNotes || action.label,
-    });
-
-  if (transactionError) {
-    redirect(
-      `/app/inventory/${itemId}?error=${encodeURIComponent(transactionError.message)}`,
-    );
-  }
-
-  revalidatePath("/app/inventory");
-  revalidatePath(`/app/inventory/${itemId}`);
-  redirect(
-    `/app/inventory/${itemId}?success=${encodeURIComponent(`${action.label} recorded successfully.`)}`,
   );
 }
 
@@ -822,6 +708,8 @@ export default async function InventoryDetailPage({
                 type="submit"
                 form={itemFormId}
                 loadingText="Saving..."
+                overlayText="Saving changes..."
+                showOverlayOnClick
                 className="app-button disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Save Changes
@@ -875,12 +763,25 @@ export default async function InventoryDetailPage({
                 workflow.
               </p>
               {hasAvailableToSell ? (
-                <Link
-                  href={`/app/inventory/${item.id}/sell`}
-                  className="app-button-primary mt-3 w-full justify-center"
-                >
-                  Sell Item
-                </Link>
+                <>
+                  <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                    Quantity
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={item.available_quantity ?? undefined}
+                    defaultValue={1}
+                    className="app-input mt-2 w-full"
+                    readOnly
+                  />
+                  <Link
+                    href={`/app/inventory/${item.id}/sell?quantity=1`}
+                    className="app-button-primary mt-3 w-full justify-center"
+                  >
+                    Sell Item
+                  </Link>
+                </>
               ) : (
                 <span className="app-button mt-3 w-full justify-center pointer-events-none opacity-60">
                   Not Available
@@ -889,7 +790,7 @@ export default async function InventoryDetailPage({
             </div>
 
             <form
-              action={inventoryMovementAction}
+              action={moveToPersonalAction}
               className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
             >
               <input type="hidden" name="inventory_item_id" value={item.id} />
@@ -908,7 +809,7 @@ export default async function InventoryDetailPage({
                   name="quantity_to_move"
                   type="number"
                   min={1}
-                  max={availableQuantity}
+                  max={availableQuantity ?? undefined}
                   defaultValue={1}
                   className="app-input"
                 />
@@ -924,6 +825,9 @@ export default async function InventoryDetailPage({
                 <AppLoadingButton
                   type="submit"
                   loadingText="Moving..."
+                  overlayText="Moving to personal collection..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
                   className="app-button mt-1 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Move to Personal
@@ -932,7 +836,7 @@ export default async function InventoryDetailPage({
             </form>
 
             <form
-              action={inventoryMovementAction}
+              action={markAsGiveawayAction}
               className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
             >
               <input type="hidden" name="inventory_item_id" value={item.id} />
@@ -951,7 +855,7 @@ export default async function InventoryDetailPage({
                   name="quantity_to_move"
                   type="number"
                   min={1}
-                  max={availableQuantity}
+                  max={availableQuantity ?? undefined}
                   defaultValue={1}
                   className="app-input"
                 />
@@ -981,6 +885,9 @@ export default async function InventoryDetailPage({
                 <AppLoadingButton
                   type="submit"
                   loadingText="Recording..."
+                  overlayText="Recording giveaway..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
                   className="app-button-warning mt-1 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Record Giveaway
@@ -989,7 +896,7 @@ export default async function InventoryDetailPage({
             </form>
 
             <form
-              action={inventoryMovementAction}
+              action={disposeInventoryAction}
               className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
             >
               <input type="hidden" name="inventory_item_id" value={item.id} />
@@ -1009,7 +916,7 @@ export default async function InventoryDetailPage({
                   name="quantity_to_move"
                   type="number"
                   min={1}
-                  max={availableQuantity}
+                  max={availableQuantity ?? undefined}
                   defaultValue={1}
                   className="app-input"
                 />
@@ -1035,6 +942,9 @@ export default async function InventoryDetailPage({
                 <AppLoadingButton
                   type="submit"
                   loadingText="Recording..."
+                  overlayText="Recording disposal..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
                   className="app-button-danger mt-1 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Dispose / Junk
@@ -1684,6 +1594,8 @@ export default async function InventoryDetailPage({
               <AppLoadingButton
                 type="submit"
                 loadingText="Saving..."
+                overlayText="Saving changes..."
+                showOverlayOnClick
                 className="app-button disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Save Listing Details
