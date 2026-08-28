@@ -18,7 +18,7 @@ type DuplicateCheckRow = {
   item_type: string
   status: string
   quantity: number
-  year: number | null
+  year: string | null
   set_name: string | null
   player_name: string | null
   card_number: string | null
@@ -504,11 +504,12 @@ export async function addBreakCardsAction(formData: FormData) {
     source_break_id: string
     item_type: string
     status: string
+    processing_status: string | null
     quantity: number
     available_quantity: number
     title: string | null
     player_name: string | null
-    year: number | null
+    year: string | null
     brand: string | null
     set_name: string | null
     card_number: string | null
@@ -548,7 +549,7 @@ export async function addBreakCardsAction(formData: FormData) {
     const statusRaw = restoreRow.status
     const notes = restoreRow.notes
 
-    const year = yearRaw ? Number(yearRaw) : null
+    const year = yearRaw || null
     const normalizedStatus = normalizeInventoryStatus(statusRaw)
     const normalizedItemType = normalizeItemType(itemTypeRaw)
     const quantity = Math.max(1, Math.floor(quantityRaw || 1))
@@ -583,6 +584,7 @@ export async function addBreakCardsAction(formData: FormData) {
       source_break_id: breakId,
       item_type: normalizedItemType,
       status: normalizedStatus,
+      processing_status: 'needs_processing',
       quantity,
       available_quantity: isAvailableForSale ? quantity : 0,
       title:
@@ -596,7 +598,7 @@ export async function addBreakCardsAction(formData: FormData) {
           quantity,
         }) || null,
       player_name: playerName || null,
-      year: year !== null && !Number.isNaN(year) ? year : null,
+      year,
       brand: null,
       set_name: setName || null,
       card_number: cardNumber || null,

@@ -392,13 +392,13 @@ export default function BreakCardEntryGrid({
                     <td className="app-td">
                       <input
                         name={`year_${index}`}
-                        type="number"
+                        type="text"
                         ref={(el) => setFieldRef('year', index, el)}
                         value={row.year}
                         onChange={(e) =>
                           updateAutoCompleteField(index, 'year', e.target.value, e)
                         }
-                        placeholder="2025"
+                        placeholder="2023-24"
                         className="app-input w-24"
                       />
                     </td>
@@ -452,7 +452,7 @@ export default function BreakCardEntryGrid({
                         className="app-select w-36"
                       >
                         <option value="single_card">Single Item</option>
-                        <option value="lot">Lot</option>
+                        <option value="lot">Lot / Team Set</option>
                       </select>
                     </td>
 
@@ -489,7 +489,7 @@ export default function BreakCardEntryGrid({
                         onChange={(e) =>
                           updateAutoCompleteField(index, 'notes', e.target.value, e)
                         }
-                        placeholder="RC / Auto / /50 / Refractor / team lot / remarks"
+                        placeholder="RC / Auto / /50 / Refractor / team lot / team set / remarks"
                         className="app-input w-72"
                       />
                     </td>

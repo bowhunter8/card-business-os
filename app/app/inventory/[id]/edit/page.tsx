@@ -11,7 +11,7 @@ type InventoryItem = {
   item_type: string
   title: string | null
   player_name: string | null
-  year: number | null
+  year: string | null
   brand: string | null
   set_name: string | null
   card_number: string | null
@@ -47,15 +47,33 @@ function EditInventorySaveScript() {
 
       let submitting = false;
 
+      function getSubmitButtons() {
+        return document.querySelectorAll(
+          'button[type="submit"][form="${EDIT_INVENTORY_FORM_ID}"], #' +
+            '${EDIT_INVENTORY_FORM_ID}' +
+            ' button[type="submit"]'
+        );
+      }
+
       function showOverlay() {
         overlay.classList.remove('hidden');
         overlay.classList.add('flex');
         document.body.classList.add('overflow-hidden');
 
         window.setTimeout(() => {
-          form.querySelectorAll('button[type="submit"]').forEach((button) => {
+          getSubmitButtons().forEach((button) => {
+            button.disabled = true;
             button.setAttribute('aria-disabled', 'true');
-            button.classList.add('pointer-events-none', 'opacity-60');
+            button.classList.add('pointer-events-none', 'cursor-wait', 'opacity-60');
+            button.innerHTML = '<span class="inline-flex items-center gap-2"><span class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></span><span>Saving...</span></span>';
+          });
+
+          form.querySelectorAll('input, select, textarea, button').forEach((field) => {
+            field.setAttribute('disabled', 'true');
+          });
+
+          document.querySelectorAll('a').forEach((link) => {
+            link.classList.add('pointer-events-none', 'cursor-wait', 'opacity-60');
           });
         }, 0);
       }
@@ -233,10 +251,10 @@ export default async function EditInventoryPage({
         <div className="w-full max-w-md rounded-2xl border border-sky-900/60 bg-zinc-950 p-5 text-center shadow-2xl shadow-black/60">
           <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-sky-300 border-t-transparent" />
           <div className="mt-4 text-base font-semibold text-zinc-100">
-            Saving Inventory Item…
+            Saving Changes...
           </div>
           <div className="mt-2 text-sm leading-relaxed text-zinc-400">
-            Please wait while HITS updates this inventory record.
+            Updating inventory information. Please wait...
           </div>
           <div className="mt-3 rounded-xl border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-100">
             Do not close this page or click back while the save is finishing.
@@ -333,7 +351,7 @@ export default async function EditInventoryPage({
 
           <div>
             <label className="mb-1 block text-sm text-zinc-300">Year</label>
-            <input name="year" disabled={isFinalizedDisposal} type="number" defaultValue={item.year ?? undefined} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
+            <input name="year" disabled={isFinalizedDisposal} type="text" placeholder="2023-24" defaultValue={item.year ?? undefined} className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70" />
           </div>
 
           <div>

@@ -59,7 +59,7 @@ type InventoryRowInsert = {
   user_id: string;
   title: string;
   player_name: string | null;
-  year: number | null;
+  year: string | null;
   brand: string | null;
   set_name: string | null;
   card_number: string | null;
@@ -98,11 +98,9 @@ function toSafeBool(value: unknown): boolean {
   return value === true;
 }
 
-function toSafeYear(value: unknown): number | null {
+function toSafeYear(value: unknown): string | null {
   const text = toSafeString(value);
-  if (!text) return null;
-  const year = Number(text);
-  return Number.isInteger(year) ? year : null;
+  return text || null;
 }
 
 function toSafeUuid(value: unknown): string | null {
@@ -241,7 +239,7 @@ function buildBaseRow({
   status: string;
   notes: string | null;
   playerName?: string | null;
-  year?: number | null;
+  year?: string | null;
   brand?: string | null;
   setName?: string | null;
   cardNumber?: string | null;

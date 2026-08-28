@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { addBreakCardsAction } from '@/app/actions/breaks'
+import SubmitButton from '@/app/components/SubmitButton'
 import BreakCardEntryGrid from './BreakCardEntryGrid'
 
 type BreakRow = {
@@ -46,14 +47,22 @@ function getCurrentYear() {
 
 function extractYearFromText(text: string | null | undefined) {
   if (!text) return ''
-  const match = String(text).match(/\b(19|20)\d{2}\b/)
-  return match ? match[0] : ''
+
+  const match = String(text).match(
+    /\b(?:19|20)\d{2}(?:\s*[-/]\s*\d{2,4})?\b/
+  )
+
+  return match ? match[0].replace(/\s+/g, '') : ''
 }
 
 function extractSetFromText(text: string | null | undefined, year: string) {
   if (!text) return ''
   if (!year) return String(text).trim()
-  return String(text).replace(year, '').replace(/\s+/g, ' ').trim()
+
+  return String(text)
+    .replace(/\b(?:19|20)\d{2}(?:\s*[-/]\s*\d{2,4})?\b/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function resolveDefaultYear(
@@ -329,12 +338,12 @@ export default async function AddBreakCardsPage({
         </div>
 
         <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
-          <button
-            type="submit"
+          <SubmitButton
             className="app-button-primary"
+            pendingText="Adding Items..."
           >
             Add Items To Inventory
-          </button>
+          </SubmitButton>
         </div>
 
         <BreakCardEntryGrid
@@ -353,12 +362,12 @@ export default async function AddBreakCardsPage({
           >
             Cancel
           </Link>
-          <button
-            type="submit"
+          <SubmitButton
             className="app-button-primary"
+            pendingText="Adding Items..."
           >
             Add Items To Inventory
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </div>

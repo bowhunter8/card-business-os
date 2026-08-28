@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/server'
 import { reverseSaleAction } from '@/app/actions/sale-safety'
 import DeleteInventoryItemButton from './DeleteInventoryItemButton'
 import CancelDetailsButton from '../search/CancelDetailsButton'
+import BulkEbayDraftExportButton from './BulkEbayDraftExportButton'
+import { updateInventoryBulkStatusShared, updateInventoryProcessingStatusShared } from '@/app/actions/inventory-bulk'
 
 type InventoryRow = {
   id: string
@@ -27,6 +29,8 @@ type InventoryRow = {
   storage_location: string | null
   notes: string | null
   created_at?: string
+  ebay_exported_at?: string | null
+  processing_status?: string | null
 }
 
 
@@ -39,11 +43,13 @@ type InventoryStatusSummary = {
 type InventoryStatusFilter =
   | 'available'
   | 'partially_sold'
+  | 'ebay'
   | 'listed'
-  | 'junk'
-  | 'disposed'
   | 'sold'
   | 'personal'
+  | 'junk'
+  | 'put_away'
+  | 'disposed'
   | 'giveaway'
 
 type SaleRow = {
@@ -83,7 +89,8 @@ type SortKey =
   | 'storage_location'
 
 type SortDir = 'asc' | 'desc'
-type BulkStatus = 'available' | 'listed' | 'personal' | 'junk' | 'giveaway'
+type InventorySharedBulkStatus = 'available' | 'listed' | 'personal' | 'junk'
+type BulkStatus = InventorySharedBulkStatus | 'giveaway'
 
 const DEFAULT_LIMIT = 5
 const LIMIT_OPTIONS = [5, 10, 50, 100] as const
@@ -101,24 +108,38 @@ const BULK_SUCCESS_OVERLAY_ID = 'bulk-inventory-success-overlay'
 const STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
   partially_sold: 'Partially Sold',
+  ebay: 'eBay',
   listed: 'Listed',
-  junk: 'Junk',
-  disposed: 'Written Off',
   sold: 'Sold',
   personal: 'Personal',
+  junk: 'Junk',
+  put_away: 'Put Away',
+  disposed: 'Written Off',
   giveaway: 'Giveaway',
 }
 
 const STATUS_FILTERS: InventoryStatusFilter[] = [
   'available',
   'partially_sold',
+  'ebay',
   'listed',
-  'junk',
-  'disposed',
   'sold',
   'personal',
+  'junk',
+  'put_away',
+  'disposed',
   'giveaway',
 ]
+
+const INVENTORY_DB_STATUSES = [
+  'available',
+  'listed',
+  'sold',
+  'personal',
+  'junk',
+  'disposed',
+  'giveaway',
+] as const
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -719,12 +740,17 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
   'use server'
 
   const itemIds = readFormIds(formData, 'selected_inventory_ids')
-  const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as BulkStatus
+  const requestedStatus = String(formData.get('bulk_status') ?? '').trim()
   const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
 
-  const allowedStatuses: BulkStatus[] = ['available', 'listed', 'personal', 'junk']
+  const allowedStatuses: InventorySharedBulkStatus[] = [
+    'available',
+    'listed',
+    'personal',
+    'junk',
+  ]
 
-  if (!allowedStatuses.includes(requestedStatus)) {
+  if (!allowedStatuses.includes(requestedStatus as InventorySharedBulkStatus)) {
     redirect(
       buildInventoryStatusHref({
         q,
@@ -739,38 +765,18 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
     )
   }
 
-  if (itemIds.length === 0) {
-    redirect(
-      buildInventoryStatusHref({
-        q,
-        sort: safeSort,
-        dir: safeDir,
-        page: safePage,
-        limit: safeLimit,
-        statusKey: 'status_error',
-        statusValue: `Select at least one inventory item to mark ${bulkStatusLabel(requestedStatus)}.`,
-        scrollY,
-      })
-    )
-  }
+  const sharedStatus = requestedStatus as InventorySharedBulkStatus
 
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
-
-  const finalizedWriteOffCheck = await findFinalizedWriteOffItemIds({
-    supabase,
-    userId: user.id,
+  const result = await updateInventoryBulkStatusShared({
     itemIds,
+    requestedStatus: sharedStatus,
   })
 
-  if (finalizedWriteOffCheck.error) {
+  if (!result.ok) {
+    if (result.code === 'not_authenticated') {
+      redirect('/login')
+    }
+
     redirect(
       buildInventoryStatusHref({
         q,
@@ -779,93 +785,10 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
         page: safePage,
         limit: safeLimit,
         statusKey: 'status_error',
-        statusValue: finalizedWriteOffCheck.error,
+        statusValue: result.error,
         scrollY,
       })
     )
-  }
-
-  if (finalizedWriteOffCheck.lockedItemIds.length > 0) {
-    redirect(
-      buildInventoryStatusHref({
-        q,
-        sort: safeSort,
-        dir: safeDir,
-        page: safePage,
-        limit: safeLimit,
-        statusKey: 'status_error',
-        statusValue:
-          'One or more selected items are written off and locked for tax review. Undo the write-off before changing status.',
-        scrollY,
-      })
-    )
-  }
-
-  const { data: existingItems } = await supabase
-    .from('inventory_items')
-    .select('id, title, status, quantity, available_quantity, cost_basis_total')
-    .eq('user_id', user.id)
-    .is('deleted_at', null)
-    .in('id', itemIds)
-
-  const inventoryUpdatePayload =
-    requestedStatus === 'giveaway'
-      ? {
-          status: requestedStatus,
-          available_quantity: 0,
-          updated_at: new Date().toISOString(),
-        }
-      : {
-          status: requestedStatus,
-          updated_at: new Date().toISOString(),
-        }
-
-  const { error } = await supabase
-    .from('inventory_items')
-    .update(inventoryUpdatePayload)
-    .eq('user_id', user.id)
-    .is('deleted_at', null)
-    .in('id', itemIds)
-
-  if (error) {
-    redirect(
-      buildInventoryStatusHref({
-        q,
-        sort: safeSort,
-        dir: safeDir,
-        page: safePage,
-        limit: safeLimit,
-        statusKey: 'status_error',
-        statusValue: error.message,
-        scrollY,
-      })
-    )
-  }
-
-  const inventoryTransactionRows = (existingItems ?? [])
-    .filter((item) => item.status !== requestedStatus)
-    .map((item) => {
-      const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
-      const nextStatus = bulkStatusLabel(requestedStatus)
-      const itemTitle = item.title || 'Inventory item'
-
-      return {
-        user_id: user.id,
-        inventory_item_id: item.id,
-        transaction_type: 'status_change',
-        quantity: Number(item.available_quantity ?? item.quantity ?? 0),
-        notes:
-          requestedStatus === 'personal'
-            ? `Bulk personal withdrawal: ${itemTitle} changed from ${previousStatus} to Personal. Cost basis preserved as inventory withdrawn for personal collection; do not also deduct this item as an expense.`
-            : requestedStatus === 'junk'
-              ? `Bulk junk cleanup: ${itemTitle} changed from ${previousStatus} to Junk. Cost basis preserved for future donation, disposal, or write-off review; no automatic deduction was taken.`
-                : `Bulk status update: ${itemTitle} changed from ${previousStatus} to ${nextStatus}. Cost basis preserved.`,
-        created_at: new Date().toISOString(),
-      }
-    })
-
-  if (inventoryTransactionRows.length > 0) {
-    await supabase.from('inventory_transactions').insert(inventoryTransactionRows)
   }
 
   revalidatePath('/app/inventory')
@@ -881,7 +804,55 @@ async function bulkUpdateInventoryStatusAction(formData: FormData) {
       page: safePage,
       limit: safeLimit,
       statusKey: 'status_updated',
-      statusValue: `${itemIds.length} item(s) marked ${bulkStatusLabel(requestedStatus)}`,
+      statusValue: `${result.updatedCount} item(s) marked ${bulkStatusLabel(sharedStatus)}`,
+      scrollY,
+    })
+  )
+}
+
+async function bulkMarkInventoryPutAwayAction(formData: FormData) {
+  'use server'
+
+  const itemIds = readFormIds(formData, 'selected_inventory_ids')
+  const { q, safeSort, safeDir, safePage, safeLimit, scrollY } = readInventoryListFormState(formData)
+
+  const result = await updateInventoryProcessingStatusShared({
+    itemIds,
+    processingStatus: 'put_away',
+  })
+
+  if (!result.ok) {
+    if (result.code === 'not_authenticated') {
+      redirect('/login')
+    }
+
+    redirect(
+      buildInventoryStatusHref({
+        q,
+        sort: safeSort,
+        dir: safeDir,
+        page: safePage,
+        limit: safeLimit,
+        statusKey: 'status_error',
+        statusValue: result.error,
+        scrollY,
+      })
+    )
+  }
+
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    buildInventoryStatusHref({
+      q,
+      sort: safeSort,
+      dir: safeDir,
+      page: safePage,
+      limit: safeLimit,
+      statusKey: 'status_updated',
+      statusValue: `${result.updatedCount} item(s) marked Put Away`,
       scrollY,
     })
   )
@@ -1584,10 +1555,14 @@ function StatusSummaryCard({
       ? 'hover:border-emerald-800/70 hover:bg-emerald-950/20'
       : status === 'partially_sold'
         ? 'hover:border-yellow-800/70 hover:bg-yellow-950/20'
-        : status === 'listed'
-        ? 'hover:border-sky-800/70 hover:bg-sky-950/20'
+        : status === 'ebay'
+          ? 'hover:border-blue-800/70 hover:bg-blue-950/20'
+          : status === 'listed'
+            ? 'hover:border-sky-800/70 hover:bg-sky-950/20'
         : status === 'junk'
           ? 'hover:border-zinc-600 hover:bg-zinc-800/70'
+          : status === 'put_away'
+            ? 'hover:border-teal-800/70 hover:bg-teal-950/20'
           : status === 'disposed'
             ? 'hover:border-red-800/70 hover:bg-red-950/20'
           : status === 'sold'
@@ -1601,10 +1576,14 @@ function StatusSummaryCard({
       ? 'border-emerald-800 bg-emerald-950/20'
       : status === 'partially_sold'
         ? 'border-yellow-800 bg-yellow-950/20'
-        : status === 'listed'
-        ? 'border-sky-800 bg-sky-950/20'
+        : status === 'ebay'
+          ? 'border-blue-800 bg-blue-950/20'
+          : status === 'listed'
+            ? 'border-sky-800 bg-sky-950/20'
         : status === 'junk'
           ? 'border-zinc-600 bg-zinc-800/60'
+          : status === 'put_away'
+            ? 'border-teal-800 bg-teal-950/20'
           : status === 'disposed'
             ? 'border-red-800 bg-red-950/20'
           : status === 'sold'
@@ -1669,6 +1648,41 @@ function BulkStatusConfirmControl({
             className="app-button-primary whitespace-nowrap"
           >
             Yes, {label}
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function BulkPutAwayConfirmControl({ formId }: { formId: string }) {
+  return (
+    <details className="group">
+      <summary
+        data-bulk-action-toggle="true"
+        className="app-button cursor-pointer list-none whitespace-nowrap"
+      >
+        Put Away
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-zinc-200">Mark selected items Put Away?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This updates only the post-entry processing state. It does not change sale status, quantity, cost basis, or tax treatment.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={formId}
+            formAction={bulkMarkInventoryPutAwayAction}
+            data-bulk-submit="true"
+            data-bulk-label="Put Away"
+            className="app-button-primary whitespace-nowrap"
+          >
+            Yes, Put Away
           </button>
 
           <CancelDetailsButton />
@@ -1894,6 +1908,7 @@ function BulkActionsPanel({
   finalizeFormId,
   pageItemCount,
   q,
+  qNormalized,
   sortKey,
   sortDir,
   limit,
@@ -1903,6 +1918,7 @@ function BulkActionsPanel({
   finalizeFormId: string
   pageItemCount: number
   q: string
+  qNormalized: string
   sortKey: SortKey
   sortDir: SortDir
   limit: number
@@ -1938,6 +1954,12 @@ function BulkActionsPanel({
               Partially Sold
             </Link>
             <Link
+              href={getFilterHref('ebay', sortKey, sortDir, limit)}
+              className={`app-chip ${qNormalized === 'ebay' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              eBay
+            </Link>
+            <Link
               href={getFilterHref('listed', sortKey, sortDir, limit)}
               className={`app-chip ${q === 'listed' ? 'app-chip-active' : 'app-chip-idle'}`}
             >
@@ -1960,6 +1982,12 @@ function BulkActionsPanel({
               className={`app-chip ${q === 'junk' ? 'app-chip-active' : 'app-chip-idle'}`}
             >
               Junk
+            </Link>
+            <Link
+              href={getFilterHref('put_away', sortKey, sortDir, limit)}
+              className={`app-chip ${qNormalized === 'put_away' ? 'app-chip-active' : 'app-chip-idle'}`}
+            >
+              Put Away
             </Link>
             <Link
               href={getFilterHref('disposed', sortKey, sortDir, limit)}
@@ -2025,6 +2053,7 @@ function BulkActionsPanel({
               label="Mark Listed"
               helpText="This will mark the selected inventory items as Listed."
             />
+            <BulkEbayDraftExportButton />
             <BulkStatusConfirmControl
               formId={statusFormId}
               status="personal"
@@ -2037,6 +2066,7 @@ function BulkActionsPanel({
               label="Mark Junk"
               helpText="This will mark the selected inventory items as Junk and add a status-change transaction note. This preserves cost basis for future donation, disposal, or write-off review without taking an automatic deduction."
             />
+            <BulkPutAwayConfirmControl formId={statusFormId} />
             <BulkGiveawayConfirmControl formId={statusFormId} />
             <BulkFinalizeDisposalConfirmControl formId={finalizeFormId} />
             <BulkDeleteConfirmControl formId={formId} />
@@ -2749,7 +2779,9 @@ export default async function InventoryPage({
       estimated_value_total,
       storage_location,
       notes,
-      created_at
+      created_at,
+      ebay_exported_at,
+      processing_status
     `)
     .eq('user_id', user.id)
     .is('deleted_at', null)
@@ -2762,16 +2794,20 @@ export default async function InventoryPage({
     query = query.eq('status', 'available')
   } else if (qNormalized === 'partially_sold') {
     query = query.eq('status', 'available').gt('available_quantity', 0)
+  } else if (qNormalized === 'ebay') {
+    query = query.or('processing_status.eq.ebay_exported,ebay_exported_at.not.is.null').neq('status', 'listed')
   } else if (qNormalized === 'listed') {
     query = query.eq('status', 'listed')
-  } else if (qNormalized === 'junk') {
-    query = query.eq('status', 'junk')
-  } else if (qNormalized === 'disposed') {
-    query = query.eq('status', 'disposed')
   } else if (qNormalized === 'sold') {
     query = query.eq('status', 'sold')
   } else if (qNormalized === 'personal') {
     query = query.eq('status', 'personal')
+  } else if (qNormalized === 'junk') {
+    query = query.eq('status', 'junk')
+  } else if (qNormalized === 'put_away') {
+    query = query.eq('processing_status', 'put_away')
+  } else if (qNormalized === 'disposed') {
+    query = query.eq('status', 'disposed')
   } else if (qNormalized === 'giveaway') {
     query = query.eq('status', 'giveaway')
   } else if (q) {
@@ -2804,9 +2840,37 @@ export default async function InventoryPage({
     .select('status, quantity, available_quantity, cost_basis_unit, cost_basis_total, estimated_value_total')
     .eq('user_id', user.id)
     .is('deleted_at', null)
-    .in('status', STATUS_FILTERS)
+    .in('status', INVENTORY_DB_STATUSES)
 
-  const [response, summaryResponse] = await Promise.all([inventoryRowsPromise, summaryRowsPromise])
+  const processingSummaryFields =
+    'status, processing_status, ebay_exported_at, quantity, available_quantity, cost_basis_unit, cost_basis_total, estimated_value_total'
+
+  const ebaySummaryPromise = supabase
+    .from('inventory_items')
+    .select(processingSummaryFields)
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .or('processing_status.eq.ebay_exported,ebay_exported_at.not.is.null')
+    .neq('status', 'listed')
+
+  const putAwaySummaryPromise = supabase
+    .from('inventory_items')
+    .select(processingSummaryFields)
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .eq('processing_status', 'put_away')
+
+  const [
+    response,
+    summaryResponse,
+    ebaySummaryResponse,
+    putAwaySummaryResponse,
+  ] = await Promise.all([
+    inventoryRowsPromise,
+    summaryRowsPromise,
+    ebaySummaryPromise,
+    putAwaySummaryPromise,
+  ])
 
   const rawItems = (response.data ?? []) as InventoryRow[]
   const filteredItems =
@@ -2814,7 +2878,11 @@ export default async function InventoryPage({
       ? rawItems.filter((item) => isPartiallySoldItem(item))
       : rawItems
   const items = sortKey === 'card' ? sortRows(filteredItems, sortKey, sortDir) : filteredItems
-  const error = response.error || summaryResponse.error
+  const error =
+    response.error ||
+    summaryResponse.error ||
+    ebaySummaryResponse.error ||
+    putAwaySummaryResponse.error
 
   const soldOutItemIds = items
     .filter((item) => Number(item.available_quantity ?? 0) <= 0)
@@ -2908,17 +2976,21 @@ export default async function InventoryPage({
       ? 'Showing available inventory items.'
       : qNormalized === 'partially_sold'
         ? 'Showing partially sold multi-quantity inventory items that still have quantity remaining.'
-        : qNormalized === 'listed'
-          ? 'Showing listed inventory items.'
-        : qNormalized === 'junk'
-          ? 'Showing junk items you are not planning to sell.'
-        : qNormalized === 'disposed'
-          ? 'Showing written-off inventory items locked for tax review.'
-          : qNormalized === 'sold'
-            ? 'Showing sold inventory items.'
-            : qNormalized === 'personal'
-              ? 'Showing personal collection items.'
-              : 'View and manage your inventory items.'
+          : qNormalized === 'ebay'
+            ? 'Showing items exported to eBay that have not yet been marked Listed.'
+            : qNormalized === 'listed'
+              ? 'Showing listed inventory items.'
+              : qNormalized === 'sold'
+                ? 'Showing sold inventory items.'
+                : qNormalized === 'personal'
+                  ? 'Showing personal collection items.'
+                  : qNormalized === 'junk'
+                    ? 'Showing junk items you are not planning to sell.'
+                    : qNormalized === 'put_away'
+                      ? 'Showing items marked Put Away in the post-entry workflow.'
+                      : qNormalized === 'disposed'
+                        ? 'Showing written-off inventory items locked for tax review.'
+                        : 'View and manage your inventory items.'
 
   const statusSummaries = STATUS_FILTERS.reduce(
     (acc, status) => {
@@ -2928,29 +3000,73 @@ export default async function InventoryPage({
     {} as Record<InventoryStatusFilter, InventoryStatusSummary>
   )
 
-  for (const item of (summaryResponse.data ?? []) as Pick<InventoryRow, 'status' | 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'>[]) {
-    const status = String(item.status ?? '') as InventoryStatusFilter
-    if (!STATUS_FILTERS.includes(status)) continue
+  for (const item of (summaryResponse.data ?? []) as Pick<
+    InventoryRow,
+    'status' | 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'
+  >[]) {
+    const status = String(item.status ?? '')
 
     if (isPartiallySoldItem(item)) {
-      statusSummaries.partially_sold.quantity += Number(item.quantity ?? 0) - Number(item.available_quantity ?? 0)
+      statusSummaries.partially_sold.quantity +=
+        Number(item.quantity ?? 0) - Number(item.available_quantity ?? 0)
       statusSummaries.partially_sold.cost += remainingCostBasis(item)
       statusSummaries.partially_sold.value += Number(item.estimated_value_total ?? 0)
     }
 
+    if (!INVENTORY_DB_STATUSES.includes(status as (typeof INVENTORY_DB_STATUSES)[number])) {
+      continue
+    }
+
+    const inventoryStatus = status as
+      | 'available'
+      | 'listed'
+      | 'sold'
+      | 'personal'
+      | 'junk'
+      | 'disposed'
+      | 'giveaway'
+
     const quantity =
-      status === 'sold' ||
-      status === 'giveaway' ||
-      status === 'disposed' ||
-      status === 'personal' ||
-      status === 'junk'
+      inventoryStatus === 'sold' ||
+      inventoryStatus === 'giveaway' ||
+      inventoryStatus === 'disposed' ||
+      inventoryStatus === 'personal' ||
+      inventoryStatus === 'junk'
         ? Number(item.quantity ?? 0)
         : Number(item.available_quantity ?? item.quantity ?? 0)
 
-    statusSummaries[status].quantity += quantity
-    statusSummaries[status].cost += remainingCostBasis(item)
-    statusSummaries[status].value += Number(item.estimated_value_total ?? 0)
+    statusSummaries[inventoryStatus].quantity += quantity
+    statusSummaries[inventoryStatus].cost += remainingCostBasis(item)
+    statusSummaries[inventoryStatus].value += Number(item.estimated_value_total ?? 0)
   }
+
+  function applyProcessingSummary(
+    rows: Array<Pick<
+      InventoryRow,
+      'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'
+    >>,
+    key: 'ebay' | 'put_away'
+  ) {
+    for (const item of rows) {
+      statusSummaries[key].quantity += Number(item.available_quantity ?? item.quantity ?? 0)
+      statusSummaries[key].cost += remainingCostBasis(item)
+      statusSummaries[key].value += Number(item.estimated_value_total ?? 0)
+    }
+  }
+
+  applyProcessingSummary(
+    (ebaySummaryResponse.data ?? []) as Array<
+      Pick<InventoryRow, 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'>
+    >,
+    'ebay'
+  )
+
+  applyProcessingSummary(
+    (putAwaySummaryResponse.data ?? []) as Array<
+      Pick<InventoryRow, 'quantity' | 'available_quantity' | 'cost_basis_unit' | 'cost_basis_total' | 'estimated_value_total'>
+    >,
+    'put_away'
+  )
 
   const hasPreviousPage = page > 1
   const hasNextPage = items.length === limit
@@ -3060,7 +3176,7 @@ export default async function InventoryPage({
         ) : null}
       </div>
 
-      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-8">
+      <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-5 xl:grid-cols-10">
         {STATUS_FILTERS.map((status) => (
           <StatusSummaryCard
             key={status}
@@ -3099,6 +3215,7 @@ export default async function InventoryPage({
             finalizeFormId={BULK_FINALIZE_FORM_ID}
             pageItemCount={items.length}
             q={q}
+            qNormalized={qNormalized}
             sortKey={sortKey}
             sortDir={sortDir}
             limit={limit}
@@ -3287,7 +3404,23 @@ export default async function InventoryPage({
                         </div>
                       </td>
 
-                      <td data-inventory-status-cell="true" className="app-td whitespace-nowrap">{renderInventoryStatusPill(item, giveawayAudit)}</td>
+                      <td data-inventory-status-cell="true" className="app-td whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          {renderInventoryStatusPill(item, giveawayAudit)}
+                          {item.ebay_exported_at ? (
+                            <span
+                              className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold leading-none shadow-sm"
+                              title="Exported for eBay"
+                              aria-label="Exported for eBay"
+                            >
+                              <span className="text-red-600">e</span>
+                              <span className="text-blue-600">B</span>
+                              <span className="text-yellow-500">a</span>
+                              <span className="text-green-600">y</span>
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="app-td whitespace-nowrap">{item.quantity ?? 0}</td>
 
                       <td className="app-td whitespace-nowrap">

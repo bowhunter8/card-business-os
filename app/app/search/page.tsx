@@ -4,6 +4,9 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import SelectAllCheckbox from './SelectAllCheckbox'
 import CancelDetailsButton from './CancelDetailsButton'
+import BulkEbayDraftExportButton from '../inventory/BulkEbayDraftExportButton'
+import StickyBulkActions from './StickyBulkActions'
+import { updateInventoryBulkStatusShared, updateInventoryProcessingStatusShared } from '@/app/actions/inventory-bulk'
 
 type WhatnotOrderRow = {
   id: string
@@ -55,6 +58,8 @@ type InventoryItemRow = {
   item_type: string | null
   notes: string | null
   source_type: string | null
+  ebay_exported_at?: string | null
+  processing_status?: string | null
 }
 
 type SaleInventoryItemRow = {
@@ -96,38 +101,65 @@ const SECTION_LIMIT = 50
 type InventoryStatusFilter =
   | 'available'
   | 'partially_sold'
+  | 'ebay'
   | 'listed'
-  | 'junk'
-  | 'disposed'
   | 'sold'
   | 'personal'
+  | 'junk'
+  | 'put_away'
+  | 'disposed'
   | 'giveaway'
 
 const INVENTORY_STATUS_LABELS: Record<InventoryStatusFilter, string> = {
   available: 'Available',
   partially_sold: 'Partially Sold',
+  ebay: 'eBay',
   listed: 'Listed',
-  junk: 'Junk',
-  disposed: 'Written Off',
   sold: 'Sold',
   personal: 'Personal',
+  junk: 'Junk',
+  put_away: 'Put Away',
+  disposed: 'Written Off',
   giveaway: 'Giveaway',
 }
 
 const INVENTORY_STATUS_FILTERS: InventoryStatusFilter[] = [
   'available',
   'partially_sold',
+  'ebay',
   'listed',
-  'junk',
-  'disposed',
   'sold',
   'personal',
+  'junk',
+  'put_away',
+  'disposed',
   'giveaway',
 ]
 
 const BULK_ORDERS_FORM_ID = 'bulk-delete-orders-form'
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-form'
 const BULK_INVENTORY_FORM_ID = 'bulk-delete-inventory-form'
+
+type SearchBulkInventoryStatus = 'available' | 'listed' | 'personal' | 'junk'
+
+function searchBulkStatusLabel(status: SearchBulkInventoryStatus) {
+  if (status === 'available') return 'For Sale'
+  if (status === 'listed') return 'Listed'
+  if (status === 'personal') return 'Personal'
+  if (status === 'junk') return 'Junk'
+  return status
+}
+
+function labelFromSearchBulkValue(value: string) {
+  return String(value || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function buildSearchGiveawayExpenseCategory(giveawayTypeLabel: string) {
+  return `Advertising / Marketing - Giveaway - ${giveawayTypeLabel || 'Giveaway'}`
+}
+
 
 function money(value: number | string | null | undefined) {
   return new Intl.NumberFormat('en-US', {
@@ -455,6 +487,326 @@ async function bulkDeleteInventoryItemsAction(formData: FormData) {
   redirect(buildSearchRedirect(q, 'deleted_count', `${itemIds.length} inventory item(s)`))
 }
 
+
+
+async function bulkMarkSearchInventoryForSaleAction(formData: FormData) {
+  'use server'
+  formData.set('bulk_status', 'available')
+  await bulkUpdateSearchInventoryStatusAction(formData)
+}
+
+async function bulkMarkSearchInventoryListedAction(formData: FormData) {
+  'use server'
+  formData.set('bulk_status', 'listed')
+  await bulkUpdateSearchInventoryStatusAction(formData)
+}
+
+async function bulkMoveSearchInventoryPersonalAction(formData: FormData) {
+  'use server'
+  formData.set('bulk_status', 'personal')
+  await bulkUpdateSearchInventoryStatusAction(formData)
+}
+
+async function bulkMarkSearchInventoryJunkAction(formData: FormData) {
+  'use server'
+  formData.set('bulk_status', 'junk')
+  await bulkUpdateSearchInventoryStatusAction(formData)
+}
+
+async function bulkUpdateSearchInventoryStatusAction(formData: FormData) {
+  'use server'
+
+  const itemIds = Array.from(new Set(readFormIds(formData, 'selected_inventory_ids')))
+  const q = String(formData.get('q') ?? '').trim()
+  const requestedStatus = String(formData.get('bulk_status') ?? '').trim() as SearchBulkInventoryStatus
+  const allowedStatuses: SearchBulkInventoryStatus[] = ['available', 'listed', 'personal', 'junk']
+
+  if (!allowedStatuses.includes(requestedStatus)) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Choose a valid bulk inventory status.'))
+  }
+
+  const result = await updateInventoryBulkStatusShared({
+    itemIds,
+    requestedStatus,
+  })
+
+  if (!result.ok) {
+    if (result.code === 'not_authenticated') {
+      redirect('/login')
+    }
+
+    redirect(buildSearchRedirect(q, 'status_error', result.error))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/breaks')
+  revalidatePath('/app/reports/tax')
+
+  redirect(
+    buildSearchRedirect(
+      q,
+      'status_updated',
+      `${result.updatedCount} item(s) marked ${searchBulkStatusLabel(requestedStatus)}`
+    )
+  )
+}
+
+async function bulkMarkSearchInventoryPutAwayAction(formData: FormData) {
+  'use server'
+
+  const itemIds = Array.from(new Set(readFormIds(formData, 'selected_inventory_ids')))
+  const q = String(formData.get('q') ?? '').trim()
+
+  const result = await updateInventoryProcessingStatusShared({
+    itemIds,
+    processingStatus: 'put_away',
+  })
+
+  if (!result.ok) {
+    if (result.code === 'not_authenticated') {
+      redirect('/login')
+    }
+
+    redirect(buildSearchRedirect(q, 'status_error', result.error))
+  }
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/breaks')
+
+  redirect(
+    buildSearchRedirect(
+      q,
+      'status_updated',
+      `${result.updatedCount} item(s) marked Put Away`
+    )
+  )
+}
+
+async function bulkFinalizeSearchGiveawayAction(formData: FormData) {
+  'use server'
+
+  const itemIds = Array.from(new Set(readFormIds(formData, 'selected_inventory_ids')))
+  const q = String(formData.get('q') ?? '').trim()
+  const giveawayType = String(formData.get('giveaway_type') ?? '').trim()
+  const businessPurpose = String(formData.get('business_purpose') ?? '').trim()
+  const recipientType = String(formData.get('recipient_type') ?? '').trim()
+  const campaignEvent = String(formData.get('campaign_event') ?? '').trim()
+  const relatedOrderSale = String(formData.get('related_order_sale') ?? '').trim()
+  const giveawayNotes = String(formData.get('giveaway_notes') ?? '').trim()
+  const eventDate = String(formData.get('event_date') ?? '').trim() || new Date().toISOString().slice(0, 10)
+
+  if (itemIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Select at least one inventory item to mark as a giveaway.'))
+  }
+
+  if (!giveawayType || !businessPurpose) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Giveaway Type and Business Purpose are required for bulk giveaways.'))
+  }
+
+  if ((giveawayType === 'other' || businessPurpose === 'other') && !giveawayNotes) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Notes are required when Giveaway Type or Business Purpose is Other.'))
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: activeSales, error: salesError } = await supabase
+    .from('sales')
+    .select('id, inventory_item_id')
+    .eq('user_id', user.id)
+    .is('reversed_at', null)
+    .in('inventory_item_id', itemIds)
+
+  if (salesError) redirect(buildSearchRedirect(q, 'status_error', salesError.message))
+  if ((activeSales ?? []).length > 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'One or more selected items have active sales. Reverse the sale first so COGS and inventory stay audit-safe.'))
+  }
+
+  const { data: existingItems, error: loadError } = await supabase
+    .from('inventory_items')
+    .select('id, title, status, quantity, available_quantity, cost_basis_unit, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
+  if (loadError) redirect(buildSearchRedirect(q, 'status_error', loadError.message))
+
+  const items = existingItems ?? []
+  if (items.length === 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'No matching active inventory items were found. Refresh the search and select the rows again.'))
+  }
+
+  const giveawayAt = new Date().toISOString()
+  const { error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      status: 'giveaway',
+      available_quantity: 0,
+      updated_at: giveawayAt,
+    })
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', items.map((item) => item.id))
+
+  if (updateError) redirect(buildSearchRedirect(q, 'status_error', updateError.message))
+
+  const giveawayTypeLabel = labelFromSearchBulkValue(giveawayType)
+  const businessPurposeLabel = labelFromSearchBulkValue(businessPurpose)
+  const recipientTypeLabel = recipientType ? labelFromSearchBulkValue(recipientType) : ''
+  const expenseCategory = buildSearchGiveawayExpenseCategory(giveawayTypeLabel)
+
+  const rows = items.map((item) => {
+    const itemTitle = item.title || 'Inventory item'
+    const quantityRemoved = Number(item.available_quantity ?? item.quantity ?? 0)
+    const unitCost = Number(item.cost_basis_unit ?? 0)
+    const totalCost = Number(item.cost_basis_total ?? 0)
+    const amount = quantityRemoved > 0 && unitCost > 0 ? quantityRemoved * unitCost : totalCost
+    const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
+    const detailParts = [
+      `Giveaway Type: ${giveawayTypeLabel}`,
+      `Business Purpose: ${businessPurposeLabel}`,
+      recipientTypeLabel ? `Recipient Type: ${recipientTypeLabel}` : '',
+      campaignEvent ? `Campaign / Event: ${campaignEvent}` : '',
+      relatedOrderSale ? `Related Order / Sale #: ${relatedOrderSale}` : '',
+      giveawayNotes ? `Notes: ${giveawayNotes}` : '',
+      'Do not also deduct this item as COGS, disposal, donation, or another separate expense.',
+    ].filter(Boolean)
+    const sharedAuditNote = `Bulk giveaway recorded from Search for advertising / marketing support. Item: ${itemTitle}. Quantity given away: ${quantityRemoved}. Cost basis recorded: ${money(amount)}. Previous status: ${previousStatus}. ${detailParts.join(' ')}`
+
+    return { item, amount, quantityRemoved, sharedAuditNote }
+  })
+
+  const { error: expenseError } = await supabase.from('expenses').insert(
+    rows.map((row) => ({
+      user_id: user.id,
+      expense_date: eventDate,
+      category: expenseCategory,
+      amount: row.amount,
+      notes: row.sharedAuditNote,
+    }))
+  )
+  if (expenseError) redirect(buildSearchRedirect(q, 'status_error', expenseError.message))
+
+  const { error: transactionError } = await supabase.from('inventory_transactions').insert(
+    rows.map((row) => ({
+      user_id: user.id,
+      inventory_item_id: row.item.id,
+      transaction_type: 'adjustment',
+      from_status: row.item.status || null,
+      to_status: 'giveaway',
+      quantity_change: -Math.abs(row.quantityRemoved),
+      amount: row.amount,
+      event_date: eventDate,
+      notes: row.sharedAuditNote,
+      created_at: giveawayAt,
+    }))
+  )
+  if (transactionError) redirect(buildSearchRedirect(q, 'status_error', transactionError.message))
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/expenses')
+  revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/profit-loss')
+
+  redirect(buildSearchRedirect(q, 'status_updated', `${items.length} item(s) marked Giveaway with tax details`))
+}
+
+async function bulkFinalizeSearchWriteOffAction(formData: FormData) {
+  'use server'
+
+  const itemIds = Array.from(new Set(readFormIds(formData, 'selected_inventory_ids')))
+  const q = String(formData.get('q') ?? '').trim()
+  const disposalReason = String(formData.get('disposal_reason') ?? '').trim()
+  const disposalNotes = String(formData.get('disposal_notes') ?? '').trim()
+
+  if (itemIds.length === 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Select at least one inventory item to write off.'))
+  }
+
+  if (!disposalReason) {
+    redirect(buildSearchRedirect(q, 'status_error', 'Choose a write-off reason before writing off selected items.'))
+  }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: activeSales, error: salesError } = await supabase
+    .from('sales')
+    .select('id, inventory_item_id')
+    .eq('user_id', user.id)
+    .is('reversed_at', null)
+    .in('inventory_item_id', itemIds)
+
+  if (salesError) redirect(buildSearchRedirect(q, 'status_error', salesError.message))
+  if ((activeSales ?? []).length > 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'One or more selected items have active sales. Reverse the sale first so COGS and inventory stay audit-safe.'))
+  }
+
+  const { data: existingItems, error: loadError } = await supabase
+    .from('inventory_items')
+    .select('id, title, status, quantity, available_quantity, cost_basis_total')
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', itemIds)
+
+  if (loadError) redirect(buildSearchRedirect(q, 'status_error', loadError.message))
+  const items = existingItems ?? []
+  if (items.length === 0) {
+    redirect(buildSearchRedirect(q, 'status_error', 'No matching active inventory items were found to write off.'))
+  }
+
+  const finalizedAt = new Date().toISOString()
+
+  const { error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      status: 'disposed',
+      available_quantity: 0,
+      updated_at: finalizedAt,
+    })
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .in('id', items.map((item) => item.id))
+
+  if (updateError) redirect(buildSearchRedirect(q, 'status_error', updateError.message))
+
+  const { error: transactionError } = await supabase.from('inventory_transactions').insert(
+    items.map((item) => {
+      const itemTitle = item.title || 'Inventory item'
+      const quantityRemoved = Number(item.available_quantity ?? item.quantity ?? 0)
+      const costBasis = Number(item.cost_basis_total ?? 0)
+      const previousStatus = String(item.status || 'unassigned').replaceAll('_', ' ')
+      const trimmedNotes = disposalNotes || 'No extra notes entered.'
+
+      return {
+        user_id: user.id,
+        inventory_item_id: item.id,
+        transaction_type: 'disposal_writeoff_review',
+        quantity_change: -Math.abs(quantityRemoved),
+        disposal_reason: disposalReason,
+        disposal_notes: disposalNotes || null,
+        finalized_for_tax: true,
+        notes: `Write-off finalized from Search: ${itemTitle} was removed from active business inventory and locked for year-end/accountant review. Previous status: ${previousStatus}. Disposal reason: ${disposalReason}. User notes: ${trimmedNotes}. Quantity removed: ${quantityRemoved}. Recorded cost basis at write-off: ${money(costBasis)}. Do not also deduct this item as an expense, giveaway, donation, or separate loss without accountant review.`,
+        created_at: finalizedAt,
+      }
+    })
+  )
+
+  if (transactionError) redirect(buildSearchRedirect(q, 'status_error', transactionError.message))
+
+  revalidatePath('/app/search')
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/reports/tax')
+  revalidatePath('/app/reports/tax/summary')
+
+  redirect(buildSearchRedirect(q, 'status_updated', `${items.length} item(s) written off and removed from inventory`))
+}
+
 async function bulkDeleteBreaksAction(formData: FormData) {
   'use server'
 
@@ -739,6 +1091,14 @@ function matchesInventoryStatusFilter(item: InventoryItemRow, status: InventoryS
   if (!status) return true
   if (status === 'partially_sold') return isSearchPartiallySoldItem(item)
 
+  if (status === 'ebay') {
+    return Boolean(item.ebay_exported_at) && String(item.status ?? '').toLowerCase() !== 'listed'
+  }
+
+  if (status === 'put_away') {
+    return String(item.processing_status ?? '').toLowerCase() === 'put_away'
+  }
+
   return String(item.status ?? '').toLowerCase() === status
 }
 
@@ -946,8 +1306,14 @@ function ResultSection({
   count: number
   children: React.ReactNode
 }) {
+  const isInventorySection = id === 'matching-inventory-items'
+
   return (
-    <div id={id} className="app-section scroll-mt-28">
+    <div
+      id={id}
+      className={`app-section scroll-mt-28 ${isInventorySection ? 'overflow-visible' : ''}`}
+      style={isInventorySection ? { overflow: 'visible' } : undefined}
+    >
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -1065,7 +1431,7 @@ function BulkOrderActionsControl({
   return (
     <div className="mb-3 rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
+        <div className="sticky-bulk-info">
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
             Select unassigned orders, then combine them into one break or delete them.
@@ -1175,6 +1541,218 @@ function BulkDeleteConfirmControl({
   )
 }
 
+
+
+function SearchInventoryDeleteConfirmControl() {
+  return (
+    <details className="group">
+      <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">
+        Delete Selected
+      </summary>
+
+      <div className="mt-2 rounded-xl border border-red-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-72">
+        <div className="text-sm font-semibold text-red-200">Confirm bulk delete?</div>
+        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+          This will delete the selected inventory items. Use delete only for correction cleanup, not for sales, personal withdrawals, giveaways, junk, donations, or write-offs.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkDeleteInventoryItemsAction}
+            className="app-button whitespace-nowrap border-red-900/60 bg-red-950/40 text-red-200 hover:bg-red-900/50"
+          >
+            Yes, Delete Selected
+          </button>
+
+          <CancelDetailsButton />
+        </div>
+      </div>
+    </details>
+  )
+}
+
+function SearchInventoryBulkActions() {
+  return (
+    <>
+      <StickyBulkActions targetId="search-inventory-bulk-actions" />
+      <div
+        id="search-inventory-bulk-actions"
+        className="sticky-bulk-panel rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 shadow-2xl shadow-black/40 backdrop-blur [&.search-bulk-actions-floating_.sticky-bulk-info]:hidden [&.search-bulk-actions-floating]:rounded-xl [&.search-bulk-actions-floating]:p-2 [&.search-bulk-actions-floating]:shadow-lg"
+      >
+      <div className="flex flex-col gap-2">
+        <div className="sticky-bulk-info">
+          <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            Select inventory search results, then use the same quick actions available on the main Inventory page.
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-start gap-2">
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkMarkSearchInventoryForSaleAction}
+            className="app-button whitespace-nowrap"
+          >
+            Mark For Sale
+          </button>
+
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkMarkSearchInventoryListedAction}
+            className="app-button whitespace-nowrap"
+          >
+            Mark Listed
+          </button>
+
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkMoveSearchInventoryPersonalAction}
+            className="app-button whitespace-nowrap"
+          >
+            Move to Personal
+          </button>
+
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkMarkSearchInventoryJunkAction}
+            className="app-button whitespace-nowrap"
+          >
+            Mark Junk
+          </button>
+
+          <button
+            type="submit"
+            form={BULK_INVENTORY_FORM_ID}
+            formAction={bulkMarkSearchInventoryPutAwayAction}
+            className="app-button whitespace-nowrap"
+          >
+            Put Away
+          </button>
+
+          <BulkEbayDraftExportButton />
+
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap border-purple-900/60 bg-purple-950/30 text-purple-100 hover:bg-purple-900/50">
+              Mark as Giveaway
+            </summary>
+            <div className="mt-2 rounded-xl border border-purple-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-[34rem]">
+              <div className="text-sm font-semibold text-purple-100">Mark selected items as giveaways?</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Giveaway Type required</span>
+                  <select form={BULK_INVENTORY_FORM_ID} name="giveaway_type" defaultValue="buyer_appreciation" className="app-select w-full">
+                    <option value="buyer_appreciation">Buyer Appreciation</option>
+                    <option value="livestream_giveaway">Livestream Giveaway</option>
+                    <option value="social_media_promotion">Social Media Promotion</option>
+                    <option value="customer_retention">Customer Retention</option>
+                    <option value="contest_prize">Contest Prize</option>
+                    <option value="show_or_event">Show / Event Giveaway</option>
+                    <option value="community_outreach">Community Outreach</option>
+                    <option value="promotional_item">Promotional Item</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Business Purpose required</span>
+                  <select form={BULK_INVENTORY_FORM_ID} name="business_purpose" defaultValue="customer_retention" className="app-select w-full">
+                    <option value="customer_retention">Customer Retention</option>
+                    <option value="buyer_appreciation">Buyer Appreciation</option>
+                    <option value="new_customer_acquisition">New Customer Acquisition</option>
+                    <option value="stream_promotion">Stream Promotion</option>
+                    <option value="whatnot_promotion">Whatnot Promotion</option>
+                    <option value="card_show_promotion">Card Show Promotion</option>
+                    <option value="social_media_promotion">Social Media Promotion</option>
+                    <option value="brand_awareness">Brand Awareness</option>
+                    <option value="community_outreach">Community Outreach</option>
+                    <option value="contest_prize_support">Contest Prize Support</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Recipient Type</span>
+                  <select form={BULK_INVENTORY_FORM_ID} name="recipient_type" defaultValue="viewer_or_customer" className="app-select w-full">
+                    <option value="viewer_or_customer">Viewer / Customer</option>
+                    <option value="buyer">Buyer</option>
+                    <option value="repeat_customer">Repeat Customer</option>
+                    <option value="prospective_customer">Prospective Customer</option>
+                    <option value="event_attendee">Event Attendee</option>
+                    <option value="community_group">Community Group</option>
+                    <option value="not_recorded">Not Recorded</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Giveaway Date</span>
+                  <input form={BULK_INVENTORY_FORM_ID} name="event_date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} className="app-input w-full" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Campaign / Event</span>
+                  <input form={BULK_INVENTORY_FORM_ID} name="campaign_event" className="app-input w-full" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Related Order / Sale #</span>
+                  <input form={BULK_INVENTORY_FORM_ID} name="related_order_sale" className="app-input w-full" />
+                </label>
+                <label className="block md:col-span-2">
+                  <span className="mb-1 block text-xs font-medium text-zinc-300">Notes</span>
+                  <textarea form={BULK_INVENTORY_FORM_ID} name="giveaway_notes" className="app-input min-h-20 w-full" />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="submit" form={BULK_INVENTORY_FORM_ID} formAction={bulkFinalizeSearchGiveawayAction} className="app-button-primary whitespace-nowrap">
+                  Yes, Mark as Giveaway
+                </button>
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+
+          <details className="group">
+            <summary className="app-button cursor-pointer list-none whitespace-nowrap border-amber-800/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50">
+              Write Off Selected
+            </summary>
+            <div className="mt-2 rounded-xl border border-amber-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-80">
+              <div className="text-sm font-semibold text-amber-200">Write off selected items?</div>
+              <label className="mt-3 block">
+                <span className="mb-1 block text-xs font-medium text-zinc-300">Write-off reason required</span>
+                <select form={BULK_INVENTORY_FORM_ID} name="disposal_reason" defaultValue="" className="app-select w-full">
+                  <option value="" disabled>Choose reason...</option>
+                  <option value="trash">Trash / discarded worthless inventory</option>
+                  <option value="recycled">Recycled bulk paper/base cards</option>
+                  <option value="damaged">Damaged inventory discarded</option>
+                  <option value="donation">Donation review</option>
+                  <option value="inventory_cleanup">Inventory cleanup / no resale value</option>
+                  <option value="lost">Lost / missing inventory review</option>
+                  <option value="other">Other documented disposal</option>
+                </select>
+              </label>
+              <label className="mt-3 block">
+                <span className="mb-1 block text-xs font-medium text-zinc-300">Notes / remarks</span>
+                <textarea form={BULK_INVENTORY_FORM_ID} name="disposal_notes" className="app-input min-h-20 w-full" />
+              </label>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="submit" form={BULK_INVENTORY_FORM_ID} formAction={bulkFinalizeSearchWriteOffAction} className="app-button whitespace-nowrap border-amber-800/80 bg-amber-950/50 text-amber-100 hover:bg-amber-900/60">
+                  Yes, Write Off Items
+                </button>
+                <CancelDetailsButton />
+              </div>
+            </div>
+          </details>
+
+          <SearchInventoryDeleteConfirmControl />
+        </div>
+      </div>
+      </div>
+    </>
+  )
+}
+
 function InventorySearchStatusFilters({
   q,
   activeStatus,
@@ -1225,6 +1803,8 @@ export default async function GlobalSearchPage({
     delete_error?: string
     combine_error?: string
     inventory_status?: string
+    status_updated?: string
+    status_error?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
@@ -1238,6 +1818,8 @@ export default async function GlobalSearchPage({
   const deletedCount = String(params?.deleted_count ?? '').trim()
   const deleteError = String(params?.delete_error ?? '').trim()
   const combineError = String(params?.combine_error ?? '').trim()
+  const statusUpdated = String(params?.status_updated ?? '').trim()
+  const statusError = String(params?.status_error ?? '').trim()
 
   const isLikelyReceiptPaste =
     extractedNumbers.length > 0 &&
@@ -1453,7 +2035,9 @@ export default async function GlobalSearchPage({
                 status,
                 item_type,
                 notes,
-                source_type
+                source_type,
+                ebay_exported_at,
+                processing_status
               `)
               .eq('user_id', user.id)
               .or(inventoryFilters.join(','))
@@ -1481,7 +2065,9 @@ export default async function GlobalSearchPage({
                 status,
                 item_type,
                 notes,
-                source_type
+                source_type,
+                ebay_exported_at,
+                processing_status
               `)
               .eq('user_id', user.id)
               .eq('status', 'sold')
@@ -1758,6 +2344,18 @@ export default async function GlobalSearchPage({
         {combineError ? (
           <div className="app-alert-error">
             Combine failed: {combineError}
+          </div>
+        ) : null}
+
+        {statusUpdated ? (
+          <div className="app-alert-success">
+            Updated {statusUpdated} successfully.
+          </div>
+        ) : null}
+
+        {statusError ? (
+          <div className="app-alert-error">
+            Inventory update failed: {statusError}
           </div>
         ) : null}
       </div>
@@ -2063,13 +2661,12 @@ export default async function GlobalSearchPage({
           subtitle="Search hits from title, player, set, number, team, notes, and related inventory fields."
           count={matchingInventory.length}
         >
-          <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction} className="hidden">
-            <input type="hidden" name="q" value={qRaw} />
-          </form>
-
           <InventorySearchStatusFilters q={qRaw} activeStatus={activeInventoryStatusFilter} />
 
-          <BulkDeleteConfirmControl label="inventory items" formId={BULK_INVENTORY_FORM_ID} />
+          <form id={BULK_INVENTORY_FORM_ID} action={bulkDeleteInventoryItemsAction}>
+            <input type="hidden" name="q" value={qRaw} />
+            <SearchInventoryBulkActions />
+          </form>
 
           <div className="app-table-wrap">
             <div className="app-table-scroll">
@@ -2108,6 +2705,7 @@ export default async function GlobalSearchPage({
                             type="checkbox"
                             name="selected_inventory_ids"
                             value={item.id}
+                            data-inventory-bulk-row-checkbox="true"
                             aria-label={`Select ${display}`}
                             className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
                           />
@@ -2123,7 +2721,26 @@ export default async function GlobalSearchPage({
                           <NotesPreview value={itemNotes} />
                         </td>
                         <td className="app-td whitespace-nowrap">
-                          <span className={statusBadgeClasses(statusLabel)}>{statusLabel || '—'}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className={statusBadgeClasses(statusLabel)}>{statusLabel || '—'}</span>
+                            {item.ebay_exported_at ? (
+                              <span
+                                className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold leading-none shadow-sm"
+                                title="Exported for eBay"
+                                aria-label="Exported for eBay"
+                              >
+                                <span className="text-red-600">e</span>
+                                <span className="text-blue-600">B</span>
+                                <span className="text-yellow-500">a</span>
+                                <span className="text-green-600">y</span>
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.processing_status === 'put_away' ? (
+                            <div className="mt-1 text-[10px] uppercase tracking-wide text-zinc-500">
+                              Put Away
+                            </div>
+                          ) : null}
                         </td>
                         <td className="app-td whitespace-nowrap">{item.quantity ?? '—'}</td>
                         <td className="app-td whitespace-nowrap">{item.available_quantity ?? '—'}</td>

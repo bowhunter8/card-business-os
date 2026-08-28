@@ -12,6 +12,10 @@ import {
 import DeleteInventoryItemButton from "../DeleteInventoryItemButton";
 import EstimateValueHelper from "./EstimateValueHelper";
 import { AppLoadingButton } from "../../components/AppLoadingButton";
+import {
+  updateInventoryBulkStatusShared,
+  updateInventoryProcessingStatusShared,
+} from "@/app/actions/inventory-bulk";
 
 type InventoryItem = {
   id: string;
@@ -19,7 +23,7 @@ type InventoryItem = {
   item_type: string | null;
   title: string | null;
   player_name: string | null;
-  year: number | null;
+  year: string | null;
   brand: string | null;
   set_name: string | null;
   card_number: string | null;
@@ -40,6 +44,8 @@ type InventoryItem = {
   listed_price?: number | null;
   listed_platform?: string | null;
   listed_date?: string | null;
+  ebay_exported_at?: string | null;
+  processing_status?: string | null;
 };
 
 type SaleRow = {
@@ -81,7 +87,7 @@ type RelatedSourceInventoryItem = {
   status: string | null;
   title: string | null;
   player_name: string | null;
-  year: number | null;
+  year: string | null;
   brand: string | null;
   set_name: string | null;
   card_number: string | null;
@@ -458,7 +464,9 @@ export default async function InventoryDetailPage({
         updated_at,
         listed_price,
         listed_platform,
-        listed_date
+        listed_date,
+        ebay_exported_at,
+        processing_status
       `,
       )
       .eq("id", id)
@@ -644,6 +652,48 @@ export default async function InventoryDetailPage({
 
   const relatedBreakTitle = buildBreakTitle(relatedBreak, item.source_break_id);
 
+  async function markItemListedAction() {
+    "use server";
+
+    const result = await updateInventoryBulkStatusShared({
+      itemIds: [id],
+      requestedStatus: "listed",
+    });
+
+    const { redirect } = await import("next/navigation");
+
+    if (!result.ok) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent(result.error)}`,
+      );
+    }
+
+    redirect(
+      `/app/inventory/${id}?success=${encodeURIComponent("Item marked Listed successfully.")}`,
+    );
+  }
+
+  async function putItemAwayAction() {
+    "use server";
+
+    const result = await updateInventoryProcessingStatusShared({
+      itemIds: [id],
+      processingStatus: "put_away",
+    });
+
+    const { redirect } = await import("next/navigation");
+
+    if (!result.ok) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent(result.error)}`,
+      );
+    }
+
+    redirect(
+      `/app/inventory/${id}?success=${encodeURIComponent("Item marked Put Away successfully.")}`,
+    );
+  }
+
   return (
     <div className="app-page-wide min-h-[calc(100vh-6.5rem)] space-y-3 pb-8">
       <form id={itemFormId} action={updateInventoryItemAction}>
@@ -688,6 +738,19 @@ export default async function InventoryDetailPage({
             ) : (
               renderStatusPill(effectiveStatus)
             )}
+
+            {item.ebay_exported_at ? (
+              <span
+                className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold leading-none shadow-sm"
+                title={`Exported to eBay ${formatDateTime(item.ebay_exported_at)}`}
+                aria-label={`Exported to eBay ${formatDateTime(item.ebay_exported_at)}`}
+              >
+                <span className="text-red-600">e</span>
+                <span className="text-blue-600">B</span>
+                <span className="text-yellow-500">a</span>
+                <span className="text-green-600">y</span>
+              </span>
+            ) : null}
 
             {!isLockedForBusinessEvent && hasActiveSales ? (
               <a href="#sales-history" className="app-button">
@@ -781,6 +844,38 @@ export default async function InventoryDetailPage({
                   >
                     Sell Item
                   </Link>
+                  <a
+                    href={`/app/inventory/${item.id}/ebay-draft`}
+                    className="app-button mt-2 w-full justify-center"
+                  >
+                    Export eBay Draft CSV
+                  </a>
+                  <form action={markItemListedAction} className="mt-2">
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Marking..."
+                      overlayText="Marking item listed..."
+                      showOverlayOnClick
+                      disabled={item.status === "listed"}
+                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {item.status === "listed" ? "Listed" : "Mark Listed"}
+                    </AppLoadingButton>
+                  </form>
+                  <form action={putItemAwayAction} className="mt-2">
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Updating..."
+                      overlayText="Marking item put away..."
+                      showOverlayOnClick
+                      disabled={item.processing_status === "put_away"}
+                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {item.processing_status === "put_away"
+                        ? "Put Away"
+                        : "Mark Put Away"}
+                    </AppLoadingButton>
+                  </form>
                 </>
               ) : (
                 <span className="app-button mt-3 w-full justify-center pointer-events-none opacity-60">
@@ -1426,7 +1521,8 @@ export default async function InventoryDetailPage({
               form={itemFormId}
               name="year"
               disabled={isLockedForBusinessEvent}
-              type="number"
+              type="text"
+              placeholder="2023-24"
               defaultValue={item.year ?? ""}
               className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
             />
@@ -1772,9 +1868,15 @@ export default async function InventoryDetailPage({
                               placeholder="Optional reversal reason"
                               className="app-textarea min-w-[200px]"
                             />
-                            <button type="submit" className="app-button-danger">
+                            <AppLoadingButton
+                              type="submit"
+                              loadingText="Reversing..."
+                              overlayText="Reversing sale..."
+                              showOverlayOnClick
+                              className="app-button-danger disabled:cursor-not-allowed disabled:opacity-50"
+                            >
                               Reverse This Sale
-                            </button>
+                            </AppLoadingButton>
                           </form>
                         )}
                       </td>

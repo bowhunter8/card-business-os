@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react'
 type EstimateCardInput = {
   title: string | null
   playerName: string | null
-  year: number | null
+  year: string | number | null
   brand: string | null
   setName: string | null
   cardNumber: string | null

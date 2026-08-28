@@ -661,6 +661,7 @@ export default function NewInventoryPage() {
                   className="app-input"
                   value={form.year}
                   onChange={(e) => updateForm("year", e.target.value)}
+                  placeholder="2023-24"
                 />
               </div>
 
@@ -823,6 +824,7 @@ export default function NewInventoryPage() {
                     className="app-input"
                     value={form.year}
                     onChange={(e) => updateForm("year", e.target.value)}
+                    placeholder="2023-24"
                   />
                 </div>
 
@@ -943,6 +945,7 @@ export default function NewInventoryPage() {
                           onChange={(e) =>
                             updateBulkItem(item.id, { year: e.target.value })
                           }
+                          placeholder="2023-24"
                         />
                       </div>
 

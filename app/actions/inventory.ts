@@ -33,12 +33,12 @@ function buildInventoryTitle({
 }: {
   fallbackTitle: string
   playerName: string
-  year: number | null
+  year: string | null
   setName: string
   cardNumber: string
 }) {
   const itemName = cleanText(playerName)
-  const yearText = year ? String(year) : ''
+  const yearText = cleanText(year)
   const setText = cleanText(setName)
   const itemNumber = cleanItemNumber(cardNumber)
 
@@ -77,8 +77,7 @@ export async function createInventoryItemAction(formData: FormData) {
     redirect('/app/inventory/new?error=Quantity must be at least 1')
   }
 
-  const year = yearRaw ? Number(yearRaw) : null
-  const safeYear = year && !Number.isNaN(year) ? year : null
+  const safeYear = cleanText(yearRaw) || null
   const title = buildInventoryTitle({
     fallbackTitle: rawTitle,
     playerName,
@@ -245,8 +244,7 @@ export async function updateInventoryItemAction(formData: FormData) {
       ? costBasisUnitInput
       : Number(item.cost_basis_unit ?? 0)
 
-  const year = yearRaw ? Number(yearRaw) : null
-  const safeYear = year && !Number.isNaN(year) ? year : null
+  const safeYear = cleanText(yearRaw) || null
   const title = buildInventoryTitle({
     fallbackTitle: rawTitle,
     playerName,

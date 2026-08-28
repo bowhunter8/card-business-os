@@ -1,12 +1,16 @@
 import Link from 'next/link'
 import { Suspense } from 'react'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
 import { rollbackBreakAction } from '@/app/actions/break-safety'
 import {
   bulkDeleteInventoryItemsAction,
   deleteInventoryItemAction,
 } from '@/app/actions/breaks'
+import BulkEbayDraftExportButton from '../../inventory/BulkEbayDraftExportButton'
+import { updateInventoryBulkStatusShared } from '@/app/actions/inventory-bulk'
+import BreakQuickActionsFloat from './BreakQuickActionsFloat'
 
 function money(value: number | null) {
   return new Intl.NumberFormat('en-US', {
@@ -58,6 +62,8 @@ type BreakCardRow = {
   status: string | null
   item_type: string | null
   notes: string | null
+  ebay_exported_at?: string | null
+  processing_status?: string | null
   created_at?: string
 }
 
@@ -493,6 +499,168 @@ async function LinkedWhatnotOrdersSection({
   )
 }
 
+
+type BreakProcessingStatus = 'available' | 'listed' | 'personal' | 'junk'
+
+function readSelectedInventoryIds(formData: FormData) {
+  return Array.from(
+    new Set(
+      formData
+        .getAll('selected_inventory_ids')
+        .map((value) => String(value).trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function breakProcessingStatusLabel(status: BreakProcessingStatus) {
+  if (status === 'available') return 'For Sale'
+  if (status === 'listed') return 'Listed'
+  if (status === 'personal') return 'Personal'
+  return 'Junk'
+}
+
+async function updateBreakInventoryStatusAction(
+  formData: FormData,
+  requestedStatus: BreakProcessingStatus
+) {
+  'use server'
+
+  const breakId = String(formData.get('break_id') ?? '').trim()
+  const itemIds = readSelectedInventoryIds(formData)
+
+  if (!breakId) {
+    redirect('/app/breaks')
+  }
+
+  const result = await updateInventoryBulkStatusShared({
+    itemIds,
+    requestedStatus,
+    requiredSourceType: 'break',
+    requiredBreakId: breakId,
+  })
+
+  if (!result.ok) {
+    if (result.code === 'not_authenticated') {
+      redirect('/login')
+    }
+
+    redirect(
+      `/app/breaks/${breakId}?error=${encodeURIComponent(result.error)}#break-items`
+    )
+  }
+
+  revalidatePath(`/app/breaks/${breakId}`)
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+  revalidatePath('/app/reports/tax')
+
+  redirect(
+    `/app/breaks/${breakId}?success=${encodeURIComponent(
+      `${result.updatedCount} item(s) marked ${breakProcessingStatusLabel(requestedStatus)}.`
+    )}#break-items`
+  )
+}
+
+async function markBreakItemsForSaleAction(formData: FormData) {
+  'use server'
+  await updateBreakInventoryStatusAction(formData, 'available')
+}
+
+async function markBreakItemsListedAction(formData: FormData) {
+  'use server'
+  await updateBreakInventoryStatusAction(formData, 'listed')
+}
+
+async function moveBreakItemsPersonalAction(formData: FormData) {
+  'use server'
+  await updateBreakInventoryStatusAction(formData, 'personal')
+}
+
+async function markBreakItemsJunkAction(formData: FormData) {
+  'use server'
+  await updateBreakInventoryStatusAction(formData, 'junk')
+}
+
+async function markBreakItemsPutAwayAction(formData: FormData) {
+  'use server'
+
+  const breakId = String(formData.get('break_id') ?? '').trim()
+  const itemIds = readSelectedInventoryIds(formData)
+
+  if (!breakId) {
+    redirect('/app/breaks')
+  }
+
+  if (itemIds.length === 0) {
+    redirect(
+      `/app/breaks/${breakId}?error=${encodeURIComponent(
+        'Select at least one item to mark Put Away.'
+      )}#break-items`
+    )
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  const { data: existingItems, error: loadError } = await supabase
+    .from('inventory_items')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('source_type', 'break')
+    .eq('source_break_id', breakId)
+    .in('id', itemIds)
+
+  if (loadError) {
+    redirect(
+      `/app/breaks/${breakId}?error=${encodeURIComponent(loadError.message)}#break-items`
+    )
+  }
+
+  const validIds = (existingItems ?? []).map((item) => String(item.id))
+
+  if (validIds.length === 0) {
+    redirect(
+      `/app/breaks/${breakId}?error=${encodeURIComponent(
+        'No matching items from this break were found.'
+      )}#break-items`
+    )
+  }
+
+  const { error: updateError } = await supabase
+    .from('inventory_items')
+    .update({
+      processing_status: 'put_away',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', user.id)
+    .eq('source_type', 'break')
+    .eq('source_break_id', breakId)
+    .in('id', validIds)
+
+  if (updateError) {
+    redirect(
+      `/app/breaks/${breakId}?error=${encodeURIComponent(updateError.message)}#break-items`
+    )
+  }
+
+  revalidatePath(`/app/breaks/${breakId}`)
+  revalidatePath('/app/inventory')
+  revalidatePath('/app/search')
+
+  redirect(
+    `/app/breaks/${breakId}?success=${encodeURIComponent(
+      `${validIds.length} item(s) marked Put Away.`
+    )}#break-items`
+  )
+}
+
 async function BreakCardsAndMetricsSection({
   breakId,
   userId,
@@ -538,6 +706,8 @@ async function BreakCardsAndMetricsSection({
       status,
       item_type,
       notes,
+      ebay_exported_at,
+      processing_status,
       created_at
     `)
     .eq('user_id', userId)
@@ -874,43 +1044,114 @@ async function BreakCardsAndMetricsSection({
             <h2 className="text-lg font-semibold">Items From This Break</h2>
             {!reversedAt ? (
               <div className="mt-0.5 text-sm text-zinc-400">
-                Select multiple items with the checkboxes, then bulk delete the selected rows.
+                Process the cards you just entered: send sellable cards to eBay, set aside personal or junk items, or leave them available for later.
               </div>
             ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2">
             {!reversedAt ? (
-              <>
-                <button
-                  type="submit"
-                  form={bulkSelectionFormId}
-                  className="app-button-danger"
-                >
-                  Delete Selected
-                </button>
-
-                <Link
-                  href={`/app/breaks/${breakId}/add-cards`}
-                  className="app-button"
-                >
-                  Add More Items
-                </Link>
-              </>
+              <Link
+                href={`/app/breaks/${breakId}/add-cards`}
+                className="app-button"
+              >
+                Add More Items
+              </Link>
             ) : null}
           </div>
         </div>
 
         {!reversedAt ? (
-          <form
-            id={bulkSelectionFormId}
-            method="get"
-            action={`/app/breaks/${breakId}`}
-          >
-            <input type="hidden" name="cards_sort" value={cardsSortKey} />
-            <input type="hidden" name="cards_dir" value={cardsSortDir} />
-            <input type="hidden" name="confirm_delete" value="bulk" />
-          </form>
+          <>
+            <form
+              id={bulkSelectionFormId}
+            >
+              <input type="hidden" name="break_id" value={breakId} />
+              <input type="hidden" name="cards_sort" value={cardsSortKey} />
+              <input type="hidden" name="cards_dir" value={cardsSortDir} />
+            </form>
+
+            <BreakQuickActionsFloat>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/95 px-3 py-3 shadow-2xl shadow-black/40 backdrop-blur">
+            <div className="text-sm font-semibold text-zinc-200">What&apos;s next?</div>
+            <div className="mt-0.5 text-xs text-zinc-500">
+              Select items below, then choose what should happen to them before you put the cards away.
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <BulkEbayDraftExportButton />
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                formAction={markBreakItemsForSaleAction}
+                className="app-button whitespace-nowrap"
+              >
+                Mark For Sale
+              </button>
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                formAction={markBreakItemsListedAction}
+                className="app-button whitespace-nowrap"
+              >
+                Mark Listed
+              </button>
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                formAction={markBreakItemsPutAwayAction}
+                className="app-button whitespace-nowrap"
+              >
+                Put Away
+              </button>
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                formAction={moveBreakItemsPersonalAction}
+                className="app-button whitespace-nowrap"
+              >
+                Move to Personal
+              </button>
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                formAction={markBreakItemsJunkAction}
+                className="app-button whitespace-nowrap"
+              >
+                Mark Junk
+              </button>
+
+              <button
+                type="button"
+                disabled
+                title="Lot / Team Set Builder is the next phase."
+                className="app-button cursor-not-allowed whitespace-nowrap opacity-50"
+              >
+                Add to Lot / Team Set
+              </button>
+
+              <button
+                type="submit"
+                form={bulkSelectionFormId}
+                name="confirm_delete"
+                value="bulk"
+                className="app-button-danger whitespace-nowrap"
+              >
+                Delete Selected
+              </button>
+            </div>
+
+              <div className="mt-2 text-[11px] text-zinc-600">
+                Giveaway and Write Off keep their existing dedicated tax-safe workflows for now. Lot / Team Set is staged here for the builder we&apos;re adding next.
+              </div>
+              </div>
+            </BreakQuickActionsFloat>
+          </>
         ) : null}
 
         <div className="app-table-scroll">
@@ -1011,17 +1252,38 @@ async function BreakCardsAndMetricsSection({
                       <td className="app-td">
                         <input
                           type="checkbox"
-                          name="inventory_item_ids"
+                          name="selected_inventory_ids"
                           value={card.id}
                           form={bulkSelectionFormId}
+                          data-inventory-bulk-row-checkbox="true"
                           defaultChecked={selectedInventoryItemIds.includes(card.id)}
                           disabled={!canDelete}
                           className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-white disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
                     ) : null}
-                    <td className="app-td capitalize">
-                      {(card.status || '—').replaceAll('_', ' ')}
+                    <td className="app-td">
+                      <div className="flex items-center gap-2">
+                        <span className="capitalize">
+                          {(card.status || '—').replaceAll('_', ' ')}
+                        </span>
+                        {card.ebay_exported_at ? (
+                          <span
+                            title="Exported for eBay"
+                            className="inline-flex items-center rounded-md border border-zinc-700 bg-white px-1.5 py-0.5 text-[10px] font-bold leading-none shadow-sm"
+                          >
+                            <span className="text-red-600">e</span>
+                            <span className="text-blue-600">B</span>
+                            <span className="text-yellow-500">a</span>
+                            <span className="text-green-600">y</span>
+                          </span>
+                        ) : null}
+                      </div>
+                      {card.processing_status ? (
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-zinc-500">
+                          {card.processing_status.replaceAll('_', ' ')}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="app-td capitalize">
                       {(card.item_type || '—').replaceAll('_', ' ')}
@@ -1094,6 +1356,8 @@ async function BreakCardsAndMetricsSection({
               <button
                 type="submit"
                 form={bulkSelectionFormId}
+                name="confirm_delete"
+                value="bulk"
                 className="app-button-danger"
               >
                 Delete Selected
@@ -1117,7 +1381,7 @@ export default async function BreakDetailPage({
     cards_sort?: string
     cards_dir?: string
     confirm_delete?: string
-    inventory_item_ids?: string | string[]
+    selected_inventory_ids?: string | string[]
   }>
 }) {
   const { id } = await params
@@ -1145,10 +1409,10 @@ export default async function BreakDetailPage({
 
   const cardsSortDir: SortDir = requestedCardsDir === 'asc' ? 'asc' : 'desc'
 
-  const selectedInventoryItemIds = Array.isArray(query?.inventory_item_ids)
-    ? query?.inventory_item_ids.map((value) => String(value))
-    : query?.inventory_item_ids
-      ? [String(query.inventory_item_ids)]
+  const selectedInventoryItemIds = Array.isArray(query?.selected_inventory_ids)
+    ? query?.selected_inventory_ids.map((value) => String(value))
+    : query?.selected_inventory_ids
+      ? [String(query.selected_inventory_ids)]
       : []
 
   const supabase = await createClient()
