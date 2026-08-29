@@ -82,6 +82,13 @@ export default function SettingsPage() {
           </div>
         </Link>
 
+        <Link href="/app/settings/ebay" className="app-card transition hover:bg-zinc-800">
+          <div className="text-lg font-semibold">eBay Draft Export</div>
+          <div className="mt-1 text-sm text-zinc-400">
+            Customize eBay draft listing descriptions and reusable export defaults.
+          </div>
+        </Link>
+
         <div className="app-card">
           <div className="flex flex-col gap-3">
             <div>

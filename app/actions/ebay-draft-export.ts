@@ -78,6 +78,12 @@ function stripLeadingHash(value: string | null | undefined) {
   return clean(value).replace(/^#/, "");
 }
 
+function cleanPlayerName(value: string | null | undefined) {
+  return clean(value)
+    .replace(/\s+(?:RC|Rookie(?:\s+Card)?)$/i, "")
+    .trim();
+}
+
 function includesLoose(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
@@ -204,12 +210,12 @@ function featureData(item: InventoryItemForEbay) {
     printRun,
     serialNumber,
     autographed: isAutographed ? "Yes" : "",
-    signedBy: isAutographed ? clean(item.player_name) : "",
+    signedBy: isAutographed ? cleanPlayerName(item.player_name) : "",
   };
 }
 
 function buildEbayTitle(item: InventoryItemForEbay) {
-  const player = clean(item.player_name);
+  const player = cleanPlayerName(item.player_name);
   const year = clean(item.year);
   const setName = setFor(item);
   const parallel = clean(item.parallel_name);
@@ -274,35 +280,47 @@ function buildEbayTitle(item: InventoryItemForEbay) {
     .trim();
 }
 
-function buildDescription(item: InventoryItemForEbay) {
-  const player = clean(item.player_name);
+const DEFAULT_EBAY_DESCRIPTION_TEMPLATE = `{summary}
+
+{details}
+
+Card pictured is the exact card you will receive. Please review the photos carefully for condition. The card will be packaged securely for shipping.`;
+
+function stableVariantIndex(seed: string, length: number) {
+  if (length <= 1) return 0;
+
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+
+  return hash % length;
+}
+
+function buildSummary(item: InventoryItemForEbay) {
+  const player = cleanPlayerName(item.player_name);
   const year = clean(item.year);
   const setName = setFor(item);
   const parallel = clean(item.parallel_name);
   const cardNumber = stripLeadingHash(item.card_number);
   const features = featureData(item);
-
   const source = `${clean(item.title)} ${clean(item.notes)}`;
   const descriptors: string[] = [];
 
-  if (/\b1st\s+bowman\b/i.test(source)) descriptors.push("1st Bowman");
-
-  if (features.autographed === "Yes") {
-    descriptors.push("Autograph");
-  }
-
-  if (/\bfuture\s+stars?\b/i.test(source)) descriptors.push("Future Stars");
+  if (/\b1st\s+bowman\b/i.test(source)) descriptors.push('1st Bowman');
+  if (features.autographed === 'Yes') descriptors.push('Autograph');
+  if (/\bfuture\s+stars?\b/i.test(source)) descriptors.push('Future Stars');
 
   if (
     /\brookie\s+card\b/i.test(source) ||
     /\brookie\b/i.test(source) ||
     /(^|[\s(/-])rc([\s)/-]|$)/i.test(source)
   ) {
-    descriptors.push("Rookie Card");
+    descriptors.push('Rookie Card');
   }
 
   if (/\berror\b/i.test(source) || /\berr\b/i.test(source)) {
-    descriptors.push("Error");
+    descriptors.push('Error');
   }
 
   const opening = joinUnique([
@@ -310,7 +328,7 @@ function buildDescription(item: InventoryItemForEbay) {
     setName,
     player,
     ...descriptors,
-    cardNumber ? `#${cardNumber}` : "",
+    cardNumber ? `#${cardNumber}` : '',
     parallel,
   ]);
 
@@ -318,11 +336,215 @@ function buildDescription(item: InventoryItemForEbay) {
     ? features.serialNumber
       ? `, serial numbered ${features.serialNumber}`
       : `, serial numbered /${features.printRun}`
-    : "";
+    : '';
 
-  const firstSentence = `${opening || clean(item.title) || "Trading card"}${serialText}.`;
+  return `${opening || clean(item.title) || 'Trading card'}${serialText}.`;
+}
 
-  return `${firstSentence} Card pictured is the card you will receive. Please review photos for condition. Card will be packaged securely for shipping.`;
+function buildDetails(item: InventoryItemForEbay) {
+  const player = cleanPlayerName(item.player_name);
+  const year = clean(item.year);
+  const setName = setFor(item);
+  const parallel = clean(item.parallel_name);
+  const team = clean(item.team);
+  const features = featureData(item);
+  const source = `${clean(item.title)} ${clean(item.notes)} ${parallel}`;
+
+  const isFirstBowman = /\b1st\s+bowman\b/i.test(source);
+  const isRookie =
+    /\brookie\s+card\b/i.test(source) ||
+    /\brookie\b/i.test(source) ||
+    /(^|[\s(/-])rc([\s)/-]|$)/i.test(source);
+  const isAuto = features.autographed === "Yes";
+  const isNumbered = Boolean(features.printRun);
+  const hasParallel = Boolean(parallel);
+
+  const subject = player || clean(item.title) || "this card";
+  const release = joinUnique([year, setName]);
+  const fromRelease = release ? ` from ${release}` : "";
+  const teamPhrase = team ? `${team} fans` : "";
+  const playerCollectors = player ? `${player} collectors` : "player collectors";
+
+  const collectorTargets = [
+    playerCollectors,
+    teamPhrase,
+    isFirstBowman || isRookie ? "prospect collectors" : "",
+    setName ? `${setName} collectors` : "",
+  ].filter(Boolean);
+
+  const targetA = collectorTargets[0] || "collectors";
+  const targetB =
+    collectorTargets.find((value) => value !== targetA) || "card collectors";
+
+  const generalCollectionTargets = [
+    player ? "the player" : "",
+    team ? "the team" : "",
+    setName ? "the set" : "",
+  ].filter(Boolean);
+
+  const generalCollectionText =
+    generalCollectionTargets.length >= 3
+      ? `${generalCollectionTargets.slice(0, -1).join(", ")}, or ${generalCollectionTargets.at(-1)}`
+      : generalCollectionTargets.length === 2
+        ? `${generalCollectionTargets[0]} or ${generalCollectionTargets[1]}`
+        : generalCollectionTargets[0] || "the hobby";
+
+  let phrases: string[] = [];
+
+  if (isFirstBowman && isAuto && isNumbered) {
+    phrases = [
+      `A premium early-career autograph of ${subject}${fromRelease}, combining the appeal of a 1st Bowman with a limited print run of just ${features.printRun} copies. A strong centerpiece for ${targetA} and ${targetB}.`,
+      `This 1st Bowman autograph pairs an important early card of ${subject} with the added scarcity of only ${features.printRun} copies. An excellent choice for prospect-focused collections.`,
+      `An exciting early-career signed card of ${subject}${fromRelease}, with the 1st Bowman designation and a print run limited to ${features.printRun}. A standout option for serious player and prospect collectors.`,
+      `A desirable combination of 1st Bowman, autograph, and low-numbered scarcity, this ${subject} card is limited to just ${features.printRun} copies. It has plenty of appeal for ${targetA}.`,
+      `Few card types combine early-career appeal and collectibility like a numbered 1st Bowman autograph. This ${subject} example is limited to ${features.printRun} copies and makes a strong addition to a focused collection.`,
+      `An impressive signed early-career card featuring ${subject}${fromRelease}. With its 1st Bowman status and limited ${features.printRun}-copy run, it checks several boxes for prospect collectors.`,
+      `This ${subject} card brings together a key early-career designation, an autograph, and a limited print run of ${features.printRun}. A compelling pickup for ${targetA} or ${targetB}.`,
+      `A highly collectible early issue of ${subject}${fromRelease}, highlighted by an autograph and a print run of only ${features.printRun}. A great card for collectors who favor scarce prospect material.`,
+    ];
+  } else if (isFirstBowman && isNumbered) {
+    phrases = [
+      `An important early-career card of ${subject}${fromRelease}, with the added scarcity of a print run limited to just ${features.printRun}. A strong choice for prospect collectors.`,
+      `This 1st Bowman of ${subject} is limited to only ${features.printRun} copies, giving an already desirable early card an extra level of collectibility.`,
+      `A scarce early issue of ${subject}${fromRelease}, combining the appeal of a 1st Bowman with a limited ${features.printRun}-copy run. A great addition for ${targetA}.`,
+      `For collectors following ${subject} early in the player's career, this numbered 1st Bowman offers both prospect appeal and limited production of just ${features.printRun}.`,
+      `A strong prospect card featuring ${subject}${fromRelease}. The 1st Bowman designation makes it an important early collectible, while the ${features.printRun}-copy print run adds scarcity.`,
+      `This early-career ${subject} card stands out with its 1st Bowman designation and limited print run of ${features.printRun}. An appealing pickup for ${targetA} and ${targetB}.`,
+      `A desirable numbered prospect card of ${subject}${fromRelease}, limited to ${features.printRun} copies. Its early-career status makes it a natural fit for player-focused collections.`,
+      `An appealing 1st Bowman of ${subject} with only ${features.printRun} copies produced. A nice combination of early-career significance and numbered-card scarcity.`,
+    ];
+  } else if (isAuto && isNumbered) {
+    phrases = [
+      `A signed ${subject} card${fromRelease} with a limited print run of just ${features.printRun} copies. The combination of autograph and scarcity gives this one strong collector appeal.`,
+      `This autograph of ${subject} is limited to only ${features.printRun} copies, making it a compelling addition for ${targetA} or ${targetB}.`,
+      `An eye-catching signed card featuring ${subject}${fromRelease}, backed by a print run of just ${features.printRun}. A great option for collectors looking for something beyond the base card.`,
+      `Autograph appeal meets limited production on this ${subject} card, with only ${features.printRun} copies in the run. A strong piece for a focused player collection.`,
+      `A limited signed issue of ${subject}${fromRelease}, produced in a run of just ${features.printRun}. This one offers both the personal touch of an autograph and numbered-card scarcity.`,
+      `This ${subject} autograph carries extra collectibility thanks to its ${features.printRun}-copy print run. A standout choice for ${targetA}.`,
+      `A sharp signed card of ${subject}${fromRelease}, limited to only ${features.printRun} copies. An appealing combination for autograph, player, and team collectors.`,
+      `With an autograph and a limited run of ${features.printRun}, this ${subject} card has two features collectors tend to seek out. A strong addition to ${targetA}.`,
+    ];
+  } else if (isRookie && isNumbered) {
+    phrases = [
+      `A great early-career card of ${subject}${fromRelease}, with a limited print run of just ${features.printRun}. A strong addition for prospect collectors and ${targetA}.`,
+      `This numbered rookie issue of ${subject} is limited to only ${features.printRun} copies, adding extra scarcity to an important early-career card.`,
+      `An appealing early card featuring ${subject}${fromRelease}, produced in a run of just ${features.printRun}. A nice pickup for player, prospect, and team collections.`,
+      `A limited early-career release of ${subject}, with only ${features.printRun} copies produced. The rookie designation and numbered run give it added collector appeal.`,
+      `This ${subject} rookie combines early-career collectibility with a ${features.printRun}-copy print run. A strong option for ${targetA} or ${targetB}.`,
+      `A scarce rookie-year card of ${subject}${fromRelease}, limited to just ${features.printRun}. A natural fit for collectors building a focused player or prospect collection.`,
+      `Early-career appeal and limited production come together on this ${subject} card, with a print run of only ${features.printRun}. A great pickup for ${targetA}.`,
+      `A collectible rookie issue of ${subject}${fromRelease}, made even more appealing by its limited ${features.printRun}-copy run. A solid choice for long-term player collections.`,
+    ];
+  } else if (isNumbered) {
+    phrases = [
+      `A sharp-looking ${subject} card${fromRelease}, limited to just ${features.printRun} copies. The low print run gives it extra appeal beyond the standard base version.`,
+      `Only ${features.printRun} copies were produced in this numbered run, giving this ${subject} card an added level of scarcity. A strong pickup for ${targetA}.`,
+      `A limited ${subject} card${fromRelease} with a print run of just ${features.printRun}. A nice option for player, team, and parallel collectors.`,
+      `This numbered ${subject} issue is limited to ${features.printRun} copies, making it an appealing alternative to the base card for collectors looking for added scarcity.`,
+      `With only ${features.printRun} copies in the run, this ${subject} card offers the kind of limited production that can make a collection stand out.`,
+      `A scarce numbered card featuring ${subject}${fromRelease}, produced in a run of just ${features.printRun}. A great addition for ${targetA} or ${targetB}.`,
+      `This ${subject} card carries a limited print run of ${features.printRun}, adding an extra collectible element to the release. A solid choice for a focused collection.`,
+      `Limited to only ${features.printRun} copies, this ${subject} card brings some welcome scarcity to the set. An appealing pickup for player and team collectors alike.`,
+    ];
+  } else if (isFirstBowman) {
+    phrases = [
+      `An important early-career card of ${subject}${fromRelease}. The 1st Bowman designation gives it strong appeal for prospect collectors and fans following the player from the beginning.`,
+      `A key early issue of ${subject}${fromRelease}, making this a natural choice for prospect-focused and player collections.`,
+      `This 1st Bowman represents an early collectible of ${subject} and makes a strong addition for collectors following the player's development.`,
+      `A desirable early-career card featuring ${subject}${fromRelease}. A great pickup for prospect collectors or anyone building a focused ${subject} collection.`,
+      `For collectors who enjoy getting in on a player early, this ${subject} card offers the appeal of an important first Bowman release.`,
+      `An appealing prospect-era card of ${subject}${fromRelease}, well suited for player collectors and those building out the release.`,
+      `This early ${subject} issue is a strong fit for prospect collections, with the 1st Bowman designation marking an important point in the player's card history.`,
+      `A solid early-career collectible featuring ${subject}${fromRelease}. The 1st Bowman status makes it especially relevant for prospect and player collectors.`,
+    ];
+  } else if (isAuto) {
+    phrases = [
+      `A signed card featuring ${subject}${fromRelease}, adding an extra level of collectibility beyond the standard issue. A strong choice for ${targetA}.`,
+      `This ${subject} autograph makes a distinctive addition to a player or team collection, pairing the card design with a player signature.`,
+      `An eye-catching signed issue of ${subject}${fromRelease}. A great option for collectors who enjoy adding autographs to their player-focused collections.`,
+      `The autograph gives this ${subject} card an extra personal element and makes it a natural centerpiece for ${targetA}.`,
+      `A collectible signed card of ${subject}${fromRelease}, offering something extra for autograph, player, and team collectors.`,
+      `This autographed ${subject} card stands apart from the standard release and makes a strong addition to a focused collection.`,
+      `A great signature card featuring ${subject}${fromRelease}, with plenty of appeal for ${targetA} and autograph collectors.`,
+      `Add a signed ${subject} to the collection with this attractive issue${fromRelease}. A nice choice for fans looking for more than a standard base card.`,
+    ];
+  } else if (isRookie) {
+    phrases = [
+      `A great early-career card of ${subject}${fromRelease}. A nice addition for prospect collectors, ${targetA}, or anyone building the set.`,
+      `An appealing early issue featuring ${subject}${fromRelease}, well suited for player collectors and fans following the beginning of the career.`,
+      `This ${subject} rookie is a strong pickup for collectors looking to add an early-career card to a player, team, or set collection.`,
+      `A solid rookie-year collectible of ${subject}${fromRelease}. A natural fit for prospect collectors and ${targetA}.`,
+      `Add an early card of ${subject} to the collection with this rookie issue${fromRelease}. A nice choice for player and team collectors alike.`,
+      `This early-career ${subject} card offers plenty of appeal for collectors following ${generalCollectionText}.`,
+      `A noteworthy rookie issue featuring ${subject}${fromRelease}. A strong addition for collectors building around the player's early cards.`,
+      `An attractive early-career release of ${subject}${fromRelease}, making it a great option for prospect, player, and set collectors.`,
+    ];
+  } else if (hasParallel) {
+    phrases = [
+      `A sharp-looking ${parallel} variation of ${subject}${fromRelease}, offering a distinctive alternative to the standard base card. A nice addition for ${targetA}.`,
+      `This ${parallel} parallel gives the ${subject} card a different look from the base version and adds extra appeal for player and set collectors.`,
+      `An eye-catching ${parallel} issue featuring ${subject}${fromRelease}. A strong option for collectors building player rainbows or parallel runs.`,
+      `The ${parallel} treatment helps this ${subject} card stand apart from the standard release. A great pickup for ${targetA} or ${targetB}.`,
+      `A distinctive ${parallel} variation of ${subject}${fromRelease}, well suited for collectors looking to add some variety beyond the base card.`,
+      `This ${subject} parallel features the ${parallel} treatment, giving it added visual appeal for player, team, and set collectors.`,
+      `A nice ${parallel} version of ${subject}${fromRelease}, offering collectors another way to build out a player or set run.`,
+      `Add some variety to the collection with this ${parallel} parallel of ${subject}${fromRelease}. A solid choice for ${targetA}.`,
+    ];
+  } else {
+    phrases = [
+      `A sharp-looking card featuring ${subject}${fromRelease}. A nice addition for ${targetA}, ${targetB}, or anyone building the set.`,
+      `A solid collectible featuring ${subject}${fromRelease}, well suited for player, team, and set collections.`,
+      `This ${subject} card${fromRelease} makes a clean addition to a focused player or team collection.`,
+      `A nice issue featuring ${subject}${fromRelease}. A strong pickup for collectors of the player, team, or release.`,
+      `Add ${subject} to the collection with this card${fromRelease}, a solid choice for player and set collectors alike.`,
+      `An appealing card of ${subject}${fromRelease}, offering a straightforward addition to a player, team, or set build.`,
+      `This ${subject} issue${fromRelease} is a great fit for collectors filling out a set or building a dedicated player collection.`,
+      `A clean collectible featuring ${subject}${fromRelease}, with broad appeal for ${targetA} and ${targetB}.`,
+    ];
+  }
+
+  return phrases[stableVariantIndex(item.id, phrases.length)];
+}
+
+function buildTemplateValues(item: InventoryItemForEbay) {
+  const features = featureData(item);
+
+  return {
+    '{summary}': buildSummary(item),
+    '{details}': buildDetails(item),
+    '{title}': buildEbayTitle(item),
+    '{year}': clean(item.year),
+    '{player}': clean(item.player_name),
+    '{set}': setFor(item),
+    '{card_number}': stripLeadingHash(item.card_number),
+    '{team}': clean(item.team),
+    '{parallel}': clean(item.parallel_name),
+    '{features}': features.features.replaceAll('|', ', '),
+    '{serial_number}': features.serialNumber,
+    '{print_run}': features.printRun,
+  } as const;
+}
+
+function renderDescriptionTemplate(
+  item: InventoryItemForEbay,
+  template: string,
+) {
+  let output = template;
+
+  for (const [token, value] of Object.entries(buildTemplateValues(item))) {
+    output = output.replaceAll(token, value);
+  }
+
+  return output
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim();
+}
+
+function buildDescription(item: InventoryItemForEbay, template: string) {
+  return renderDescriptionTemplate(item, template);
 }
 
 function csvEscape(value: string) {
@@ -338,7 +560,7 @@ function csvEscape(value: string) {
   return value;
 }
 
-function buildRow(item: InventoryItemForEbay): EbayDraftRow {
+function buildRow(item: InventoryItemForEbay, descriptionTemplate: string): EbayDraftRow {
   const featureInfo = featureData(item);
   const year = clean(item.year);
 
@@ -353,10 +575,10 @@ function buildRow(item: InventoryItemForEbay): EbayDraftRow {
     Quantity: "1",
     "Item photo URL": "",
     "Condition ID": "",
-    Description: buildDescription(item),
+    Description: buildDescription(item, descriptionTemplate),
     Format: EBAY_DEFAULT_FORMAT,
     "C:Sport": EBAY_DEFAULT_SPORT,
-    "C:Player/Athlete": clean(item.player_name),
+    "C:Player/Athlete": cleanPlayerName(item.player_name),
     "C:Manufacturer": manufacturerFor(item),
     "C:Set": setFor(item),
     "C:Card Number": stripLeadingHash(item.card_number),
@@ -372,11 +594,11 @@ function buildRow(item: InventoryItemForEbay): EbayDraftRow {
   };
 }
 
-function buildCsv(items: InventoryItemForEbay[]) {
+function buildCsv(items: InventoryItemForEbay[], descriptionTemplate: string) {
   const headerLine = EBAY_HEADERS.map(csvEscape).join(",");
 
   const dataLines = items.map((item) => {
-    const row = buildRow(item);
+    const row = buildRow(item, descriptionTemplate);
     return EBAY_HEADERS.map((header) => csvEscape(row[header])).join(",");
   });
 
@@ -480,6 +702,23 @@ export async function getEbayDraftCsvForInventoryIds(
 
   orderedItems.forEach(assertExportable);
 
+  const { data: ebaySettings, error: ebaySettingsError } = await supabase
+    .from("ebay_export_settings")
+    .select("description_template")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (ebaySettingsError) {
+    throw new Error(
+      `Unable to load eBay export settings: ${ebaySettingsError.message}`,
+    );
+  }
+
+  const descriptionTemplate =
+    typeof ebaySettings?.description_template === "string"
+      ? ebaySettings.description_template
+      : DEFAULT_EBAY_DESCRIPTION_TEMPLATE;
+
   const timestamp = new Date()
     .toISOString()
     .replace(/[:.]/g, "-")
@@ -487,7 +726,7 @@ export async function getEbayDraftCsvForInventoryIds(
 
   return {
     filename: `HITS-eBay-Drafts-${timestamp}.csv`,
-    csv: buildCsv(orderedItems),
+    csv: buildCsv(orderedItems, descriptionTemplate),
     itemCount: orderedItems.length,
   };
 }
