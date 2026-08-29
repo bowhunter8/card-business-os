@@ -2,7 +2,6 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { addBreakCardsAction } from '@/app/actions/breaks'
-import SubmitButton from '@/app/components/SubmitButton'
 import BreakCardEntryGrid from './BreakCardEntryGrid'
 
 type BreakRow = {
@@ -338,12 +337,12 @@ export default async function AddBreakCardsPage({
         </div>
 
         <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
-          <SubmitButton
+          <button
+            type="submit"
             className="app-button-primary"
-            pendingText="Adding Items..."
           >
             Add Items To Inventory
-          </SubmitButton>
+          </button>
         </div>
 
         <BreakCardEntryGrid
@@ -362,12 +361,12 @@ export default async function AddBreakCardsPage({
           >
             Cancel
           </Link>
-          <SubmitButton
+          <button
+            type="submit"
             className="app-button-primary"
-            pendingText="Adding Items..."
           >
             Add Items To Inventory
-          </SubmitButton>
+          </button>
         </div>
       </form>
     </div>

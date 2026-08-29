@@ -504,7 +504,6 @@ export async function addBreakCardsAction(formData: FormData) {
     source_break_id: string
     item_type: string
     status: string
-    processing_status: string | null
     quantity: number
     available_quantity: number
     title: string | null
@@ -584,7 +583,6 @@ export async function addBreakCardsAction(formData: FormData) {
       source_break_id: breakId,
       item_type: normalizedItemType,
       status: normalizedStatus,
-      processing_status: 'needs_processing',
       quantity,
       available_quantity: isAvailableForSale ? quantity : 0,
       title:
