@@ -16,7 +16,9 @@ export default function ChecklistAutoMatcher({ checklistId }: Props) {
   const router = useRouter()
   const startedRef = useRef(false)
   const [isPending, startTransition] = useTransition()
-  const [checking, setChecking] = useState(true)
+  // Start false so the server render and the client's first render are identical.
+  // The mount effect immediately calls run(false), which turns checking on.
+  const [checking, setChecking] = useState(false)
   const [message, setMessage] = useState<Message>({ kind: 'none', text: '' })
 
   function run(force: boolean) {

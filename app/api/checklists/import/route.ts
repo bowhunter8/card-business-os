@@ -752,6 +752,15 @@ function inferProductMetadata(fileName: string): ProductMetadata {
       .trim()
   }
 
+  // Preserve release-defining product modifiers. Bowman Draft, Bowman Chrome,
+  // Mega Box, Sapphire, Logofractor, Update, etc. are distinct products and
+  // must never collapse into the parent brand simply because they share a year.
+  if (/\bbowman\s+draft\b/i.test(withoutChecklist)) {
+    cleanedProductName = /\bbaseball\b/i.test(cleanedProductName)
+      ? cleanedProductName
+      : `${cleanedProductName} Baseball`.trim()
+  }
+
   const productName = cleanedProductName || 'Imported Checklist'
 
   const displayName =
@@ -1460,11 +1469,11 @@ function suggestedMappings(headers: string[]) {
   }
 
   return {
-    sectionName: find(/^section$/, /subset/, /^set$/, /card.*set/),
-    cardNumber: find(/card.*number/, /^card #$/, /^number$/, /^no\.?$/),
+    sectionName: find(/^section$/, /subset/, /^set$/, /card.*set/, /^type$/),
+    cardNumber: find(/card.*number/, /^card #$/, /^card$/, /^number$/, /^no\.?$/),
     playerName: find(/player/, /athlete/, /item.*name/, /^name$/),
     printedTeam: find(/^team$/, /printed.*team/, /club/),
-    rookieFlag: find(/rookie/, /^rc$/),
+    rookieFlag: find(/rookie/, /^rc$/, /^1st\??$/),
     autoFlag: find(/autograph/, /^auto$/),
     relicFlag: find(/relic/, /memorabilia/, /patch/),
     serialFlag: find(/serial/, /numbered/),
@@ -2283,57 +2292,85 @@ async function handleStructuredWorkbookImport(params: {
   const { uploaded, buffer, sheetNames, supabase, userId } = params
   const stats = newStats()
 
-  // A Master-style sheet is the strongest representation because it already
-  // carries section, card number, name and optional team on each row.
-  const masterName = sheetNames.find(
-    (name) => normalizedKey(name) === 'master'
-  )
-
-  if (masterName) {
-    const masterRows = (await readSheet(buffer, masterName)) as SheetRow[]
-
-    if (looksLikeMasterChecklistRows(masterRows)) {
-      const parsed = parseMasterChecklist(masterRows, stats)
-
-      if (parsed.sections.length > 0 && parsed.items.length > 0) {
-        const metadata = inferProductMetadata(uploaded.name)
-        const persisted = await persistChecklist({
-          supabase,
-          userId,
-          uploadedName: uploaded.name,
-          metadata,
-          parsed,
-          stats,
-          sourceType: 'beckett',
-          importFormat: 'xlsx',
-          checklistNotes:
-            'Imported from a structured XLSX checklist using its Master card list.',
-          importNotes:
-            `Master sheet rows seen: ${stats.totalRowsSeen}. `,
-        })
-
-        return NextResponse.json({
-          ok: true,
-          detectedSource: 'Beckett / structured XLSX',
-          checklistId: persisted.checklist.id,
-          checklistName: persisted.checklist.name,
-          productId: persisted.product.id,
-          productName: persisted.product.display_name,
-          importMode: persisted.importMode,
-          files: [{ fileName: uploaded.name, ...stats }],
-          totals: {
-            files: 1,
-            totalRowsSeen: stats.totalRowsSeen,
-            normalizedRows: stats.normalizedRows,
-            insertedRows: stats.insertedRows,
-            skippedRows: stats.skippedRows,
-            sectionsCreated: stats.sectionsCreated,
-            checklistItemsCreated: stats.checklistItemsCreated,
-            teamRowsSeen: stats.teamRowsSeen,
-          },
-        })
+  // Prefer the strongest already-normalized card index anywhere in the
+  // workbook. Real-world workbooks often call this sheet Master, Team Sets,
+  // Checklist Index, etc. We intentionally recognize it by structure rather
+  // than by worksheet name:
+  //   Section | Card # | Player | Team
+  //
+  // This prevents summary/ranking/helper sheets from winning merely because
+  // they contain team names and numbers.
+  let canonical:
+    | {
+        sheetName: string
+        parsed: { sections: string[]; items: ParsedItem[] }
+        stats: ImportStats
       }
+    | null = null
+
+  for (const sheetName of sheetNames) {
+    const rows = (await readSheet(buffer, sheetName)) as SheetRow[]
+    if (!looksLikeMasterChecklistRows(rows)) continue
+
+    const probeStats = newStats()
+    const parsed = parseMasterChecklist(rows, probeStats)
+
+    if (
+      parsed.sections.length === 0 ||
+      parsed.items.length < 5 ||
+      parsed.items.filter((item) => Boolean(item.printedTeam)).length <
+        Math.max(5, Math.floor(parsed.items.length * 0.5))
+    ) {
+      continue
     }
+
+    if (!canonical || parsed.items.length > canonical.parsed.items.length) {
+      canonical = { sheetName, parsed, stats: probeStats }
+    }
+  }
+
+  if (canonical) {
+    Object.assign(stats, canonical.stats)
+    stats.teamRowsSeen = canonical.parsed.items.filter((item) =>
+      Boolean(item.printedTeam)
+    ).length
+
+    const metadata = inferProductMetadata(uploaded.name)
+    const persisted = await persistChecklist({
+      supabase,
+      userId,
+      uploadedName: uploaded.name,
+      metadata,
+      parsed: canonical.parsed,
+      stats,
+      sourceType: 'generic',
+      importFormat: 'xlsx',
+      checklistNotes:
+        'Imported from a structured XLSX checklist using its strongest canonical card index.',
+      importNotes:
+        `Canonical card index worksheet: ${canonical.sheetName}. `,
+    })
+
+    return NextResponse.json({
+      ok: true,
+      detectedSource: 'Structured XLSX checklist',
+      checklistId: persisted.checklist.id,
+      checklistName: persisted.checklist.name,
+      productId: persisted.product.id,
+      productName: persisted.product.display_name,
+      importMode: persisted.importMode,
+      files: [{ fileName: uploaded.name, ...stats }],
+      totals: {
+        files: 1,
+        totalRowsSeen: stats.totalRowsSeen,
+        normalizedRows: stats.normalizedRows,
+        insertedRows: stats.insertedRows,
+        skippedRows: stats.skippedRows,
+        sectionsCreated: stats.sectionsCreated,
+        checklistItemsCreated: stats.checklistItemsCreated,
+        teamRowsSeen: stats.teamRowsSeen,
+      },
+    })
   }
 
   // Otherwise inspect each worksheet for repeated card-number + item/name rows.

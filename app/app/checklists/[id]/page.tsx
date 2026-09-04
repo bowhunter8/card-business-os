@@ -945,6 +945,119 @@ function ChecklistTable({
   )
 }
 
+
+function TeamSectionChecklistTables({
+  items,
+  sections,
+  sectionNameById,
+  matchesByChecklistItemId,
+  checklistId,
+  selectedTeam,
+  searchText,
+  ownershipFilter,
+}: {
+  items: ChecklistItemRow[]
+  sections: ChecklistSectionRow[]
+  sectionNameById: Map<string, string>
+  matchesByChecklistItemId: Map<string, ChecklistMatchRow[]>
+  checklistId: string
+  selectedTeam: string
+  searchText: string
+  ownershipFilter: OwnershipFilter
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-6 text-center text-sm text-zinc-400">
+        No checklist cards match this team and filter.
+      </div>
+    )
+  }
+
+  const sectionOrder = new Map(
+    sections.map((section, index) => [section.id, index])
+  )
+
+  const grouped = new Map<string, ChecklistItemRow[]>()
+
+  for (const item of items) {
+    const existing = grouped.get(item.section_id)
+    if (existing) {
+      existing.push(item)
+    } else {
+      grouped.set(item.section_id, [item])
+    }
+  }
+
+  const groups = Array.from(grouped.entries())
+    .map(([sectionId, sectionItems]) => ({
+      sectionId,
+      sectionName: sectionNameById.get(sectionId) || 'Unknown Section',
+      items: sectionItems,
+      order: sectionOrder.get(sectionId) ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order
+      return a.sectionName.localeCompare(b.sectionName, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    })
+
+  return (
+    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {groups.map((group) => {
+        const ownedCount = group.items.filter(
+          (item) => ownershipForItem(item, matchesByChecklistItemId).owned
+        ).length
+
+        return (
+          <details
+            key={group.sectionId}
+            className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/30 open:col-span-full"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 transition hover:bg-zinc-900/70 [&::-webkit-details-marker]:hidden">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="text-sm text-cyan-300">▶</span>
+                <span className="truncate font-semibold text-zinc-100">
+                  {group.sectionName}
+                </span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                {ownedCount > 0 && (
+                  <span className="app-badge app-badge-success">
+                    {ownedCount} owned
+                  </span>
+                )}
+                <span className="app-badge">
+                  {group.items.length} card
+                  {group.items.length === 1 ? '' : 's'}
+                </span>
+              </div>
+            </summary>
+
+            <div className="border-t border-zinc-800 p-3">
+              <ChecklistTable
+                items={group.items}
+                sectionNameById={sectionNameById}
+                showSection={false}
+                emptyMessage="No cards in this section."
+                matchesByChecklistItemId={matchesByChecklistItemId}
+                checklistId={checklistId}
+                view="team"
+                selectedTeam={selectedTeam}
+                selectedSection={group.sectionId}
+                searchText={searchText}
+                ownershipFilter={ownershipFilter}
+              />
+            </div>
+          </details>
+        )
+      })}
+    </div>
+  )
+}
+
 async function loadChecklistMatches(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
@@ -2052,16 +2165,13 @@ export default async function ChecklistDetailPage({
                     </div>
                   )}
 
-                  <ChecklistTable
+                  <TeamSectionChecklistTables
                     items={visibleItems}
+                    sections={sections}
                     sectionNameById={sectionNameById}
-                    showSection
-                    emptyMessage="No checklist cards match this team and search."
                     matchesByChecklistItemId={matchesByChecklistItemId}
                     checklistId={checklist.id}
-                    view={view}
                     selectedTeam={selectedTeam}
-                    selectedSection={selectedSection}
                     searchText={searchText}
                     ownershipFilter={ownershipFilter}
                   />
