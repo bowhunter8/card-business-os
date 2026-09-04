@@ -80,6 +80,13 @@ export default function UtilitiesPage() {
             title="Backup & Export"
             description="Create full restore-capable backups and export records for accountants, QuickBooks, tax software, or CPA workflows."
           />
+
+          <UtilityCard
+            href="/app/checklists"
+            title="Checklist Library"
+            description="Browse card checklists by product and team, compare them with inventory, and build sets or team lots from matching cards."
+            tone="success"
+          />
         </div>
       </section>
 

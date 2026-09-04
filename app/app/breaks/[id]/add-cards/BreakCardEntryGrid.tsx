@@ -20,6 +20,8 @@ type Props = {
   defaultSet: string
   initialRows?: EntryRow[]
   forceFresh?: boolean
+  cardsReceived: number
+  alreadyEnteredCount: number
 }
 
 type AutoCompleteField = 'year' | 'set_name' | 'player_name' | 'card_number' | 'notes'
@@ -80,6 +82,15 @@ function rowHasMeaningfulData(row: EntryRow) {
     row.status !== 'available' ||
     row.notes.trim() !== ''
   )
+}
+
+function enteredUnitsFromRows(rows: EntryRow[]) {
+  return rows.reduce((sum, row) => {
+    if (!rowHasMeaningfulData(row)) return sum
+
+    const quantity = Math.max(1, Math.floor(Number(row.quantity || 1)))
+    return sum + (Number.isFinite(quantity) ? quantity : 1)
+  }, 0)
 }
 
 function uniqueValues(values: string[]) {
@@ -148,6 +159,8 @@ export default function BreakCardEntryGrid({
   defaultSet,
   initialRows = [],
   forceFresh = false,
+  cardsReceived,
+  alreadyEnteredCount,
 }: Props) {
   const playerRefs = useRef<Array<HTMLInputElement | null>>([])
   const fieldRefs = useRef<Record<AutoCompleteField, Array<HTMLInputElement | null>>>({
@@ -170,8 +183,68 @@ export default function BreakCardEntryGrid({
   const [rows, setRows] = useState<EntryRow[]>(fallbackRows)
   const [isDraftLoaded, setIsDraftLoaded] = useState(false)
   const [lastSavedText, setLastSavedText] = useState('')
+  const [checklistDraftJson, setChecklistDraftJson] = useState('')
 
   const storageKey = `${STORAGE_PREFIX}${breakId}`
+
+  useEffect(() => {
+    try {
+      setChecklistDraftJson(
+        window.localStorage.getItem(`hits:break-checklist-entry:${breakId}`) ?? ''
+      )
+    } catch {
+      setChecklistDraftJson('')
+    }
+  }, [breakId])
+
+  const thisEntryCount = useMemo(() => enteredUnitsFromRows(rows), [rows])
+  const totalAfterThisEntry = alreadyEnteredCount + thisEntryCount
+  const remainingAfterThisEntry = Math.max(0, cardsReceived - totalAfterThisEntry)
+
+  useEffect(() => {
+    const form = document.getElementById(
+      `manual-break-entry-form-${breakId}`
+    ) as HTMLFormElement | null
+
+    if (!form) return
+
+    function handleSubmit(event: SubmitEvent) {
+      const totalAfterSave = alreadyEnteredCount + thisEntryCount
+
+      if (thisEntryCount <= 0) {
+        event.preventDefault()
+        window.alert('Enter at least one item before saving.')
+        return
+      }
+
+      if (totalAfterSave > cardsReceived) {
+        event.preventDefault()
+        window.alert(
+          `This break already has ${alreadyEnteredCount} saved item${alreadyEnteredCount === 1 ? '' : 's'}. Adding ${thisEntryCount} more would make ${totalAfterSave}, but Items Received is ${cardsReceived}. Update Items Received or reduce the new quantities before saving.`
+        )
+        return
+      }
+
+      if (totalAfterSave < cardsReceived) {
+        const remaining = cardsReceived - totalAfterSave
+        const confirmed = window.confirm(
+          `${alreadyEnteredCount} item${alreadyEnteredCount === 1 ? '' : 's'} already saved + ${thisEntryCount} in this entry = ${totalAfterSave} of ${cardsReceived}. ${remaining} item${remaining === 1 ? '' : 's'} will still be unentered. Continue anyway?`
+        )
+
+        if (!confirmed) {
+          event.preventDefault()
+        }
+      }
+    }
+
+    form.addEventListener('submit', handleSubmit)
+    return () => form.removeEventListener('submit', handleSubmit)
+  }, [
+    breakId,
+    alreadyEnteredCount,
+    thisEntryCount,
+    cardsReceived,
+  ])
 
   useEffect(() => {
     let nextRows = fallbackRows
@@ -260,10 +333,24 @@ export default function BreakCardEntryGrid({
 
   function moveToNextPlayer(currentRow: number) {
     const nextRow = currentRow + 1
-    if (nextRow < rowCount) {
+    if (nextRow < rows.length) {
       playerRefs.current[nextRow]?.focus()
       playerRefs.current[nextRow]?.select()
     }
+  }
+
+  function addRows(count: number) {
+    setRows((current) => [
+      ...current,
+      ...Array.from({ length: count }).map((_, offset) =>
+        getInitialRow(
+          undefined,
+          current.length + offset,
+          defaultYear,
+          defaultSet
+        )
+      ),
+    ])
   }
 
   function updateRow(index: number, patch: Partial<EntryRow>) {
@@ -350,6 +437,24 @@ export default function BreakCardEntryGrid({
 
   return (
     <div>
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-400">
+        <span>
+          Saved: <span className="font-semibold text-emerald-300">{alreadyEnteredCount}</span>
+        </span>
+        <span>·</span>
+        <span>
+          This Entry: <span className="font-semibold text-zinc-100">{thisEntryCount}</span>
+        </span>
+        <span>·</span>
+        <span>
+          Received: <span className="font-semibold text-zinc-100">{cardsReceived}</span>
+        </span>
+        <span>·</span>
+        <span>
+          Remaining: <span className="font-semibold text-zinc-100">{remainingAfterThisEntry}</span>
+        </span>
+      </div>
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="text-sm text-zinc-400">
           {forceFresh
@@ -368,6 +473,10 @@ export default function BreakCardEntryGrid({
           Clear Autosaved Draft
         </button>
       </div>
+
+      <input type="hidden" name="card_count" value={rows.length} />
+      <input type="hidden" name="manual_pending_json" value={JSON.stringify({ rows })} />
+      <input type="hidden" name="checklist_pending_json" value={checklistDraftJson} />
 
       <div className="app-table-wrap">
         <div className="app-table-scroll">
@@ -499,6 +608,16 @@ export default function BreakCardEntryGrid({
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => addRows(20)}
+          className="app-button"
+        >
+          + Add 20 Rows
+        </button>
       </div>
     </div>
   )

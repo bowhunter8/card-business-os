@@ -73,6 +73,7 @@ export default async function NewBreakPage({
 
   if (!user) return null
 
+
   let selectedOrders: WhatnotOrderRow[] = []
 
   if (selectedWhatnotOrderIds.length > 0) {
@@ -241,6 +242,25 @@ export default async function NewBreakPage({
               Save Order
             </button>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+          <label className="flex cursor-pointer items-center gap-3">
+            <input
+              type="checkbox"
+              name="use_checklist_entry"
+              value="1"
+              className="h-4 w-4"
+            />
+            <div>
+              <div className="text-sm font-semibold text-zinc-200">
+                Use Checklist Entry
+              </div>
+              <div className="mt-0.5 text-xs text-zinc-500">
+                Optional. Leave unchecked to use the normal Manual Entry workflow.
+              </div>
+            </div>
+          </label>
         </div>
 
         <details className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">

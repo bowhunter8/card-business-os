@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { addBreakCardsAction } from '@/app/actions/breaks'
+import { addBreakChecklistCardsAction } from '@/app/actions/breaks'
 import BreakCardEntryGrid from './BreakCardEntryGrid'
+import ChecklistBreakEntry from './ChecklistBreakEntry'
 
 type BreakRow = {
   id: string
@@ -31,6 +32,42 @@ type EntryRow = {
   quantity: string
   status: string
   notes: string
+}
+
+type ChecklistOption = {
+  id: string
+  name: string
+  year: string | null
+  manufacturer: string | null
+  brand: string | null
+  product_name: string | null
+  sport: string | null
+}
+
+type ChecklistSection = {
+  id: string
+  checklist_id: string
+  name: string
+  sort_order: number | null
+}
+
+type ChecklistItem = {
+  id: string
+  checklist_id: string
+  section_id: string
+  card_number: string
+  player_name: string
+  printed_team: string | null
+  parallel_name: string | null
+  variation: string | null
+  rookie_flag: boolean
+  auto_flag: boolean
+  relic_flag: boolean
+  serial_flag: boolean
+  print_run: number | null
+  quantity_required: number
+  sort_order: number | null
+  notes: string | null
 }
 
 function money(value: number | null) {
@@ -117,6 +154,43 @@ function parseRestoreRows(value: string | undefined): EntryRow[] {
   }
 }
 
+async function loadChecklistItems(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  checklistIds: string[]
+) {
+  const rows: ChecklistItem[] = []
+  const pageSize = 500
+
+  for (const checklistId of checklistIds) {
+    let from = 0
+
+    while (true) {
+      const to = from + pageSize - 1
+
+      const { data, error } = await supabase
+        .from('checklist_items')
+        .select(
+          'id, checklist_id, section_id, card_number, player_name, printed_team, parallel_name, variation, rookie_flag, auto_flag, relic_flag, serial_flag, print_run, quantity_required, sort_order, notes'
+        )
+        .eq('checklist_id', checklistId)
+        .order('sort_order', { ascending: true })
+        .range(from, to)
+
+      if (error) {
+        throw new Error(`Unable to load checklist items: ${error.message}`)
+      }
+
+      const batch = (data ?? []) as ChecklistItem[]
+      rows.push(...batch)
+
+      if (batch.length < pageSize) break
+      from += pageSize
+    }
+  }
+
+  return rows
+}
+
 export default async function AddBreakCardsPage({
   params,
   searchParams,
@@ -127,11 +201,13 @@ export default async function AddBreakCardsPage({
     restore?: string
     row_count?: string
     cards_received?: string
+    entry_mode?: string
   }>
 }) {
   const { id } = await params
   const pageParams = searchParams ? await searchParams : undefined
   const pageError = pageParams?.error
+  const entryMode = pageParams?.entry_mode === 'checklist' ? 'checklist' : 'manual'
 
   const safeRestore =
     pageParams?.restore && pageParams.restore.length <= 12000
@@ -148,7 +224,12 @@ export default async function AddBreakCardsPage({
 
   if (!user) return null
 
-  const [breakResponse, linkedOrdersResponse, existingItemsResponse] = await Promise.all([
+  const [
+    breakResponse,
+    linkedOrdersResponse,
+    existingItemsResponse,
+    checklistResponse,
+  ] = await Promise.all([
     supabase
       .from('breaks')
       .select(`
@@ -178,18 +259,51 @@ export default async function AddBreakCardsPage({
 
     supabase
       .from('inventory_items')
-      .select('id', { count: 'exact', head: true })
+      .select('id, quantity')
       .eq('user_id', user.id)
       .eq('source_type', 'break')
       .eq('source_break_id', id),
+
+    supabase
+      .from('checklists')
+      .select(
+        'id, name, year, manufacturer, brand, product_name, sport'
+      )
+      .or(`visibility.eq.global,owner_user_id.eq.${user.id}`)
+      .order('year', { ascending: false })
+      .order('name', { ascending: true }),
   ])
 
   if (breakResponse.error || !breakResponse.data) {
     notFound()
   }
 
+  if (checklistResponse.error) {
+    throw new Error(`Unable to load checklists: ${checklistResponse.error.message}`)
+  }
+
   const item = breakResponse.data as BreakRow
   const linkedOrders = (linkedOrdersResponse.data ?? []) as LinkedWhatnotOrderRow[]
+  const checklists = (checklistResponse.data ?? []) as ChecklistOption[]
+  const checklistIds = checklists.map((checklist) => checklist.id)
+
+  let checklistSections: ChecklistSection[] = []
+  let checklistItems: ChecklistItem[] = []
+
+  if (entryMode === 'checklist' && checklistIds.length > 0) {
+    const { data: sectionsData, error: sectionsError } = await supabase
+      .from('checklist_sections')
+      .select('id, checklist_id, name, sort_order')
+      .in('checklist_id', checklistIds)
+      .order('sort_order', { ascending: true })
+
+    if (sectionsError) {
+      throw new Error(`Unable to load checklist sections: ${sectionsError.message}`)
+    }
+
+    checklistSections = (sectionsData ?? []) as ChecklistSection[]
+    checklistItems = await loadChecklistItems(supabase, checklistIds)
+  }
 
   const linkedOrderProductNames = linkedOrders
     .map((row) => row.product_name || '')
@@ -209,7 +323,7 @@ export default async function AddBreakCardsPage({
 
   const rowCount =
     pageParams?.row_count != null
-      ? Math.min(Math.max(1, Number(pageParams.row_count)), 100)
+      ? Math.min(Math.max(1, Number(pageParams.row_count)), 2000)
       : itemsReceived > 0
         ? Math.min(itemsReceived, 50)
         : 1
@@ -217,7 +331,13 @@ export default async function AddBreakCardsPage({
   const droppedOversizedRestore =
     Boolean(pageParams?.restore) && safeRestore == null
 
-  const existingItemsCount = Math.max(0, Number(existingItemsResponse.count ?? 0))
+  const existingInventoryItems = existingItemsResponse.data ?? []
+  const existingItemsCount = existingInventoryItems.length
+  const alreadyEnteredCount = existingInventoryItems.reduce(
+    (sum, inventoryItem) => sum + Math.max(0, Number(inventoryItem.quantity ?? 0)),
+    0
+  )
+  const remainingCount = Math.max(0, itemsReceived - alreadyEnteredCount)
   const hasExistingItems = existingItemsCount > 0
 
   return (
@@ -226,7 +346,7 @@ export default async function AddBreakCardsPage({
         <div>
           <h1 className="app-title">Add Items From Break</h1>
           <p className="app-subtitle">
-            Enter items or lots from this break, choose for sale, personal, or junk, and quantity will count toward the total items received.
+            Enter items manually or use HITS checklists to quickly record cards received from this break.
           </p>
         </div>
 
@@ -263,13 +383,15 @@ export default async function AddBreakCardsPage({
 
       {hasExistingItems ? (
         <div className="mt-4 rounded-xl border border-blue-900 bg-blue-950/30 px-4 py-3 text-sm text-blue-200">
-          This break already has items entered. This page now opens as a fresh add-more form so old autosaved rows do not get reloaded on top of your existing items.
+          This break already has items entered. This page opens as an add-more form so existing inventory is preserved.
         </div>
       ) : null}
 
-      <div className="mt-4 rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
-        Autosave is enabled on this page. Large entries should now stay recoverable in this browser even if the page refreshes or errors.
-      </div>
+      {entryMode === 'manual' ? (
+        <div className="mt-4 rounded-xl border border-emerald-900 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+          Autosave is enabled for Manual Entry. Large entries should stay recoverable in this browser even if the page refreshes or errors.
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-2 md:grid-cols-6">
         <div className="app-card-tight p-2.5">
@@ -324,51 +446,92 @@ export default async function AddBreakCardsPage({
         </Link>
       </div>
 
-      <form
-        action={addBreakCardsAction}
-        className="app-card mt-6"
-      >
-        <input type="hidden" name="break_id" value={item.id} />
-        <input type="hidden" name="card_count" value={rowCount} />
-        <input type="hidden" name="cards_received" value={itemsReceived} />
+      <div className="mt-6 flex flex-wrap gap-2 rounded-xl border border-zinc-800 bg-zinc-950/50 p-2">
+        <Link
+          href={`/app/breaks/${item.id}/add-cards?entry_mode=manual`}
+          className={entryMode === 'manual' ? 'app-button-primary' : 'app-button'}
+        >
+          Manual Entry
+        </Link>
 
-        <div className="mb-5 text-sm text-zinc-400">
-          This break has <span className="font-medium text-zinc-200">{itemsReceived}</span> item(s) received, and only the quantities from filled rows will count toward that total.
+        <Link
+          href={`/app/breaks/${item.id}/add-cards?entry_mode=checklist`}
+          className={entryMode === 'checklist' ? 'app-button-primary' : 'app-button'}
+        >
+          Checklist Entry
+        </Link>
+      </div>
+
+      {entryMode === 'manual' ? (
+        <form
+          id={`manual-break-entry-form-${item.id}`}
+          action={addBreakChecklistCardsAction}
+          className="app-card mt-6"
+        >
+          <input type="hidden" name="break_id" value={item.id} />
+          <input type="hidden" name="cards_received" value={itemsReceived} />
+          <input type="hidden" name="entry_mode" value="manual" />
+
+          <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-400">
+            <span>
+              Saved: <span className="font-semibold text-emerald-300">{alreadyEnteredCount}</span>
+            </span>
+            <span>·</span>
+            <span>
+              Received: <span className="font-semibold text-zinc-100">{itemsReceived}</span>
+            </span>
+            <span>·</span>
+            <span>
+              Remaining before this entry: <span className="font-semibold text-zinc-100">{remainingCount}</span>
+            </span>
+          </div>
+
+          <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
+            <button
+              type="submit"
+              className="app-button-primary"
+            >
+              Save All Items To Inventory
+            </button>
+          </div>
+
+          <BreakCardEntryGrid
+            breakId={item.id}
+            rowCount={rowCount}
+            defaultYear={defaultYear}
+            defaultSet={defaultSet}
+            initialRows={restoredRows}
+            forceFresh={hasExistingItems}
+            cardsReceived={itemsReceived}
+            alreadyEnteredCount={alreadyEnteredCount}
+          />
+
+          <div className="mt-5 flex justify-end gap-3">
+            <Link
+              href={`/app/breaks/${item.id}`}
+              className="app-button-secondary"
+            >
+              Cancel
+            </Link>
+            <button
+              type="submit"
+              className="app-button-primary"
+            >
+              Save All Items To Inventory
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="app-card mt-6">
+          <ChecklistBreakEntry
+            breakId={item.id}
+            cardsReceived={itemsReceived}
+            checklists={checklists}
+            sections={checklistSections}
+            items={checklistItems}
+          />
         </div>
-
-        <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
-          <button
-            type="submit"
-            className="app-button-primary"
-          >
-            Add Items To Inventory
-          </button>
-        </div>
-
-        <BreakCardEntryGrid
-          breakId={item.id}
-          rowCount={rowCount}
-          defaultYear={defaultYear}
-          defaultSet={defaultSet}
-          initialRows={restoredRows}
-          forceFresh={hasExistingItems}
-        />
-
-        <div className="mt-5 flex justify-end gap-3">
-          <Link
-            href={`/app/breaks/${item.id}`}
-            className="app-button-secondary"
-          >
-            Cancel
-          </Link>
-          <button
-            type="submit"
-            className="app-button-primary"
-          >
-            Add Items To Inventory
-          </button>
-        </div>
-      </form>
+      )}
     </div>
   )
 }

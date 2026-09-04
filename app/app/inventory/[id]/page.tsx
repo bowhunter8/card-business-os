@@ -108,6 +108,20 @@ type RelatedBreakRow = {
   created_at: string | null;
 };
 
+type InventoryBuildRow = {
+  id: string;
+  build_type: string;
+  name: string;
+  status: string;
+  result_inventory_item_id: string | null;
+  checklist_id: string | null;
+  checklist_section_id: string | null;
+  team_name: string | null;
+  created_at: string;
+  finalized_at: string | null;
+  disassembled_at: string | null;
+};
+
 function money(value: number | null | undefined) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -406,14 +420,18 @@ export default async function InventoryDetailPage({
     savedSale?: string;
     updatedSale?: string;
     deletedSale?: string;
+    buildDisassembled?: string;
+    buildError?: string;
   }>;
 }) {
   const { id } = await params;
   const query = searchParams ? await searchParams : undefined;
-  const errorMessage = query?.error;
+  const errorMessage = query?.buildError || query?.error;
 
   const successMessage =
-    query?.saleRecorded === "1" || query?.savedSale === "1"
+    query?.buildDisassembled === "1"
+      ? "Build disassembled successfully. Original source quantities were restored and the finished build item was removed from active inventory."
+      : query?.saleRecorded === "1" || query?.savedSale === "1"
       ? "Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated."
       : query?.updatedSale === "1"
         ? "Sale updated successfully."
@@ -548,6 +566,37 @@ export default async function InventoryDetailPage({
     ((giveawayAuditResponse.data ?? [])[0] as GiveawayAuditRow | undefined) ??
     null;
 
+  const { data: buildData, error: buildLoadError } = await supabase
+    .from("inventory_builds")
+    .select(
+      `
+      id,
+      build_type,
+      name,
+      status,
+      result_inventory_item_id,
+      checklist_id,
+      checklist_section_id,
+      team_name,
+      created_at,
+      finalized_at,
+      disassembled_at
+    `,
+    )
+    .eq("user_id", user.id)
+    .eq("result_inventory_item_id", item.id)
+    .maybeSingle();
+
+  if (buildLoadError) {
+    throw new Error(
+      `Unable to load build history: ${buildLoadError.message}`,
+    );
+  }
+
+  const inventoryBuild = (buildData as InventoryBuildRow | null) ?? null;
+  const isFinalizedBuild = inventoryBuild?.status === "finalized";
+  const isDisassembledBuild = inventoryBuild?.status === "disassembled";
+
   const isFinalizedDisposal = Boolean(finalizedDisposal);
 
   const activeSales = sales.filter((sale) => !sale.reversed_at);
@@ -574,12 +623,23 @@ export default async function InventoryDetailPage({
   const isFinalizedGiveaway =
     isGiveaway && (Boolean(giveawayAudit) || availableQuantity <= 0);
   const isPlannedGiveaway = isGiveaway && !isFinalizedGiveaway;
-  const isLockedForBusinessEvent = isFinalizedDisposal || isFinalizedGiveaway;
+  const isLockedForBusinessEvent =
+    isFinalizedDisposal || isFinalizedGiveaway || isDisassembledBuild;
   const effectiveStatus =
     availableQuantity <= 0 && totalQtySold > 0 ? "sold" : item.status;
 
   const hasAvailableToSell = availableQuantity > 0 && !isGiveaway;
-  const canDelete = activeSales.length === 0;
+  const canDelete =
+    activeSales.length === 0 && !isFinalizedBuild && !isDisassembledBuild;
+  const buildHasAnySaleHistory = sales.length > 0;
+  const canDisassembleBuild =
+    Boolean(isFinalizedBuild) &&
+    !buildHasAnySaleHistory &&
+    item.status === "available" &&
+    Number(item.quantity ?? 0) === 1 &&
+    Number(item.available_quantity ?? 0) === 1 &&
+    !isFinalizedDisposal &&
+    !isFinalizedGiveaway;
   const itemFormId = "inventory-inline-edit-form";
   const itemName =
     buildDisplay(item) || item.title || item.player_name || "Untitled item";
@@ -694,6 +754,43 @@ export default async function InventoryDetailPage({
     );
   }
 
+  async function disassembleBuildAction(formData: FormData) {
+    "use server";
+
+    const buildId = String(formData.get("build_id") ?? "").trim();
+    const { redirect } = await import("next/navigation");
+    const actionSupabase = await createClient();
+
+    const {
+      data: { user: actionUser },
+    } = await actionSupabase.auth.getUser();
+
+    if (!actionUser) {
+      redirect("/login");
+    }
+
+    if (!buildId) {
+      redirect(
+        `/app/inventory/${id}?buildError=${encodeURIComponent("Missing build ID.")}`,
+      );
+    }
+
+    const { error: rpcError } = await actionSupabase.rpc(
+      "disassemble_inventory_build",
+      {
+        p_build_id: buildId,
+      },
+    );
+
+    if (rpcError) {
+      redirect(
+        `/app/inventory/${id}?buildError=${encodeURIComponent(rpcError.message)}`,
+      );
+    }
+
+    redirect(`/app/inventory/${id}?buildDisassembled=1`);
+  }
+
   return (
     <div className="app-page-wide min-h-[calc(100vh-6.5rem)] space-y-3 pb-8">
       <form id={itemFormId} action={updateInventoryItemAction}>
@@ -738,6 +835,18 @@ export default async function InventoryDetailPage({
             ) : (
               renderStatusPill(effectiveStatus)
             )}
+
+            {isFinalizedBuild ? (
+              <span className="app-badge app-badge-success">
+                Built in HITS
+              </span>
+            ) : null}
+
+            {isDisassembledBuild ? (
+              <span className="app-badge app-badge-neutral">
+                Build Disassembled
+              </span>
+            ) : null}
 
             {item.ebay_exported_at ? (
               <span
@@ -796,6 +905,109 @@ export default async function InventoryDetailPage({
         <div className="app-alert-success">{successMessage}</div>
       ) : null}
 
+      {inventoryBuild ? (
+        <div className="app-section mt-0 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Build History
+              </div>
+              <h2 className="mt-1 text-base font-semibold leading-tight">
+                {inventoryBuild.name}
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                This item was created by HITS from other inventory records. The
+                permanent build record preserves component quantities and cost
+                basis for audit and reversal.
+              </p>
+            </div>
+
+            {isFinalizedBuild ? (
+              <span className="app-badge app-badge-success">
+                Finalized Build
+              </span>
+            ) : isDisassembledBuild ? (
+              <span className="app-badge app-badge-neutral">
+                Disassembled
+              </span>
+            ) : (
+              <span className="app-badge app-badge-info capitalize">
+                {inventoryBuild.status.replaceAll("_", " ")}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <Detail
+              label="Build Type"
+              value={inventoryBuild.build_type.replaceAll("_", " ")}
+            />
+            <Detail
+              label="Team"
+              value={inventoryBuild.team_name || item.team || "—"}
+            />
+            <Detail
+              label="Built"
+              value={formatDateTime(inventoryBuild.finalized_at)}
+            />
+            <Detail label="Cost Basis" value={money(item.cost_basis_total)} />
+          </div>
+
+          {isFinalizedBuild ? (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-zinc-100">
+                    Disassemble Build
+                  </div>
+                  <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
+                    Restores the exact component quantities to their original
+                    inventory records and removes this finished set from active
+                    inventory. This is only allowed while the finished item is
+                    still completely available and has no sale history.
+                  </p>
+
+                  {!canDisassembleBuild ? (
+                    <div className="mt-2 text-xs text-amber-300">
+                      Disassembly is unavailable because this finished item has
+                      sale history, is no longer fully available, or has another
+                      finalized business event.
+                    </div>
+                  ) : null}
+                </div>
+
+                <form action={disassembleBuildAction}>
+                  <input
+                    type="hidden"
+                    name="build_id"
+                    value={inventoryBuild.id}
+                  />
+                  <AppLoadingButton
+                    type="submit"
+                    loadingText="Disassembling..."
+                    overlayText="Restoring original inventory..."
+                    showOverlayOnClick
+                    disabled={!canDisassembleBuild}
+                    className="app-button-danger disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Disassemble Build
+                  </AppLoadingButton>
+                </form>
+              </div>
+            </div>
+          ) : null}
+
+          {isDisassembledBuild ? (
+            <div className="app-alert-info mt-3">
+              This build was disassembled on{" "}
+              {formatDateTime(inventoryBuild.disassembled_at)}. Original source
+              quantities were restored and this finished item remains only as
+              history.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="app-section mt-0 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
@@ -814,8 +1026,9 @@ export default async function InventoryDetailPage({
 
         {isLockedForBusinessEvent ? (
           <div className="app-alert-warning mt-3">
-            This item is locked because it has already been finalized for
-            giveaway or tax review.
+            {isDisassembledBuild
+              ? "This finished build has been disassembled and is retained only for audit/history."
+              : "This item is locked because it has already been finalized for giveaway or tax review."}
           </div>
         ) : (
           <div className="mt-3 grid gap-3 lg:grid-cols-4">
@@ -1061,6 +1274,14 @@ export default async function InventoryDetailPage({
               </p>
             </div>
             <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
+          </div>
+        ) : null}
+
+        {!isLockedForBusinessEvent && isFinalizedBuild ? (
+          <div className="app-alert-info mt-3">
+            Built inventory items are not deleted directly. Use Disassemble
+            Build above to restore the original component inventory and preserve
+            the audit trail.
           </div>
         ) : null}
       </div>

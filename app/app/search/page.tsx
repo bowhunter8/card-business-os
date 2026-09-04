@@ -97,6 +97,29 @@ type SaleSearchRow = {
 }
 
 const SECTION_LIMIT = 50
+const SEARCH_PAGE_SIZE = 500
+
+async function fetchAllPages<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message?: string } | null }>) {
+  const rows: T[] = []
+  let from = 0
+
+  while (true) {
+    const to = from + SEARCH_PAGE_SIZE - 1
+    const response = await fetchPage(from, to)
+
+    if (response.error) {
+      return { data: rows, error: response.error }
+    }
+
+    const page = response.data ?? []
+    rows.push(...page)
+
+    if (page.length < SEARCH_PAGE_SIZE) break
+    from += SEARCH_PAGE_SIZE
+  }
+
+  return { data: rows, error: null }
+}
 
 type InventoryStatusFilter =
   | 'available'
@@ -1968,137 +1991,147 @@ export default async function GlobalSearchPage({
         salesDirectResponse,
       ] = await Promise.all([
         orderFilters.length > 0
-          ? supabase
-              .from('whatnot_orders')
-              .select(`
-                id,
-                break_id,
-                order_id,
-                order_numeric_id,
-                buyer,
-                seller,
-                product_name,
-                processed_date,
-                processed_date_display,
-                order_status,
-                quantity,
-                subtotal,
-                shipping_price,
-                taxes,
-                total,
-                source_file_name
-              `)
-              .eq('user_id', user.id)
-              .or(orderFilters.join(','))
-              .order('processed_date', { ascending: false })
-              .limit(SECTION_LIMIT * 4)
+          ? fetchAllPages<WhatnotOrderRow>((from, to) =>
+              supabase
+                .from('whatnot_orders')
+                .select(`
+                  id,
+                  break_id,
+                  order_id,
+                  order_numeric_id,
+                  buyer,
+                  seller,
+                  product_name,
+                  processed_date,
+                  processed_date_display,
+                  order_status,
+                  quantity,
+                  subtotal,
+                  shipping_price,
+                  taxes,
+                  total,
+                  source_file_name
+                `)
+                .eq('user_id', user.id)
+                .or(orderFilters.join(','))
+                .order('processed_date', { ascending: false })
+                .range(from, to)
+            )
           : Promise.resolve({ data: [], error: null }),
 
         breakFilters.length > 0
-          ? supabase
-              .from('breaks')
-              .select(`
-                id,
-                break_date,
-                source_name,
-                order_number,
-                product_name,
-                format_type,
-                notes,
-                total_cost,
-                reversed_at
-              `)
-              .eq('user_id', user.id)
-              .or(breakFilters.join(','))
-              .order('break_date', { ascending: false })
-              .limit(SECTION_LIMIT * 4)
+          ? fetchAllPages<BreakRow>((from, to) =>
+              supabase
+                .from('breaks')
+                .select(`
+                  id,
+                  break_date,
+                  source_name,
+                  order_number,
+                  product_name,
+                  format_type,
+                  notes,
+                  total_cost,
+                  reversed_at
+                `)
+                .eq('user_id', user.id)
+                .or(breakFilters.join(','))
+                .order('break_date', { ascending: false })
+                .range(from, to)
+            )
           : Promise.resolve({ data: [], error: null }),
 
         inventoryFilters.length > 0
-          ? supabase
-              .from('inventory_items')
-              .select(`
-                id,
-                source_break_id,
-                title,
-                player_name,
-                year,
-                brand,
-                set_name,
-                card_number,
-                parallel_name,
-                team,
-                quantity,
-                available_quantity,
-                cost_basis_total,
-                estimated_value_total,
-                status,
-                item_type,
-                notes,
-                source_type,
-                ebay_exported_at,
-                processing_status
-              `)
-              .eq('user_id', user.id)
-              .or(inventoryFilters.join(','))
-              .limit(SECTION_LIMIT * 4)
+          ? fetchAllPages<InventoryItemRow>((from, to) =>
+              supabase
+                .from('inventory_items')
+                .select(`
+                  id,
+                  source_break_id,
+                  title,
+                  player_name,
+                  year,
+                  brand,
+                  set_name,
+                  card_number,
+                  parallel_name,
+                  team,
+                  quantity,
+                  available_quantity,
+                  cost_basis_total,
+                  estimated_value_total,
+                  status,
+                  item_type,
+                  notes,
+                  source_type,
+                  ebay_exported_at,
+                  processing_status
+                `)
+                .eq('user_id', user.id)
+                .or(inventoryFilters.join(','))
+                .range(from, to)
+            )
           : Promise.resolve({ data: [], error: null }),
 
         soldInventoryFilters.length > 0
-          ? supabase
-              .from('inventory_items')
-              .select(`
-                id,
-                source_break_id,
-                title,
-                player_name,
-                year,
-                brand,
-                set_name,
-                card_number,
-                parallel_name,
-                team,
-                quantity,
-                available_quantity,
-                cost_basis_total,
-                estimated_value_total,
-                status,
-                item_type,
-                notes,
-                source_type,
-                ebay_exported_at,
-                processing_status
-              `)
-              .eq('user_id', user.id)
-              .eq('status', 'sold')
-              .or(soldInventoryFilters.join(','))
-              .limit(SECTION_LIMIT * 4)
+          ? fetchAllPages<InventoryItemRow>((from, to) =>
+              supabase
+                .from('inventory_items')
+                .select(`
+                  id,
+                  source_break_id,
+                  title,
+                  player_name,
+                  year,
+                  brand,
+                  set_name,
+                  card_number,
+                  parallel_name,
+                  team,
+                  quantity,
+                  available_quantity,
+                  cost_basis_total,
+                  estimated_value_total,
+                  status,
+                  item_type,
+                  notes,
+                  source_type,
+                  ebay_exported_at,
+                  processing_status
+                `)
+                .eq('user_id', user.id)
+                .eq('status', 'sold')
+                .or(soldInventoryFilters.join(','))
+                .range(from, to)
+            )
           : Promise.resolve({ data: [], error: null }),
 
         salesFilters.length > 0
-          ? supabase
-              .from('sales')
-              .select(`
-                id,
-                sale_date,
-                quantity_sold,
-                gross_sale,
-                platform_fees,
-                shipping_cost,
-                other_costs,
-                net_proceeds,
-                cost_of_goods_sold,
-                profit,
-                platform,
-                notes,
-                reversed_at,
-                inventory_item_id
-              `)
-              .eq('user_id', user.id)
-              .is('reversed_at', null)
-              .or(salesFilters.join(','))
-              .order('sale_date', { ascending: false })
-              .limit(SECTION_LIMIT * 4)
+          ? fetchAllPages<SaleSearchRow>((from, to) =>
+              supabase
+                .from('sales')
+                .select(`
+                  id,
+                  sale_date,
+                  quantity_sold,
+                  gross_sale,
+                  platform_fees,
+                  shipping_cost,
+                  other_costs,
+                  net_proceeds,
+                  cost_of_goods_sold,
+                  profit,
+                  platform,
+                  notes,
+                  reversed_at,
+                  inventory_item_id
+                `)
+                .eq('user_id', user.id)
+                .is('reversed_at', null)
+                .or(salesFilters.join(','))
+                .order('sale_date', { ascending: false })
+                .range(from, to)
+            )
           : Promise.resolve({ data: [], error: null }),
       ])
 
@@ -2118,7 +2151,6 @@ export default async function GlobalSearchPage({
         getExactBoostText: (order) => buildSearchableText([order.product_name, order.order_numeric_id, order.order_id]),
       })
         .filter((order) => matchesOrderFilters(order, searchFilters))
-        .slice(0, SECTION_LIMIT)
 
       matchingBreaks = filterAndRankByTokens({
         rows: (breaksResponse.data ?? []) as BreakRow[],
@@ -2134,7 +2166,6 @@ export default async function GlobalSearchPage({
         getExactBoostText: (breakRow) => buildSearchableText([breakRow.product_name, breakRow.order_number]),
       })
         .filter((breakRow) => matchesBreakFilters(breakRow, searchFilters))
-        .slice(0, SECTION_LIMIT)
 
       const rankedInventoryMatches = filterAndRankByTokens({
         rows: (inventoryResponse.data ?? []) as InventoryItemRow[],
@@ -2159,7 +2190,6 @@ export default async function GlobalSearchPage({
 
       matchingInventory = rankedInventoryMatches
         .filter((item) => matchesInventoryStatusFilter(item, activeInventoryStatusFilter))
-        .slice(0, SECTION_LIMIT)
 
       const soldInventoryMatches = filterAndRankByTokens({
         rows: (soldInventoryResponse.data ?? []) as InventoryItemRow[],
@@ -2180,7 +2210,6 @@ export default async function GlobalSearchPage({
         getExactBoostText: (item) => buildSearchableText([item.title, item.player_name, item.brand, item.set_name]),
       })
         .filter((item) => matchesInventoryFilters(item, searchFilters))
-        .slice(0, SECTION_LIMIT)
       const soldInventoryIds = soldInventoryMatches.map((item) => item.id)
 
       const salesDirectMatches = filterAndRankByTokens({
@@ -2190,7 +2219,6 @@ export default async function GlobalSearchPage({
           buildSearchableText([sale.platform, sale.notes]),
       })
         .filter((sale) => matchesSaleFilters(sale, searchFilters))
-        .slice(0, SECTION_LIMIT)
       let salesFromInventoryMatches: SaleSearchRow[] = []
 
       if (soldInventoryIds.length > 0) {
@@ -2216,7 +2244,6 @@ export default async function GlobalSearchPage({
           .is('reversed_at', null)
           .in('inventory_item_id', soldInventoryIds)
           .order('sale_date', { ascending: false })
-          .limit(SECTION_LIMIT)
 
         salesFromInventoryMatches = (salesFromInventoryResponse.data ?? []) as SaleSearchRow[]
         salesError = salesFromInventoryResponse.error?.message ?? null
@@ -2227,7 +2254,7 @@ export default async function GlobalSearchPage({
         salesMap.set(sale.id, sale)
       }
 
-      matchingSales = Array.from(salesMap.values()).slice(0, SECTION_LIMIT)
+      matchingSales = Array.from(salesMap.values())
 
       const salesInventoryIds = Array.from(
         new Set(
