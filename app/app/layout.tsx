@@ -274,6 +274,18 @@ export default async function AppLayout({
   if (!hasSubscriptionAccess(access)) redirect('/not-authorized')
 
   const isAdmin = access.role === 'admin'
+
+  let openChecklistProblemCount = 0
+
+  if (isAdmin) {
+    const { count } = await supabase
+      .from('checklist_problem_reports')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['open', 'reviewing', 'source_issue', 'importer_issue'])
+
+    openChecklistProblemCount = count ?? 0
+  }
+
   const displayName = access.display_name || user.email
   const trialDaysRemaining = getTrialDaysRemaining(access)
 
@@ -312,7 +324,7 @@ export default async function AppLayout({
             <img
               src="/hits-icon.png"
               alt="HITS Inventory & Profit Tax Tracking"
-              className="h-auto w-full max-w-[225px] object-contain"
+              className="h-auto w-full max-w-56.25 object-contain"
             />
             
           </div>
@@ -327,10 +339,19 @@ export default async function AppLayout({
 
             {isAdmin && (
               <Link
-                href="/app/admin/users"
-                className="app-button-warning w-full justify-start hover:border-cyan-500/40"
+                href="/app/admin"
+                className="app-button-warning w-full justify-between hover:border-cyan-500/40"
               >
-                Admin
+                <span>Admin</span>
+
+                {openChecklistProblemCount > 0 && (
+                  <span
+                    className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full border border-red-500/70 bg-red-950/70 px-1.5 py-0.5 text-xs font-bold text-red-200"
+                    title={`${openChecklistProblemCount} unresolved checklist problem${openChecklistProblemCount === 1 ? '' : 's'}`}
+                  >
+                    {openChecklistProblemCount}
+                  </span>
+                )}
               </Link>
             )}
           </nav>
@@ -359,13 +380,13 @@ export default async function AppLayout({
 
           {/* Top Bar */}
           <div className="sticky top-0 z-50 px-3 py-3 backdrop-blur md:px-6 md:py-4">
-            <div className="mx-auto max-w-[1900px]">
-              <div className="relative overflow-hidden rounded-2xl border border-cyan-500/60 bg-gradient-to-r from-blue-950 via-black to-blue-950/80 px-4 py-4 shadow-[0_0_22px_rgba(14,165,233,0.22)] md:px-6">
+            <div className="mx-auto max-w-475">
+              <div className="relative overflow-hidden rounded-2xl border border-cyan-500/60 bg-linear-to-r from-blue-950 via-black to-blue-950/80 px-4 py-4 shadow-[0_0_22px_rgba(14,165,233,0.22)] md:px-6">
                 <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_left,rgba(37,99,235,0.34),transparent_44%),radial-gradient(circle_at_right,rgba(14,165,233,0.16),transparent_38%)]" />
-                <div className="pointer-events-none absolute bottom-0 left-0 h-px w-full bg-gradient-to-r from-transparent via-yellow-400/80 to-transparent" />
+                <div className="pointer-events-none absolute bottom-0 left-0 h-px w-full bg-linear-to-r from-transparent via-yellow-400/80 to-transparent" />
 
                 <div className="relative z-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:gap-8">
-                  <div className="flex shrink-0 items-center gap-5 md:min-w-[520px]">
+                  <div className="flex shrink-0 items-center gap-5 md:min-w-130">
                     <img
                       src="/hits-icon.png"
                       alt="HITS Hobby Inventory Tracking System"

@@ -15,6 +15,13 @@ type ImportFileResult = {
   errors: string[]
 }
 
+type ProductIdentity = {
+  year: string
+  manufacturer: string
+  brand: string
+  productName: string
+}
+
 type ImportResponse = {
   ok: boolean
   detectedSource?: string
@@ -50,6 +57,95 @@ function fileIdentity(file: File) {
   return `${file.name}::${file.size}::${file.lastModified}`
 }
 
+function inferProductIdentity(fileName: string): ProductIdentity {
+  const base = fileName
+    .replace(/\.xlsx$/i, '')
+    .replace(/\s*\(\d+\)\s*$/i, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\bchecklist\s+insider\b/gi, ' ')
+    .replace(/\bchecklist\b/gi, ' ')
+    .replace(/\bdownloads?\b/gi, ' ')
+    .replace(/\bexcel\b/gi, ' ')
+    .replace(/\bspreadsheet\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const year = base.match(/\b(?:19|20)\d{2}\b/)?.[0] ?? ''
+  const withoutYear = year ? base.replace(year, '').trim() : base
+  const lower = withoutYear.toLowerCase()
+
+  const paniniTerms = [
+    'panini',
+    'prizm',
+    'national treasures',
+    'donruss',
+    'select',
+    'immaculate',
+    'three and two',
+    'stars stripes',
+    'stars & stripes',
+  ]
+
+  const toppsTerms = [
+    'topps',
+    'bowman',
+    'finest',
+    'stadium club',
+    'heritage',
+    'archives',
+    'museum collection',
+    'tier one',
+    'pristine',
+    'pro debut',
+    't205',
+    '205 baseball',
+    'shoebox treasures',
+    'allen ginter',
+    'allen & ginter',
+  ]
+
+  const isPanini = paniniTerms.some((term) => lower.includes(term))
+  const isTopps = !isPanini && toppsTerms.some((term) => lower.includes(term))
+
+  const manufacturer = isPanini ? 'Panini' : isTopps ? 'Topps' : ''
+  const brand = lower.includes('bowman')
+    ? 'Bowman'
+    : isPanini
+      ? 'Panini'
+      : isTopps
+        ? 'Topps'
+        : ''
+
+  const productName = withoutYear || 'Imported Checklist'
+
+  return {
+    year,
+    manufacturer,
+    brand,
+    productName,
+  }
+}
+
+function updateIdentityField(
+  current: Record<string, ProductIdentity>,
+  fileKey: string,
+  field: keyof ProductIdentity,
+  value: string
+) {
+  return {
+    ...current,
+    [fileKey]: {
+      ...(current[fileKey] ?? {
+        year: '',
+        manufacturer: '',
+        brand: '',
+        productName: '',
+      }),
+      [field]: value,
+    },
+  }
+}
+
 function isPopupChecklistImport() {
   if (typeof window === 'undefined') return false
   return new URLSearchParams(window.location.search).get('popup') === '1'
@@ -65,6 +161,7 @@ export default function ChecklistImportPage() {
   const [importing, setImporting] = useState(false)
   const [results, setResults] = useState<ImportResponse[]>([])
   const [inputKey, setInputKey] = useState(0)
+  const [identities, setIdentities] = useState<Record<string, ProductIdentity>>({})
 
   const totalFileSize = useMemo(() => {
     const bytes = files.reduce((sum, file) => sum + file.size, 0)
@@ -113,6 +210,19 @@ export default function ChecklistImportPage() {
         try {
           const formData = new FormData()
           formData.append('file', file)
+
+          const identity =
+            identities[fileIdentity(file)] ?? inferProductIdentity(file.name)
+
+          formData.append(
+            'metadataOverride',
+            JSON.stringify({
+              year: identity.year.trim(),
+              manufacturer: identity.manufacturer.trim(),
+              brand: identity.brand.trim(),
+              productName: identity.productName.trim(),
+            })
+          )
 
           const response = await fetch('/api/checklists/import', {
             method: 'POST',
@@ -201,6 +311,7 @@ export default function ChecklistImportPage() {
 
   function clearFiles() {
     setFiles([])
+    setIdentities({})
     setResults([])
     setInputKey((value) => value + 1)
   }
@@ -235,12 +346,17 @@ export default function ChecklistImportPage() {
         <div>
           <h2 className="text-lg font-semibold">Checklist Files</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Beckett and Checklist Insider XLSX checklists are currently supported.
-            You do not need to choose which source the file came from.
+            Original, unmodified XLSX files from the manufacturer or an established
+            checklist provider are preferred. HITS looks for real checklist structure
+            such as card numbers, player or item names, sections, and team data, and
+            safely rejects workbooks it cannot identify with confidence.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <span className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2.5 py-1 text-xs font-semibold text-emerald-200">
+            Manufacturer XLSX · Preferred
+          </span>
           <span className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2.5 py-1 text-xs font-semibold text-emerald-200">
             Beckett XLSX · Supported
           </span>
@@ -281,6 +397,19 @@ export default function ChecklistImportPage() {
                   return next
                 })
 
+                setIdentities((current) => {
+                  const next = { ...current }
+
+                  for (const file of newlySelected) {
+                    const identity = fileIdentity(file)
+                    if (!next[identity]) {
+                      next[identity] = inferProductIdentity(file.name)
+                    }
+                  }
+
+                  return next
+                })
+
                 setResults([])
                 setInputKey((value) => value + 1)
               }}
@@ -293,34 +422,152 @@ export default function ChecklistImportPage() {
                   {files.length} checklist file{files.length === 1 ? '' : 's'} selected
                   {totalFileSize ? ` · ${totalFileSize}` : ''}
                 </div>
-                {files.map((file) => (
-                  <div
-                    key={fileIdentity(file)}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-cyan-900/60 bg-cyan-950/20 px-3 py-2 text-sm text-zinc-200"
-                  >
-                    <span className="min-w-0 truncate" title={file.name}>
-                      {file.name}
-                    </span>
+                {files.map((file) => {
+                  const key = fileIdentity(file)
+                  const identity = identities[key] ?? inferProductIdentity(file.name)
 
-                    {!importing && (
-                      <button
-                        type="button"
-                        className="app-button shrink-0 px-2.5 py-1 text-xs"
-                        onClick={() => {
-                          setFiles((current) =>
-                            current.filter(
-                              (candidate) =>
-                                fileIdentity(candidate) !== fileIdentity(file)
-                            )
-                          )
-                          setResults([])
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  return (
+                    <details
+                      key={key}
+                      className="overflow-hidden rounded-xl border border-cyan-900/60 bg-cyan-950/20"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm text-zinc-200 [&::-webkit-details-marker]:hidden">
+                        <div className="min-w-0">
+                          <div className="truncate font-medium" title={file.name}>
+                            {file.name}
+                          </div>
+                          <div className="mt-0.5 truncate text-xs text-zinc-400">
+                            {[identity.year, identity.brand || identity.manufacturer, identity.productName]
+                              .filter(Boolean)
+                              .join(' • ') || 'Product identity needs review'}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className="app-badge">Review identity</span>
+
+                          {!importing && (
+                            <button
+                              type="button"
+                              className="app-button px-2.5 py-1 text-xs"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+
+                                setFiles((current) =>
+                                  current.filter(
+                                    (candidate) =>
+                                      fileIdentity(candidate) !== key
+                                  )
+                                )
+
+                                setIdentities((current) => {
+                                  const next = { ...current }
+                                  delete next[key]
+                                  return next
+                                })
+
+                                setResults([])
+                              }}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </summary>
+
+                      <div className="grid gap-3 border-t border-cyan-900/60 p-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Year
+                          <input
+                            type="text"
+                            value={identity.year}
+                            disabled={importing}
+                            onChange={(event) =>
+                              setIdentities((current) =>
+                                updateIdentityField(
+                                  current,
+                                  key,
+                                  'year',
+                                  event.target.value
+                                )
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
+                            placeholder="2025"
+                          />
+                        </label>
+
+                        <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Manufacturer
+                          <input
+                            type="text"
+                            value={identity.manufacturer}
+                            disabled={importing}
+                            onChange={(event) =>
+                              setIdentities((current) =>
+                                updateIdentityField(
+                                  current,
+                                  key,
+                                  'manufacturer',
+                                  event.target.value
+                                )
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
+                            placeholder="Topps"
+                          />
+                        </label>
+
+                        <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Brand Family
+                          <input
+                            type="text"
+                            value={identity.brand}
+                            disabled={importing}
+                            onChange={(event) =>
+                              setIdentities((current) =>
+                                updateIdentityField(
+                                  current,
+                                  key,
+                                  'brand',
+                                  event.target.value
+                                )
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
+                            placeholder="Topps, Bowman, Panini..."
+                          />
+                        </label>
+
+                        <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                          Product Name
+                          <input
+                            type="text"
+                            value={identity.productName}
+                            disabled={importing}
+                            onChange={(event) =>
+                              setIdentities((current) =>
+                                updateIdentityField(
+                                  current,
+                                  key,
+                                  'productName',
+                                  event.target.value
+                                )
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
+                            placeholder="Stadium Club Baseball"
+                          />
+                        </label>
+
+                        <div className="sm:col-span-2 xl:col-span-4 text-xs text-zinc-500">
+                          HITS pre-fills these from the file name and workbook. Edit them only when the product identity is wrong.
+                        </div>
+                      </div>
+                    </details>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -343,8 +590,9 @@ export default function ChecklistImportPage() {
         </form>
 
         <p className="text-xs text-zinc-500">
-          Have a checklist from another source? Submit a feature request so the
-          format can be reviewed before HITS supports it.
+          Worksheet names help HITS organize a checklist, but the card-row structure
+          determines whether a file is safe to import. Team data is helpful but is
+          not required.
         </p>
       </section>
 

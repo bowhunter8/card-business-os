@@ -40,6 +40,13 @@ export default async function AdminPage() {
     redirect('/app')
   }
 
+  const { count: openChecklistProblemCount } = await supabase
+    .from('checklist_problem_reports')
+    .select('id', { count: 'exact', head: true })
+    .in('status', ['open', 'reviewing', 'source_issue', 'importer_issue'])
+
+  const checklistProblemCount = openChecklistProblemCount ?? 0
+
   return (
     <div className="space-y-6">
       <div className="app-page-header">
@@ -54,6 +61,38 @@ export default async function AdminPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Link
+          href="/app/admin/checklist-problems"
+          className="app-card block hover:border-cyan-700/70 hover:bg-cyan-950/10"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-lg font-semibold text-zinc-100">
+              Checklist Problems
+            </div>
+
+            {checklistProblemCount > 0 && (
+              <span className="app-badge app-badge-danger">
+                {checklistProblemCount} needs attention
+              </span>
+            )}
+          </div>
+
+          <p className="app-muted mt-2">
+            Review checklist data problems, source-file issues, importer
+            problems, attachments, and resolutions reported by users.
+          </p>
+
+          <div className="mt-4">
+            {checklistProblemCount > 0 ? (
+              <span className="app-badge app-badge-info">
+                {checklistProblemCount} unresolved
+              </span>
+            ) : (
+              <span className="app-badge app-badge-success">All clear</span>
+            )}
+          </div>
+        </Link>
+
         <Link
           href="/app/admin/users"
           className="app-card block hover:border-amber-700/70 hover:bg-amber-950/10"

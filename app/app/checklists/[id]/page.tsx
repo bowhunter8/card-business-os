@@ -2,6 +2,8 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ChecklistAutoMatcher from '@/app/components/ChecklistAutoMatcher'
+import ChecklistProblemReport from '@/app/components/ChecklistProblemReport'
+import ChecklistAlphabetRail from '@/app/components/ChecklistAlphabetRail'
 import { buildChecklistSetAction } from '@/app/actions/inventory-builds'
 
 type ChecklistRow = {
@@ -49,6 +51,13 @@ type ChecklistItemRow = {
   notes: string | null
 }
 
+type ChecklistItemPersonRow = {
+  checklist_item_id: string
+  player_name: string
+  printed_team: string | null
+  sort_order: number | null
+}
+
 type ChecklistMatchRow = {
   checklist_item_id: string
   inventory_item_id: string
@@ -83,7 +92,7 @@ type ChecklistMatchRow = {
     | null
 }
 
-type ViewMode = 'team' | 'section'
+type ViewMode = 'team' | 'player' | 'section'
 type OwnershipFilter = 'all' | 'owned' | 'missing' | 'needed'
 
 type PageProps = {
@@ -93,6 +102,8 @@ type PageProps = {
   searchParams: Promise<{
     view?: string | string[]
     team?: string | string[]
+    player?: string | string[]
+    playerSort?: string | string[]
     section?: string | string[]
     q?: string | string[]
     matchItem?: string | string[]
@@ -718,6 +729,7 @@ function ChecklistTable({
   checklistId,
   view,
   selectedTeam,
+  selectedPlayer,
   selectedSection,
   searchText,
   ownershipFilter,
@@ -730,6 +742,7 @@ function ChecklistTable({
   checklistId: string
   view: ViewMode
   selectedTeam: string
+  selectedPlayer: string
   selectedSection: string
   searchText: string
   ownershipFilter: OwnershipFilter
@@ -770,6 +783,10 @@ function ChecklistTable({
 
               if (view === 'team' && selectedTeam) {
                 matchParams.set('team', selectedTeam)
+              }
+
+              if (view === 'player' && selectedPlayer) {
+                matchParams.set('player', selectedPlayer)
               }
 
               if (view === 'section' && selectedSection) {
@@ -1015,10 +1032,10 @@ function TeamSectionChecklistTables({
             key={group.sectionId}
             className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/30 open:col-span-full"
           >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 transition hover:bg-zinc-900/70 [&::-webkit-details-marker]:hidden">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="text-sm text-cyan-300">▶</span>
-                <span className="truncate font-semibold text-zinc-100">
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3 transition hover:bg-zinc-900/70 [&::-webkit-details-marker]:hidden">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="mt-0.5 shrink-0 text-sm text-cyan-300">▶</span>
+                <span className="min-w-0 whitespace-normal wrap-break-word font-semibold leading-snug text-zinc-100">
                   {group.sectionName}
                 </span>
               </div>
@@ -1046,6 +1063,7 @@ function TeamSectionChecklistTables({
                 checklistId={checklistId}
                 view="team"
                 selectedTeam={selectedTeam}
+                selectedPlayer=""
                 selectedSection={group.sectionId}
                 searchText={searchText}
                 ownershipFilter={ownershipFilter}
@@ -1124,6 +1142,82 @@ async function loadAllChecklistItems(
   return rows
 }
 
+async function loadChecklistItemPeople(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  itemIds: string[]
+) {
+  if (itemIds.length === 0) return [] as ChecklistItemPersonRow[]
+
+  const rows: ChecklistItemPersonRow[] = []
+  const PEOPLE_BATCH_SIZE = 100
+
+  for (let index = 0; index < itemIds.length; index += PEOPLE_BATCH_SIZE) {
+    const batchIds = itemIds.slice(index, index + PEOPLE_BATCH_SIZE)
+    const { data, error } = await supabase
+      .from('checklist_item_people')
+      .select('checklist_item_id, player_name, printed_team, sort_order')
+      .in('checklist_item_id', batchIds)
+      .order('sort_order', { ascending: true })
+
+    if (error) {
+      console.error('Unable to load checklist item people:', error)
+      return rows
+    }
+
+    rows.push(...((data ?? []) as ChecklistItemPersonRow[]))
+  }
+
+  return rows
+}
+
+function fallbackPlayerNames(playerName: string | null | undefined) {
+  const value = clean(playerName)
+  if (!value) return []
+
+  const splitNames = value
+    .split(/\s+\/\s+/g)
+    .map((name) => clean(name))
+    .filter(Boolean)
+
+  return splitNames.length > 1 ? splitNames : [value]
+}
+
+
+function playerLastNameSortValue(name: string) {
+  const parts = clean(name).split(/\s+/g).filter(Boolean)
+  if (parts.length === 0) return ''
+
+  const suffixes = new Set(['jr', 'jr.', 'sr', 'sr.', 'ii', 'iii', 'iv', 'v'])
+  let lastIndex = parts.length - 1
+
+  while (
+    lastIndex > 0 &&
+    suffixes.has(parts[lastIndex].toLowerCase())
+  ) {
+    lastIndex -= 1
+  }
+
+  const lastName = parts[lastIndex]
+  const firstPart = parts.slice(0, lastIndex).join(' ')
+  const suffixPart = parts.slice(lastIndex + 1).join(' ')
+
+  return [lastName, firstPart, suffixPart].filter(Boolean).join(' ')
+}
+
+function playerSortValue(name: string, mode: 'first' | 'last') {
+  return mode === 'last' ? playerLastNameSortValue(name) : clean(name)
+}
+
+function playerAlphabetLetter(name: string, mode: 'first' | 'last') {
+  const value = playerSortValue(name, mode).trim()
+  const letter = value.charAt(0).toUpperCase()
+  return /^[A-Z]$/.test(letter) ? letter : '#'
+}
+
+function playerLetterAnchor(letter: string) {
+  return `player-letter-${letter === '#' ? 'other' : letter.toLowerCase()}`
+}
+
 export default async function ChecklistDetailPage({
   params,
   searchParams,
@@ -1169,6 +1263,14 @@ export default async function ChecklistDetailPage({
   const items = await loadAllChecklistItems(supabase, checklist.id)
 
   const itemIds = items.map((item) => item.id)
+  const itemPeople = await loadChecklistItemPeople(supabase, itemIds)
+
+  const peopleByItemId = new Map<string, ChecklistItemPersonRow[]>()
+  for (const person of itemPeople) {
+    const existing = peopleByItemId.get(person.checklist_item_id)
+    if (existing) existing.push(person)
+    else peopleByItemId.set(person.checklist_item_id, [person])
+  }
 
   let checklistMatches: ChecklistMatchRow[] = []
 
@@ -1200,9 +1302,18 @@ export default async function ChecklistDetailPage({
   )
 
   const requestedView = firstParam(queryParams.view)
-  const view: ViewMode = requestedView === 'section' ? 'section' : 'team'
+  const view: ViewMode =
+    requestedView === 'section'
+      ? 'section'
+      : requestedView === 'player'
+        ? 'player'
+        : 'team'
 
   const selectedTeam = firstParam(queryParams.team)
+  const selectedPlayer = firstParam(queryParams.player)
+  const requestedPlayerSort = firstParam(queryParams.playerSort)
+  const playerSort: 'first' | 'last' =
+    requestedPlayerSort === 'last' ? 'last' : 'first'
   const selectedSection = firstParam(queryParams.section)
   const searchText = firstParam(queryParams.q).trim()
   const normalizedSearch = normalize(searchText)
@@ -1225,13 +1336,53 @@ export default async function ChecklistDetailPage({
   }
 
   const teams = Array.from(teamCounts.entries())
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => ({
+      name,
+      count,
+      letter: /^[A-Z]$/.test(clean(name).charAt(0).toUpperCase())
+        ? clean(name).charAt(0).toUpperCase()
+        : '#',
+    }))
     .sort((a, b) =>
       a.name.localeCompare(b.name, undefined, {
         numeric: true,
         sensitivity: 'base',
       })
     )
+
+  const availableTeamLetters = new Set(teams.map((team) => team.letter))
+
+  const playerItemIds = new Map<string, Set<string>>()
+
+  for (const item of items) {
+    const people = peopleByItemId.get(item.id) ?? []
+    const names =
+      people.length > 0
+        ? people.map((person) => clean(person.player_name)).filter(Boolean)
+        : fallbackPlayerNames(item.player_name)
+
+    for (const playerName of new Set(names)) {
+      if (!playerItemIds.has(playerName)) playerItemIds.set(playerName, new Set())
+      playerItemIds.get(playerName)!.add(item.id)
+    }
+  }
+
+  const players = Array.from(playerItemIds.entries())
+    .map(([name, ids]) => ({
+      name,
+      count: ids.size,
+      sortValue: playerSortValue(name, playerSort),
+      letter: playerAlphabetLetter(name, playerSort),
+    }))
+    .sort((a, b) =>
+      a.sortValue.localeCompare(b.sortValue, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    )
+
+  const availablePlayerLetters = new Set(players.map((player) => player.letter))
+  const alphabetLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
 
   const sectionCounts = new Map<string, number>()
 
@@ -1249,6 +1400,21 @@ export default async function ChecklistDetailPage({
             (team) => normalize(team) === normalize(selectedTeam)
           )
         )
+      : []
+
+  const selectedPlayerItems =
+    view === 'player' && selectedPlayer
+      ? items.filter((item) => {
+          const people = peopleByItemId.get(item.id) ?? []
+          if (people.length > 0) {
+            return people.some(
+              (person) => normalize(person.player_name) === normalize(selectedPlayer)
+            )
+          }
+          return fallbackPlayerNames(item.player_name).some(
+            (playerName) => normalize(playerName) === normalize(selectedPlayer)
+          )
+        })
       : []
 
   const selectedSectionItems =
@@ -1309,7 +1475,9 @@ export default async function ChecklistDetailPage({
     ? items
     : view === 'team'
       ? selectedTeamItems
-      : selectedSectionItems
+      : view === 'player'
+        ? selectedPlayerItems
+        : selectedSectionItems
 
   const visibleItems = baseVisibleItems
     .filter((item) =>
@@ -1350,6 +1518,7 @@ export default async function ChecklistDetailPage({
   function checklistContextHref(overrides?: {
     view?: ViewMode
     team?: string
+    player?: string
     section?: string
     q?: string
     ownership?: OwnershipFilter
@@ -1359,6 +1528,8 @@ export default async function ChecklistDetailPage({
     const nextView = overrides?.view ?? view
     const nextTeam =
       overrides && 'team' in overrides ? overrides.team ?? '' : selectedTeam
+    const nextPlayer =
+      overrides && 'player' in overrides ? overrides.player ?? '' : selectedPlayer
     const nextSection =
       overrides && 'section' in overrides
         ? overrides.section ?? ''
@@ -1381,6 +1552,10 @@ export default async function ChecklistDetailPage({
 
     if (nextView === 'team' && nextTeam) {
       params.set('team', nextTeam)
+    }
+
+    if (nextView === 'player' && nextPlayer) {
+      params.set('player', nextPlayer)
     }
 
     if (nextView === 'section' && nextSection) {
@@ -1414,7 +1589,7 @@ export default async function ChecklistDetailPage({
   const buildErrorMessage = firstParam(queryParams.buildError)
 
   return (
-    <div className="app-page-wide space-y-5">
+    <div id="checklist-top" className="app-page-wide space-y-5">
       <div className="app-page-header">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap gap-2">
@@ -1446,6 +1621,25 @@ export default async function ChecklistDetailPage({
           <Link href="/app/checklists/import" className="app-button">
             Import Another
           </Link>
+
+          <ChecklistProblemReport
+            checklistId={checklist.id}
+            checklistName={checklist.name}
+            checklistItemId={selectedMatchItem?.id ?? null}
+            sectionName={
+              selectedMatchItem
+                ? sectionNameById.get(selectedMatchItem.section_id) ?? null
+                : selectedSectionRow?.name ?? null
+            }
+            teamName={
+              selectedMatchItem
+                ? clean(selectedMatchItem.printed_team) || null
+                : selectedTeam || null
+            }
+            cardNumber={selectedMatchItem?.card_number ?? null}
+            playerName={selectedMatchItem?.player_name ?? null}
+            buttonLabel="Report a Problem"
+          />
 
           <ChecklistAutoMatcher checklistId={checklist.id} />
         </div>
@@ -1486,11 +1680,15 @@ export default async function ChecklistDetailPage({
                   ? `/app/checklists/${checklist.id}?view=team&team=${encodeURIComponent(
                       selectedTeam
                     )}${ownershipFilter !== 'all' ? `&ownership=${encodeURIComponent(ownershipFilter)}` : ''}${searchText ? `&q=${encodeURIComponent(searchText)}` : ''}`
-                  : view === 'section' && selectedSection
-                    ? `/app/checklists/${checklist.id}?view=section&section=${encodeURIComponent(
-                        selectedSection
-                      )}${selectedTeam ? `&team=${encodeURIComponent(selectedTeam)}` : ''}${ownershipFilter !== 'all' ? `&ownership=${encodeURIComponent(ownershipFilter)}` : ''}${searchText ? `&q=${encodeURIComponent(searchText)}` : ''}`
-                    : `/app/checklists/${checklist.id}?view=${view}`
+                  : view === 'player' && selectedPlayer
+                    ? `/app/checklists/${checklist.id}?view=player&player=${encodeURIComponent(
+                        selectedPlayer
+                      )}${ownershipFilter !== 'all' ? `&ownership=${encodeURIComponent(ownershipFilter)}` : ''}${searchText ? `&q=${encodeURIComponent(searchText)}` : ''}`
+                    : view === 'section' && selectedSection
+                      ? `/app/checklists/${checklist.id}?view=section&section=${encodeURIComponent(
+                          selectedSection
+                        )}${selectedTeam ? `&team=${encodeURIComponent(selectedTeam)}` : ''}${ownershipFilter !== 'all' ? `&ownership=${encodeURIComponent(ownershipFilter)}` : ''}${searchText ? `&q=${encodeURIComponent(searchText)}` : ''}`
+                      : `/app/checklists/${checklist.id}?view=${view}`
               }
               className="app-button"
             >
@@ -1621,18 +1819,28 @@ export default async function ChecklistDetailPage({
         </div>
       </section>
 
-      <section className="app-section space-y-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+      <section
+        id="checklist-browser"
+        className="app-section scroll-mt-48 space-y-4 xl:sticky xl:top-52 xl:z-20 xl:flex xl:h-[calc(100vh-231px)] xl:min-h-150 xl:flex-col xl:overflow-hidden"
+      >
+        <div className="z-30 -mx-1 shrink-0 flex flex-col gap-3 border-b border-zinc-800 bg-black/95 px-1 py-2 backdrop-blur xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-2">
             <Link
-              href={`/app/checklists/${checklist.id}?view=team`}
+              href={`/app/checklists/${checklist.id}?view=team#checklist-browser`}
               className={view === 'team' ? 'app-button-primary' : 'app-button'}
             >
               Browse by Team
             </Link>
 
             <Link
-              href={`/app/checklists/${checklist.id}?view=section`}
+              href={`/app/checklists/${checklist.id}?view=player#checklist-browser`}
+              className={view === 'player' ? 'app-button-primary' : 'app-button'}
+            >
+              Browse by Player
+            </Link>
+
+            <Link
+              href={`/app/checklists/${checklist.id}?view=section#checklist-browser`}
               className={view === 'section' ? 'app-button-primary' : 'app-button'}
             >
               Browse by Section
@@ -1653,10 +1861,18 @@ export default async function ChecklistDetailPage({
             <button type="submit" className="app-button">
               Search
             </button>
+
+            <a
+              href="#checklist-top"
+              className="app-button shrink-0"
+              title="Back to the top of this checklist"
+            >
+              ↑ Top
+            </a>
           </form>
         </div>
 
-        {!normalizedSearch && (selectedTeam || selectedSection) && (
+        {!normalizedSearch && (selectedTeam || selectedPlayer || selectedSection) && (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -1676,6 +1892,13 @@ export default async function ChecklistDetailPage({
 
                 if (view === 'team' && selectedTeam) {
                   filterParams.set('team', selectedTeam)
+                }
+
+                if (view === 'player' && selectedPlayer) {
+                  filterParams.set('player', selectedPlayer)
+                  if (playerSort === 'last') {
+                    filterParams.set('playerSort', 'last')
+                  }
                 }
 
                 if (view === 'section' && selectedSection) {
@@ -1736,41 +1959,61 @@ export default async function ChecklistDetailPage({
         )}
 
         {view === 'team' && (
-          <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[300px_minmax(0,1fr)] xl:overflow-hidden">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="font-semibold">Teams</h2>
                 <span className="text-xs text-zinc-500">{teams.length}</span>
               </div>
 
-              <div className="max-h-170 space-y-1 overflow-y-auto pr-1">
-                {teams.map((team) => {
-                  const active =
-                    normalize(team.name) === normalize(selectedTeam)
+              <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-2 xl:min-h-0 xl:flex-1">
+                <ChecklistAlphabetRail
+                  ariaLabel="Team alphabet"
+                  letters={alphabetLetters}
+                  availableLetters={Array.from(availableTeamLetters)}
+                  listId="team-list"
+                  targetPrefix="team-letter-"
+                />
 
-                  return (
-                    <Link
-                      key={team.name}
-                      href={`/app/checklists/${checklist.id}?view=team&team=${encodeURIComponent(team.name)}`}
-                      className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition ${
-                        active
-                          ? 'border-cyan-600 bg-cyan-950/30 text-cyan-200'
-                          : 'border-transparent text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
-                      }`}
-                    >
-                      <span className="min-w-0 truncate font-medium">
-                        {team.name}
-                      </span>
-                      <span className="shrink-0 text-xs text-zinc-500">
-                        {team.count}
-                      </span>
-                    </Link>
-                  )
-                })}
+                <div
+                  id="team-list"
+                  className="max-h-170 space-y-1 overflow-y-auto pr-1 scroll-smooth xl:max-h-none xl:min-h-0 xl:flex-1"
+                >
+                  {teams.map((team, index) => {
+                    const active =
+                      normalize(team.name) === normalize(selectedTeam)
+                    const firstInLetter =
+                      index === 0 || teams[index - 1]?.letter !== team.letter
+
+                    return (
+                      <Link
+                        key={team.name}
+                        id={
+                          firstInLetter && team.letter !== '#'
+                            ? `team-letter-${team.letter.toLowerCase()}`
+                            : undefined
+                        }
+                        href={`/app/checklists/${checklist.id}?view=team&team=${encodeURIComponent(team.name)}#checklist-browser`}
+                        className={`flex scroll-mt-2 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition ${
+                          active
+                            ? 'border-cyan-600 bg-cyan-950/30 text-cyan-200'
+                            : 'border-transparent text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
+                        }`}
+                      >
+                        <span className="min-w-0 truncate font-medium">
+                          {team.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {team.count}
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
-            <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
               {normalizedSearch ? (
                   <>
                     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -1801,6 +2044,7 @@ export default async function ChecklistDetailPage({
                       checklistId={checklist.id}
                       view={view}
                       selectedTeam={selectedTeam}
+                      selectedPlayer={selectedPlayer}
                       selectedSection={selectedSection}
                       searchText={searchText}
                       ownershipFilter={ownershipFilter}
@@ -2181,15 +2425,166 @@ export default async function ChecklistDetailPage({
           </div>
         )}
 
+        {view === 'player' && (
+          <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[300px_minmax(0,1fr)] xl:overflow-hidden">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <h2 className="font-semibold">Players</h2>
+                  <div className="flex items-center rounded-lg border border-zinc-800 bg-black/30 p-0.5 text-[11px]">
+                    <Link
+                      href={`/app/checklists/${checklist.id}?view=player${selectedPlayer ? `&player=${encodeURIComponent(selectedPlayer)}` : ''}`}
+                      className={`rounded-md px-2 py-1 transition ${
+                        playerSort === 'first'
+                          ? 'bg-zinc-800 text-zinc-100'
+                          : 'text-zinc-500 hover:text-zinc-200'
+                      }`}
+                      title="Sort players by first name"
+                    >
+                      First
+                    </Link>
+                    <Link
+                      href={`/app/checklists/${checklist.id}?view=player&playerSort=last${selectedPlayer ? `&player=${encodeURIComponent(selectedPlayer)}` : ''}`}
+                      className={`rounded-md px-2 py-1 transition ${
+                        playerSort === 'last'
+                          ? 'bg-zinc-800 text-zinc-100'
+                          : 'text-zinc-500 hover:text-zinc-200'
+                      }`}
+                      title="Sort players by last name"
+                    >
+                      Last
+                    </Link>
+                  </div>
+                </div>
+
+                <span className="text-xs text-zinc-500">{players.length}</span>
+              </div>
+
+              <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-2 xl:min-h-0 xl:flex-1">
+                <ChecklistAlphabetRail
+                  ariaLabel="Player alphabet"
+                  letters={alphabetLetters}
+                  availableLetters={Array.from(availablePlayerLetters)}
+                  listId="player-list"
+                  targetPrefix="player-letter-"
+                />
+
+                <div
+                  id="player-list"
+                  className="max-h-170 space-y-1 overflow-y-auto pr-1 scroll-smooth xl:max-h-none xl:min-h-0 xl:flex-1"
+                >
+                  {players.map((player, index) => {
+                    const active =
+                      normalize(player.name) === normalize(selectedPlayer)
+                    const firstInLetter =
+                      index === 0 || players[index - 1]?.letter !== player.letter
+
+                    return (
+                      <Link
+                        key={player.name}
+                        id={
+                          firstInLetter
+                            ? playerLetterAnchor(player.letter)
+                            : undefined
+                        }
+                        href={`/app/checklists/${checklist.id}?view=player&player=${encodeURIComponent(player.name)}${playerSort === 'last' ? '&playerSort=last' : ''}#checklist-browser`}
+                        className={`flex scroll-mt-2 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition ${
+                          active
+                            ? 'border-cyan-600 bg-cyan-950/30 text-cyan-200'
+                            : 'border-transparent text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
+                        }`}
+                      >
+                        <span className="min-w-0 truncate font-medium">
+                          {player.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {player.count}
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="min-w-0 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
+              {normalizedSearch ? (
+                <>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-semibold">Search Results</h2>
+                      <p className="mt-1 text-sm text-zinc-400">
+                        {visibleItems.length} card{visibleItems.length === 1 ? '' : 's'} matching "{searchText}"
+                      </p>
+                    </div>
+                    <Link
+                      href={`/app/checklists/${checklist.id}?view=player${playerSort === 'last' ? '&playerSort=last' : ''}`}
+                      className="app-button"
+                    >
+                      Clear Search
+                    </Link>
+                  </div>
+
+                  <ChecklistTable
+                    items={visibleItems}
+                    sectionNameById={sectionNameById}
+                    showSection
+                    emptyMessage={`No checklist cards match "${searchText}".`}
+                    matchesByChecklistItemId={matchesByChecklistItemId}
+                    checklistId={checklist.id}
+                    view={view}
+                    selectedTeam={selectedTeam}
+                    selectedPlayer={selectedPlayer}
+                    selectedSection={selectedSection}
+                    searchText={searchText}
+                    ownershipFilter={ownershipFilter}
+                  />
+                </>
+              ) : !selectedPlayer ? (
+                <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-8 text-center">
+                  <h2 className="text-lg font-semibold">Choose a Player</h2>
+                  <p className="mx-auto mt-2 max-w-2xl text-sm text-zinc-400">
+                    Select a player on the left to view every appearance in this checklist. Multi-player cards are included under each player when individual person data is available.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <h2 className="text-xl font-semibold">{selectedPlayer}</h2>
+                    <p className="mt-1 text-sm text-zinc-400">
+                      {visibleItems.length} card{visibleItems.length === 1 ? '' : 's'}
+                    </p>
+                  </div>
+
+                  <ChecklistTable
+                    items={visibleItems}
+                    sectionNameById={sectionNameById}
+                    showSection
+                    emptyMessage={`No cards are available for ${selectedPlayer} with this filter.`}
+                    matchesByChecklistItemId={matchesByChecklistItemId}
+                    checklistId={checklist.id}
+                    view={view}
+                    selectedTeam={selectedTeam}
+                    selectedPlayer={selectedPlayer}
+                    selectedSection={selectedSection}
+                    searchText={searchText}
+                    ownershipFilter={ownershipFilter}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         {view === 'section' && (
-          <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
+          <div className="grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[340px_minmax(0,1fr)] xl:overflow-hidden">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 className="font-semibold">Checklist Sections</h2>
                 <span className="text-xs text-zinc-500">{sections.length}</span>
               </div>
 
-              <div className="max-h-170 space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-170 space-y-1 overflow-y-auto pr-1 xl:max-h-none xl:min-h-0 xl:flex-1">
                 {sections.map((section) => {
                   const active = section.id === selectedSection
                   const count = sectionCounts.get(section.id) ?? 0
@@ -2204,7 +2599,7 @@ export default async function ChecklistDetailPage({
                           : 'border-transparent text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
                       }`}
                     >
-                      <span className="min-w-0 truncate font-medium">
+                      <span className="min-w-0 whitespace-normal wrap-break-word font-medium leading-snug">
                         {section.name}
                       </span>
                       <span className="shrink-0 text-xs text-zinc-500">
@@ -2216,7 +2611,7 @@ export default async function ChecklistDetailPage({
               </div>
             </div>
 
-            <div className="min-w-0 space-y-3">
+            <div className="min-w-0 space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
               {normalizedSearch ? (
                   <>
                     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -2247,6 +2642,7 @@ export default async function ChecklistDetailPage({
                       checklistId={checklist.id}
                       view={view}
                       selectedTeam={selectedTeam}
+                      selectedPlayer={selectedPlayer}
                       selectedSection={selectedSection}
                       searchText={searchText}
                       ownershipFilter={ownershipFilter}
@@ -2297,6 +2693,7 @@ export default async function ChecklistDetailPage({
                     checklistId={checklist.id}
                     view={view}
                     selectedTeam={selectedTeam}
+                    selectedPlayer={selectedPlayer}
                     selectedSection={selectedSection}
                     searchText={searchText}
                     ownershipFilter={ownershipFilter}
