@@ -1409,7 +1409,7 @@ function DeleteOrderConfirmControl({
 }) {
   if (isLinked) {
     return (
-      <div className="max-w-[190px] whitespace-normal rounded-xl border border-amber-900/50 bg-amber-950/20 px-2 py-1 text-[11px] leading-snug text-amber-300">
+      <div className="max-w-47.5 whitespace-normal rounded-xl border border-amber-900/50 bg-amber-950/20 px-2 py-1 text-[11px] leading-snug text-amber-300">
         Linked order — roll back the break first.
       </div>
     )
@@ -1664,7 +1664,7 @@ function SearchInventoryBulkActions() {
             <summary className="app-button cursor-pointer list-none whitespace-nowrap border-purple-900/60 bg-purple-950/30 text-purple-100 hover:bg-purple-900/50">
               Mark as Giveaway
             </summary>
-            <div className="mt-2 rounded-xl border border-purple-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-[34rem]">
+            <div className="mt-2 rounded-xl border border-purple-900/60 bg-zinc-950 p-3 shadow-xl md:min-w-136">
               <div className="text-sm font-semibold text-purple-100">Mark selected items as giveaways?</div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <label className="block">
@@ -2470,10 +2470,10 @@ export default async function GlobalSearchPage({
                     <th className="app-th">Date</th>
                     <th className="app-th">Purchased From</th>
                     <th className="app-th">Description</th>
-                    <th className="app-th min-w-[180px]">Source File</th>
+                    <th className="app-th min-w-45">Source File</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Total</th>
-                    <th className="app-th min-w-[220px]">Actions</th>
+                    <th className="app-th min-w-55">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2591,10 +2591,10 @@ export default async function GlobalSearchPage({
                     <th className="app-th">Break</th>
                     <th className="app-th">Source</th>
                     <th className="app-th">Order #</th>
-                    <th className="app-th min-w-[180px]">Notes</th>
+                    <th className="app-th min-w-45">Notes</th>
                     <th className="app-th">Status</th>
                     <th className="app-th text-right">Cost</th>
-                    <th className="app-th min-w-[220px]">Actions</th>
+                    <th className="app-th min-w-55">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2708,13 +2708,13 @@ export default async function GlobalSearchPage({
                       />
                     </th>
                     <th className="app-th">Item</th>
-                    <th className="app-th min-w-[180px]">Notes</th>
+                    <th className="app-th min-w-45">Notes</th>
                     <th className="app-th">Status</th>
                     <th className="app-th">Qty</th>
                     <th className="app-th">Available</th>
                     <th className="app-th text-right">Cost</th>
                     <th className="app-th text-right">Est. Value</th>
-                    <th className="app-th min-w-[220px]">Actions</th>
+                    <th className="app-th min-w-55">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2828,7 +2828,7 @@ export default async function GlobalSearchPage({
                   <tr>
                     <th className="app-th">Date</th>
                     <th className="app-th">Item</th>
-                    <th className="app-th min-w-[180px]">Notes</th>
+                    <th className="app-th min-w-45">Notes</th>
                     <th className="app-th">Platform</th>
                     <th className="app-th">Qty</th>
                     <th className="app-th text-right">Gross</th>

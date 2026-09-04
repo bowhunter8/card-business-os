@@ -97,12 +97,12 @@ export default function ChecklistAutoMatcher({ checklistId }: Props) {
 
       {busy && (
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-[1px]"
+          className="fixed inset-0 z-9999 flex items-center justify-center bg-black/70 backdrop-blur-[1px]"
           role="status"
           aria-live="polite"
           aria-label="Finding inventory matches"
         >
-          <div className="flex min-w-[280px] flex-col items-center gap-4 rounded-2xl border border-zinc-700 bg-zinc-950/95 px-8 py-7 shadow-2xl">
+          <div className="flex min-w-70 flex-col items-center gap-4 rounded-2xl border border-zinc-700 bg-zinc-950/95 px-8 py-7 shadow-2xl">
             <span
               aria-hidden="true"
               className="h-10 w-10 animate-spin rounded-full border-4 border-zinc-600 border-t-cyan-300"

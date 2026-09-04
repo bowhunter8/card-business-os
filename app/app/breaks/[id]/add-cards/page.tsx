@@ -486,7 +486,7 @@ export default async function AddBreakCardsPage({
             </span>
           </div>
 
-          <div className="sticky top-[72px] z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
+          <div className="sticky top-18 z-40 mb-5 flex justify-end rounded-xl border border-zinc-800 bg-zinc-950/90 px-3 py-3 backdrop-blur">
             <button
               type="submit"
               className="app-button-primary"

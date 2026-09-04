@@ -745,7 +745,7 @@ function ChecklistTable({
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-800">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px] text-left text-sm">
+        <table className="w-full min-w-230 text-left text-sm">
           <thead className="bg-zinc-950 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-3">Card #</th>
@@ -1505,7 +1505,7 @@ export default async function ChecklistDetailPage({
           ) : (
             <div className="overflow-hidden rounded-xl border border-zinc-800">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+                <table className="w-full min-w-190 text-left text-sm">
                   <thead className="bg-zinc-950 text-xs uppercase tracking-wide text-zinc-500">
                     <tr>
                       <th className="px-3 py-3">Inventory Item</th>
@@ -1743,7 +1743,7 @@ export default async function ChecklistDetailPage({
                 <span className="text-xs text-zinc-500">{teams.length}</span>
               </div>
 
-              <div className="max-h-[680px] space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-170 space-y-1 overflow-y-auto pr-1">
                 {teams.map((team) => {
                   const active =
                     normalize(team.name) === normalize(selectedTeam)
@@ -1872,7 +1872,7 @@ export default async function ChecklistDetailPage({
 
                       <div className="overflow-hidden rounded-xl border border-zinc-800">
                         <div className="overflow-x-auto">
-                          <table className="w-full min-w-[720px] text-left text-sm">
+                          <table className="w-full min-w-180 text-left text-sm">
                             <thead className="bg-zinc-950 text-xs uppercase tracking-wide text-zinc-500">
                               <tr>
                                 <th className="px-3 py-3">Section / Set</th>
@@ -2013,7 +2013,7 @@ export default async function ChecklistDetailPage({
 
                       <div className="overflow-hidden rounded-xl border border-zinc-800">
                         <div className="overflow-x-auto">
-                          <table className="w-full min-w-[1100px] text-left text-sm">
+                          <table className="w-full min-w-275 text-left text-sm">
                             <thead className="bg-zinc-950 text-xs uppercase tracking-wide text-zinc-500">
                               <tr>
                                 <th className="px-3 py-3">Card #</th>
@@ -2189,7 +2189,7 @@ export default async function ChecklistDetailPage({
                 <span className="text-xs text-zinc-500">{sections.length}</span>
               </div>
 
-              <div className="max-h-[680px] space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-170 space-y-1 overflow-y-auto pr-1">
                 {sections.map((section) => {
                   const active = section.id === selectedSection
                   const count = sectionCounts.get(section.id) ?? 0

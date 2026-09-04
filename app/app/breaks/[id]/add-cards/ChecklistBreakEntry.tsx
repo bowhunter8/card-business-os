@@ -1215,7 +1215,7 @@ export default function ChecklistBreakEntry({
 
       {selectedChecklistId && (
         <section className="app-section overflow-hidden">
-          <div className="grid min-h-[540px] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid min-h-135 xl:grid-cols-[280px_minmax(0,1fr)]">
             <aside className="border-b border-zinc-800 bg-zinc-950/30 xl:border-b-0 xl:border-r">
               <div className="border-b border-zinc-800 px-4 py-3">
                 <div className="font-semibold text-zinc-100">
@@ -1226,7 +1226,7 @@ export default function ChecklistBreakEntry({
                 </div>
               </div>
 
-              <div className="max-h-[620px] overflow-y-auto p-2">
+              <div className="max-h-155 overflow-y-auto p-2">
                 {teamOptions.map((team) => {
                   const active = team.name === selectedTeam
                   const saved = teamSavedCount(team.name)
@@ -1263,7 +1263,7 @@ export default function ChecklistBreakEntry({
 
             <div className="min-w-0">
               {!selectedTeam ? (
-                <div className="flex min-h-[540px] items-center justify-center p-8 text-center">
+                <div className="flex min-h-135 items-center justify-center p-8 text-center">
                   <div>
                     <div className="text-lg font-semibold text-zinc-200">
                       Choose a team
@@ -1376,7 +1376,7 @@ export default function ChecklistBreakEntry({
 
                             {active && (
                               <div className="overflow-x-auto border-t border-zinc-800 bg-black/20">
-                                <table className="w-full min-w-[760px] text-left text-sm">
+                                <table className="w-full min-w-190 text-left text-sm">
                                   <thead className="bg-zinc-950/80 text-xs uppercase tracking-wide text-zinc-500">
                                     <tr>
                                       <th className="px-3 py-2.5">Card #</th>
