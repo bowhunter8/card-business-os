@@ -2235,7 +2235,7 @@ async function insertInBatches<T extends Record<string, unknown>>(
   return inserted
 }
 
-async function getOrCreatePrivateProduct(
+async function getOrCreateGlobalProduct(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
   metadata: ProductMetadata
@@ -2243,8 +2243,7 @@ async function getOrCreatePrivateProduct(
   const { data: existing, error: existingError } = await supabase
     .from('products')
     .select('id, display_name')
-    .eq('owner_user_id', userId)
-    .eq('visibility', 'private')
+    .eq('visibility', 'global')
     .eq('product_key', metadata.productKey)
     .maybeSingle()
 
@@ -2261,7 +2260,7 @@ async function getOrCreatePrivateProduct(
     .from('products')
     .insert({
       owner_user_id: userId,
-      visibility: 'private',
+      visibility: 'global',
       category: metadata.category,
       sport_or_game: metadata.sportOrGame,
       year: metadata.year,
@@ -2350,7 +2349,7 @@ async function persistChecklist(params: {
   let insertedItemIdsForCleanup: string[] = []
 
   try {
-    const productResult = await getOrCreatePrivateProduct(
+    const productResult = await getOrCreateGlobalProduct(
       supabase,
       userId,
       metadata
@@ -2366,8 +2365,7 @@ async function persistChecklist(params: {
         .select(
           'id, name, product_id, source_type, created_at, is_active, superseded_by_checklist_id'
         )
-        .eq('owner_user_id', userId)
-        .eq('visibility', 'private')
+        .eq('visibility', 'global')
         .eq('product_id', product.id)
         .eq('is_active', true)
         .order('created_at', { ascending: false })
@@ -2416,7 +2414,7 @@ async function persistChecklist(params: {
         .from('checklists')
         .insert({
           owner_user_id: userId,
-          visibility: 'private',
+          visibility: 'global',
           product_id: product.id,
           sport: metadata.sportOrGame.toLowerCase(),
           year: metadata.year,
@@ -2603,7 +2601,7 @@ async function persistChecklist(params: {
             existingSource
           )} to ${sourceLabel(sourceType)}`
         : existingChecklist && isSameSourceRebuild
-          ? `rebuilt existing ${sourceLabel(sourceType)} checklist from this file`
+          ? 'rebuilt existing HITS checklist from this file'
           : createdChecklistThisRequest
             ? 'created new product checklist'
           : stats.insertedRows > 0 || stats.sectionsCreated > 0
@@ -2643,8 +2641,7 @@ async function persistChecklist(params: {
               )} checklist from a fresh import of ${uploadedName}.`,
         })
         .eq('id', existingChecklist.id)
-        .eq('owner_user_id', userId)
-        .eq('visibility', 'private')
+        .eq('visibility', 'global')
         .eq('is_active', true)
 
       if (supersedeError) throw supersedeError
@@ -2661,8 +2658,7 @@ async function persistChecklist(params: {
         .from('checklists')
         .delete()
         .eq('id', checklistId)
-        .eq('owner_user_id', userId)
-        .eq('visibility', 'private')
+        .eq('visibility', 'global')
 
       if (cleanupError) {
         console.error('Checklist import cleanup failed:', cleanupError)
@@ -2701,8 +2697,7 @@ async function persistChecklist(params: {
         .from('products')
         .delete()
         .eq('id', productId)
-        .eq('owner_user_id', userId)
-        .eq('visibility', 'private')
+        .eq('visibility', 'global')
 
       if (productCleanupError) {
         console.error('Product cleanup failed:', productCleanupError)
@@ -4020,6 +4015,40 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, error: 'You must be signed in to import a checklist.' },
       { status: 401 }
+    )
+  }
+
+  const signedInEmail = String(user.email ?? '').trim().toLowerCase()
+
+  if (!signedInEmail) {
+    return NextResponse.json(
+      { ok: false, error: 'Your account email could not be verified.' },
+      { status: 403 }
+    )
+  }
+
+  const { data: appUser, error: appUserError } = await supabase
+    .from('app_users')
+    .select('role, is_active')
+    .ilike('email', signedInEmail)
+    .maybeSingle()
+
+  if (appUserError) {
+    console.error('Checklist import admin lookup failed:', appUserError)
+    return NextResponse.json(
+      { ok: false, error: 'HITS could not verify checklist import access.' },
+      { status: 500 }
+    )
+  }
+
+  if (!appUser?.is_active || String(appUser.role ?? '').toLowerCase() !== 'admin') {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          'Checklist Library imports are managed by HITS administrators. You can still browse and use the shared checklist library.',
+      },
+      { status: 403 }
     )
   }
 

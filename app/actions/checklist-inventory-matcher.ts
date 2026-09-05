@@ -222,220 +222,46 @@ function sharedTokenCount(left: unknown, right: unknown) {
   return count
 }
 
-function productIdentityTokens(value: unknown) {
-  const generic = new Set([
-    'baseball',
-    'basketball',
-    'football',
-    'hockey',
-    'soccer',
-    'cards',
-    'card',
-    'checklist',
-    'trading',
-    'the',
-    'and',
+function hasMeaningfulProductOverlap(checklist: ChecklistRow, inventory: InventoryRow) {
+  const checklistText = [
+    checklist.manufacturer,
+    checklist.brand,
+    checklist.product_name,
+    checklist.name,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  const inventoryText = [inventory.brand, inventory.set_name, inventory.title]
+    .filter(Boolean)
+    .join(' ')
+
+  if (!checklistText || !inventoryText) return false
+
+  const overlap = sharedTokenCount(checklistText, inventoryText)
+
+  if (overlap >= 2) return true
+
+  const checklistNormalized = normalizeText(checklistText)
+  const inventoryNormalized = normalizeText(inventoryText)
+
+  const importantFamilies = [
+    'bowman',
     'topps',
     'panini',
-    'fanatics',
-  ])
+    'donruss',
+    'heritage',
+    'finest',
+    'prizm',
+    'select',
+    'chrome',
+  ]
 
-  return normalizeText(value)
-    .split(' ')
-    .map((token) => token.trim())
-    .filter(
-      (token) =>
-        token.length >= 3 &&
-        !generic.has(token) &&
-        !/^20\d{2}$/.test(token)
-    )
-}
-
-function checklistProductIdentityTokens(checklist: ChecklistRow) {
-  return Array.from(
-    new Set(
-      productIdentityTokens(
-        [checklist.brand, checklist.product_name, checklist.name]
-          .filter(Boolean)
-          .join(' ')
-      )
-    )
+  return importantFamilies.some(
+    (family) =>
+      checklistNormalized.includes(family) &&
+      inventoryNormalized.includes(family)
   )
-}
-
-function inventoryProductIdentityTokens(inventory: InventoryRow) {
-  return Array.from(
-    new Set(
-      productIdentityTokens(
-        [inventory.brand, inventory.set_name, inventory.title]
-          .filter(Boolean)
-          .join(' ')
-      )
-    )
-  )
-}
-
-function structuredInventoryProductLabel(inventory: InventoryRow) {
-  const title = clean(inventory.title)
-  if (!title.includes('•')) return ''
-
-  const parts = title
-    .split('•')
-    .map((part) => clean(part))
-    .filter(Boolean)
-
-  if (parts.length < 2) return ''
-
-  // HITS titles commonly begin "YEAR • PRODUCT • ...". Treat that product
-  // segment as stronger evidence than loose words elsewhere in the title.
-  if (/^20\d{2}(?:[-–]\d{2})?$/.test(parts[0])) {
-    return normalizeText(parts[1])
-  }
-
-  return ''
-}
-
-function checklistPrimaryProductTokens(checklist: ChecklistRow) {
-  return Array.from(
-    new Set(
-      productIdentityTokens(
-        [checklist.brand, checklist.product_name]
-          .filter(Boolean)
-          .join(' ')
-      )
-    )
-  )
-}
-
-function hasStructuredTitleProductConflict(
-  checklist: ChecklistRow,
-  inventory: InventoryRow
-) {
-  const titleProduct = structuredInventoryProductLabel(inventory)
-  if (!titleProduct) return false
-
-  const checklistTokens = checklistPrimaryProductTokens(checklist)
-  if (checklistTokens.length === 0) return false
-
-  const titleTokens = productIdentityTokens(titleProduct)
-  if (titleTokens.length === 0) return false
-
-  // If the structured HITS product segment names a different product, reject
-  // the candidate even when some older structured field is incomplete/wrong.
-  return !checklistTokens.some((token) => titleTokens.includes(token))
-}
-
-function inventoryTitleYear(inventory: InventoryRow) {
-  const title = clean(inventory.title)
-
-  if (!title) return ''
-
-  const match = title.match(/^\s*(20\d{2}(?:[-–]\d{2})?)\b/)
-  return match ? normalizeYear(match[1]) : ''
-}
-
-function inventoryEffectiveYear(inventory: InventoryRow) {
-  return normalizeYear(inventory.year) || inventoryTitleYear(inventory)
-}
-
-function checklistEffectiveYear(checklist: ChecklistRow) {
-  return normalizeYear(checklist.year)
-}
-
-function sameChecklistYear(checklist: ChecklistRow, inventory: InventoryRow) {
-  const checklistYear = checklistEffectiveYear(checklist)
-  const inventoryYear = inventoryEffectiveYear(inventory)
-
-  // Checklist matching is intentionally strict here. If we cannot establish
-  // the same year, do not include the inventory row in this checklist.
-  return Boolean(
-    checklistYear &&
-      inventoryYear &&
-      checklistYear === inventoryYear
-  )
-}
-
-function checklistCoreProductTokens(checklist: ChecklistRow) {
-  const manufacturerTokens = new Set(
-    productIdentityTokens(checklist.manufacturer)
-  )
-
-  return Array.from(
-    new Set(
-      productIdentityTokens(
-        [checklist.brand, checklist.product_name, checklist.name]
-          .filter(Boolean)
-          .join(' ')
-      ).filter((token) => !manufacturerTokens.has(token))
-    )
-  )
-}
-
-function inventoryCoreProductTokens(inventory: InventoryRow) {
-  const titleProduct = structuredInventoryProductLabel(inventory)
-
-  if (titleProduct) {
-    return Array.from(new Set(productIdentityTokens(titleProduct)))
-  }
-
-  return Array.from(
-    new Set(
-      productIdentityTokens(
-        [inventory.brand, inventory.set_name]
-          .filter(Boolean)
-          .join(' ')
-      )
-    )
-  )
-}
-
-function sameChecklistProduct(checklist: ChecklistRow, inventory: InventoryRow) {
-  const checklistTokens = checklistCoreProductTokens(checklist)
-  const inventoryTokens = inventoryCoreProductTokens(inventory)
-
-  if (checklistTokens.length === 0 || inventoryTokens.length === 0) {
-    return false
-  }
-
-  // Require an actual product-family token from this checklist to be present
-  // in the inventory product identity. For 2026 Bowman this means "Bowman";
-  // "Topps", "Topps Finest", SMLB, etc. cannot qualify.
-  return checklistTokens.some((token) => inventoryTokens.includes(token))
-}
-
-function sameChecklistIdentity(checklist: ChecklistRow, inventory: InventoryRow) {
-  return (
-    sameChecklistYear(checklist, inventory) &&
-    sameChecklistProduct(checklist, inventory)
-  )
-}
-
-function hasMeaningfulProductOverlap(checklist: ChecklistRow, inventory: InventoryRow) {
-  const checklistTokens = checklistProductIdentityTokens(checklist)
-  const inventoryTokens = inventoryProductIdentityTokens(inventory)
-
-  if (checklistTokens.length === 0 || inventoryTokens.length === 0) {
-    return false
-  }
-
-  return checklistTokens.some((token) => inventoryTokens.includes(token))
-}
-
-function hasExplicitProductConflict(checklist: ChecklistRow, inventory: InventoryRow) {
-  if (hasStructuredTitleProductConflict(checklist, inventory)) {
-    return true
-  }
-
-  const checklistTokens = checklistProductIdentityTokens(checklist)
-  const inventoryTokens = inventoryProductIdentityTokens(inventory)
-
-  if (checklistTokens.length === 0 || inventoryTokens.length === 0) {
-    return false
-  }
-
-  // Product-specific words are present on both sides but none agree. This is
-  // stronger negative evidence than a coincidental card number or player name.
-  return !checklistTokens.some((token) => inventoryTokens.includes(token))
 }
 
 function splitPrintedTeams(value: string | null) {
@@ -486,75 +312,6 @@ function checklistItemIsOrdinary(item: ChecklistItemRow) {
     item.serial_flag === true ||
     Number(item.print_run ?? 0) > 0
   )
-}
-
-function sectionSubsetIdentity(section: ChecklistSectionRow | null) {
-  const text = normalizeText(section?.name)
-
-  if (!text) return ''
-
-  // Named subsets/inserts inside the same overall product must stay in their
-  // own checklist section. This prevents, for example, a Bowman Sterling lot
-  // from satisfying an ordinary Bowman Base Set card.
-  const identities = [
-    'bowman sterling',
-    'under the radar',
-    'top 100',
-    'electric sluggers',
-    'power chords',
-    'anime',
-    'final draft',
-    'crystallized',
-    'bowman spotlights',
-    'draft pick pairings',
-  ]
-
-  return identities.find((identity) => text.includes(identity)) ?? ''
-}
-
-function inventoryNamedSubsetIdentities(inventory: InventoryRow) {
-  const text = normalizeText(
-    [
-      inventory.title,
-      inventory.set_name,
-      inventory.parallel_name,
-      inventory.variation,
-      inventory.notes,
-    ]
-      .filter(Boolean)
-      .join(' ')
-  )
-
-  const identities = [
-    'bowman sterling',
-    'under the radar',
-    'top 100',
-    'electric sluggers',
-    'power chords',
-    'anime',
-    'final draft',
-    'crystallized',
-    'bowman spotlights',
-    'draft pick pairings',
-  ]
-
-  return identities.filter((identity) => text.includes(identity))
-}
-
-function sectionSubsetCompatible(
-  section: ChecklistSectionRow | null,
-  inventory: InventoryRow
-) {
-  const checklistSubset = sectionSubsetIdentity(section)
-  const inventorySubsets = inventoryNamedSubsetIdentities(inventory)
-
-  if (checklistSubset) {
-    return inventorySubsets.includes(checklistSubset)
-  }
-
-  // Default/base checklist sections must not absorb a clearly named insert or
-  // subset merely because year, product, player, or card number also match.
-  return inventorySubsets.length === 0
 }
 
 function sectionLooksBaseLike(section: ChecklistSectionRow | null) {
@@ -953,8 +710,7 @@ function scoreStructuredCandidate({
   inventory: InventoryRow
   peopleByItemId: Map<string, ChecklistItemPersonRow[]>
 }): ScoredCandidate | null {
-  if (!sameChecklistIdentity(checklist, inventory)) return null
-  if (!sectionSubsetCompatible(section, inventory)) return null
+  if (yearsExplicitlyConflict(checklist.year, inventory.year)) return null
 
   const checklistPlayers = getChecklistPlayerNames(item, peopleByItemId)
   const inventoryPlayer = normalizePlayerName(inventory.player_name)
@@ -970,20 +726,6 @@ function scoreStructuredCandidate({
       inventoryCardNumber &&
       checklistCardNumber === inventoryCardNumber
   )
-
-  // If both rows explicitly name a player, the wrong player can never be
-  // rescued by a coincidental shared card number such as #5.
-  if (
-    checklistPlayers.length > 0 &&
-    inventoryPlayer &&
-    !checklistPlayers.includes(inventoryPlayer)
-  ) {
-    return null
-  }
-
-  if (hasExplicitProductConflict(checklist, inventory)) {
-    return null
-  }
 
   // A known conflicting card number is stronger negative evidence than a
   // matching player name is positive evidence.
@@ -1425,24 +1167,11 @@ function scoreNotesCandidate({
   peopleByItemId: Map<string, ChecklistItemPersonRow[]>
   parsedNotes: Map<string, number>
 }): ScoredCandidate | null {
-  const namedSubsetSection = Boolean(sectionSubsetIdentity(section))
-
-  // Grouped-note lots are useful beyond base/paper. If the checklist row is a
-  // clearly named subset/insert (Bowman Sterling, Under The Radar, Top 100,
-  // etc.), allow Notes-based player matching there too. sectionSubsetCompatible
-  // below still requires the inventory lot to name the same subset, so a
-  // Bowman Sterling lot cannot spill back into Base Set or another insert.
-  if (!sectionLooksBaseLike(section) && !namedSubsetSection) return null
+  if (!sectionLooksBaseLike(section)) return null
   if (!checklistItemIsOrdinary(item)) return null
   if (looksLikeSpecialVariant(inventory)) return null
   if (!groupedNotesFamilyCompatible(section, item, inventory)) return null
-  if (!sameChecklistIdentity(checklist, inventory)) return null
-  if (!sectionSubsetCompatible(section, inventory)) return null
-  if (hasExplicitProductConflict(checklist, inventory)) return null
-
-  // Notes can identify the player inside a grouped lot, but they cannot by
-  // themselves prove that a Topps Finest/SMLB/etc. lot belongs to Bowman.
-  if (!hasMeaningfulProductOverlap(checklist, inventory)) return null
+  if (yearsExplicitlyConflict(checklist.year, inventory.year)) return null
 
   const checklistPlayers = getChecklistPlayerNames(item, peopleByItemId)
 
