@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import ChecklistAutoMatcher from '@/app/components/ChecklistAutoMatcher'
 import ChecklistProblemReport from '@/app/components/ChecklistProblemReport'
 import ChecklistAlphabetRail from '@/app/components/ChecklistAlphabetRail'
-import ChecklistTopButton from '@/app/components/ChecklistTopButton'
+import ChecklistLoadingLink from '@/app/components/ChecklistLoadingLink'
 import { buildChecklistSetAction } from '@/app/actions/inventory-builds'
 
 type ChecklistRow = {
@@ -2402,26 +2402,26 @@ export default async function ChecklistDetailPage({
       >
         <div className="z-30 -mx-1 shrink-0 flex flex-col gap-3 border-b border-zinc-800 bg-black/95 px-1 py-2 backdrop-blur xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-2">
-            <Link
+            <ChecklistLoadingLink
               href={`/app/checklists/${checklist.id}?view=team#checklist-browser`}
               className={view === 'team' ? 'app-button-primary' : 'app-button'}
             >
               Browse by Team
-            </Link>
+            </ChecklistLoadingLink>
 
-            <Link
+            <ChecklistLoadingLink
               href={`/app/checklists/${checklist.id}?view=player#checklist-browser`}
               className={view === 'player' ? 'app-button-primary' : 'app-button'}
             >
               Browse by Player
-            </Link>
+            </ChecklistLoadingLink>
 
-            <Link
+            <ChecklistLoadingLink
               href={`/app/checklists/${checklist.id}?view=section#checklist-browser`}
               className={view === 'section' ? 'app-button-primary' : 'app-button'}
             >
               Browse by Section
-            </Link>
+            </ChecklistLoadingLink>
           </div>
 
           <form method="get" className="flex w-full max-w-xl gap-2">
@@ -2439,10 +2439,12 @@ export default async function ChecklistDetailPage({
               Search
             </button>
 
-            <ChecklistTopButton
-              targetId="checklist-top"
-              scrollContainerId="checklist-browser"
-            />
+            <ChecklistLoadingLink
+              href="/app/checklists"
+              className="app-button"
+            >
+              Back to Checklist Library
+            </ChecklistLoadingLink>
           </form>
         </div>
 
@@ -2560,7 +2562,7 @@ export default async function ChecklistDetailPage({
                       index === 0 || teams[index - 1]?.letter !== team.letter
 
                     return (
-                      <Link
+                      <ChecklistLoadingLink
                         key={team.name}
                         id={
                           firstInLetter && team.letter !== '#'
@@ -2580,7 +2582,7 @@ export default async function ChecklistDetailPage({
                         <span className="shrink-0 text-xs text-zinc-500">
                           {team.count}
                         </span>
-                      </Link>
+                      </ChecklistLoadingLink>
                     )
                   })}
                 </div>
@@ -3054,7 +3056,7 @@ export default async function ChecklistDetailPage({
                       index === 0 || players[index - 1]?.letter !== player.letter
 
                     return (
-                      <Link
+                      <ChecklistLoadingLink
                         key={player.name}
                         id={
                           firstInLetter
@@ -3074,7 +3076,7 @@ export default async function ChecklistDetailPage({
                         <span className="shrink-0 text-xs text-zinc-500">
                           {player.count}
                         </span>
-                      </Link>
+                      </ChecklistLoadingLink>
                     )
                   })}
                 </div>
@@ -3164,7 +3166,7 @@ export default async function ChecklistDetailPage({
                   const count = sectionCounts.get(section.id) ?? 0
 
                   return (
-                    <Link
+                    <ChecklistLoadingLink
                       key={section.id}
                       href={`/app/checklists/${checklist.id}?view=section&section=${encodeURIComponent(section.id)}`}
                       className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition ${
@@ -3179,7 +3181,7 @@ export default async function ChecklistDetailPage({
                       <span className="shrink-0 text-xs text-zinc-500">
                         {count}
                       </span>
-                    </Link>
+                    </ChecklistLoadingLink>
                   )
                 })}
               </div>

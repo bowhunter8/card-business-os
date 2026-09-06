@@ -749,11 +749,45 @@ function parseFullChecklist(rows: SheetRow[], stats: ImportStats) {
 function parseTeamSets(rows: SheetRow[], stats: ImportStats) {
   const teamRows: TeamRow[] = []
 
+  // Beckett uses two closely related team-index layouts:
+  //
+  // Classic Team Sets:
+  //   Section | Card # | Player | Team
+  //
+  // Newer Teams:
+  //   Index | Section | Card # | Player | Team | Detail
+  //
+  // Detect the newer form by structure instead of worksheet name so the
+  // proven classic parser remains unchanged for existing workbooks.
+  const sample = rows
+    .slice(0, 200)
+    .filter((row) => row.some((value) => text(value)))
+
+  const indexedLayoutMatches = sample.filter((row) => {
+    const indexValue = text(row[0])
+    const sectionName = text(row[1])
+    const cardNumber = text(row[2])
+    const playerName = cleanPlayer(row[3])
+    const printedTeam = text(row[4])
+
+    return (
+      /^\d+$/.test(indexValue) &&
+      Boolean(sectionName) &&
+      (cardNumber === '' || looksLikeCardNumber(cardNumber)) &&
+      Boolean(playerName) &&
+      Boolean(printedTeam)
+    )
+  }).length
+
+  const useIndexedTeamsLayout =
+    sample.length >= 5 &&
+    indexedLayoutMatches >= Math.max(5, Math.floor(sample.length * 0.6))
+
   for (const row of rows) {
-    const sectionName = text(row[0])
-    const cardNumber = text(row[1])
-    const playerName = cleanPlayer(row[2])
-    const printedTeam = text(row[3])
+    const sectionName = text(row[useIndexedTeamsLayout ? 1 : 0])
+    const cardNumber = text(row[useIndexedTeamsLayout ? 2 : 1])
+    const playerName = cleanPlayer(row[useIndexedTeamsLayout ? 3 : 2])
+    const printedTeam = text(row[useIndexedTeamsLayout ? 4 : 3])
 
     if (!sectionName || !playerName || !printedTeam) {
       continue
@@ -2413,7 +2447,7 @@ async function persistChecklist(params: {
       const { data: createdChecklist, error: checklistError } = await supabase
         .from('checklists')
         .insert({
-          owner_user_id: userId,
+          owner_user_id: null,
           visibility: 'global',
           product_id: product.id,
           sport: metadata.sportOrGame.toLowerCase(),
@@ -3575,6 +3609,16 @@ async function handleBeckettImport(params: {
   let fullRows: SheetRow[]
   let teamRowsRaw: SheetRow[]
 
+  const workbookSheetNames = readWorkbookSheetNames(buffer)
+  const beckettTeamSheetName =
+    workbookSheetNames.find(
+      (name) => normalizedKey(name) === 'team sets'
+    ) ??
+    workbookSheetNames.find(
+      (name) => normalizedKey(name) === 'teams'
+    ) ??
+    null
+
   try {
     fullRows = (await readSheet(buffer, 'Full Checklist')) as SheetRow[]
   } catch (error) {
@@ -3597,8 +3641,19 @@ async function handleBeckettImport(params: {
     throw error
   }
 
+  if (!beckettTeamSheetName) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          'This workbook does not contain a Beckett "Team Sets" or "Teams" sheet.',
+      },
+      { status: 400 }
+    )
+  }
+
   try {
-    teamRowsRaw = (await readSheet(buffer, 'Team Sets')) as SheetRow[]
+    teamRowsRaw = (await readSheet(buffer, beckettTeamSheetName)) as SheetRow[]
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? '')
 
@@ -3609,7 +3664,8 @@ async function handleBeckettImport(params: {
       return NextResponse.json(
         {
           ok: false,
-          error: 'This workbook does not contain the Beckett "Team Sets" sheet.',
+          error:
+            'This workbook does not contain a readable Beckett team index sheet.',
         },
         { status: 400 }
       )
@@ -4112,27 +4168,34 @@ export async function POST(request: Request) {
     // but do not require those exact worksheet names for checklist recognition.
     if (
       normalizedSheetNames.has('full checklist') &&
-      normalizedSheetNames.has('team sets')
+      (
+        normalizedSheetNames.has('team sets') ||
+        normalizedSheetNames.has('teams')
+      )
     ) {
-      const teamSetsSheetName =
+      const beckettTeamSheetName =
         sheetNames.find((name) => normalizedKey(name) === 'team sets') ??
-        'Team Sets'
-      const teamSetsRows = (await readSheet(
-        buffer,
-        teamSetsSheetName
-      )) as SheetRow[]
+        sheetNames.find((name) => normalizedKey(name) === 'teams') ??
+        null
 
-      if (looksLikeParentAffiliateTeamIndex(teamSetsRows)) {
-        const hierarchyResult = await handleStructuredWorkbookImport({
-          uploaded,
+      if (beckettTeamSheetName) {
+        const beckettTeamRows = (await readSheet(
           buffer,
-          sheetNames,
-          supabase,
-          userId: user.id,
-          metadataOverride,
-        })
+          beckettTeamSheetName
+        )) as SheetRow[]
 
-        if (hierarchyResult) return hierarchyResult
+        if (looksLikeParentAffiliateTeamIndex(beckettTeamRows)) {
+          const hierarchyResult = await handleStructuredWorkbookImport({
+            uploaded,
+            buffer,
+            sheetNames,
+            supabase,
+            userId: user.id,
+            metadataOverride,
+          })
+
+          if (hierarchyResult) return hierarchyResult
+        }
       }
 
       return handleBeckettImport({

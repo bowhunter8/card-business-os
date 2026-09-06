@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import ChecklistLoadingLink from '@/app/components/ChecklistLoadingLink'
 
 type ChecklistRow = {
   id: string
@@ -290,7 +291,7 @@ export default async function ChecklistsPage() {
                           const meta = checklistMeta(checklist)
 
                           return (
-                            <Link
+                            <ChecklistLoadingLink
                               key={checklist.id}
                               href={`/app/checklists/${checklist.id}`}
                               prefetch={false}
@@ -327,7 +328,7 @@ export default async function ChecklistsPage() {
                                   </span>
                                 </div>
                               </div>
-                            </Link>
+                            </ChecklistLoadingLink>
                           )
                         })}
                       </div>

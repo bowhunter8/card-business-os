@@ -1,6 +1,7 @@
 "use client"
 
 import Link from 'next/link'
+import ChecklistLoadingLink from '@/app/components/ChecklistLoadingLink'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 type ImportFileResult = {
@@ -684,12 +685,12 @@ export default function ChecklistImportPage() {
                   )}
 
                   {!popupMode && result.ok && result.checklistId && (
-                    <Link
+                    <ChecklistLoadingLink
                       href={`/app/checklists/${result.checklistId}`}
                       className="app-button mt-3 inline-flex"
                     >
                       Open Checklist
-                    </Link>
+                    </ChecklistLoadingLink>
                   )}
                 </div>
               )
