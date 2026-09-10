@@ -8,8 +8,17 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useFormStatus } from 'react-dom'
 import { ensureChecklistInventoryMatches } from '@/app/actions/checklist-match-freshness'
-import { buildChecklistSetAction } from '@/app/actions/inventory-builds'
+import {
+  updateInventoryBulkStatusShared,
+  type SharedInventoryBulkStatus,
+} from '@/app/actions/inventory-bulk'
+import {
+  buildChecklistSetAction,
+  quoteChecklistBuild,
+  type ChecklistBuildQuoteResult,
+} from '@/app/actions/inventory-builds'
 
 type Checklist = {
   id: string
@@ -312,6 +321,11 @@ type BuildProposal = {
   ready: boolean
   protectedCount: number
   unresolvedCount: number
+  listedCount: number
+  personalCount: number
+  sellableCount: number
+  mixedPersonalStatus: boolean
+  resultStatus: 'available' | 'personal' | null
 }
 
 function inventoryStatusLabel(status: string | null | undefined) {
@@ -338,7 +352,8 @@ function inventoryPreferenceRank(inventory: InventoryMatchItem) {
 
 function buildProposalForSection(
   sectionItems: ChecklistItem[],
-  matchesByChecklistItemId: Map<string, InventoryMatch[]>
+  matchesByChecklistItemId: Map<string, InventoryMatch[]>,
+  preferredInventoryByChecklistItemId: Map<string, string> = new Map()
 ): BuildProposal {
   const rowRemaining = new Map<string, number>()
   const playerRemaining = new Map<string, number>()
@@ -410,6 +425,15 @@ function buildProposalForSection(
         return rowAvailable > 0 && playerAvailable > 0
       })
       .sort((a, b) => {
+        const pinnedInventoryId =
+          preferredInventoryByChecklistItemId.get(item.id) ?? ''
+
+        const pinnedDifference =
+          Number(b.inventory.id === pinnedInventoryId) -
+          Number(a.inventory.id === pinnedInventoryId)
+
+        if (pinnedDifference !== 0) return pinnedDifference
+
         const preferredDifference =
           Number(Boolean(b.match.is_preferred)) -
           Number(Boolean(a.match.is_preferred))
@@ -498,14 +522,48 @@ function buildProposalForSection(
   )
 
   const unresolvedCount = rows.filter((row) => !row.inventory).length
-  const protectedCount = rows.filter((row) => row.protectedStatus).length
+  const listedCount = rows.filter(
+    (row) =>
+      cleanText(row.inventory?.status).toLowerCase() === 'listed'
+  ).length
+  const personalCount = rows.filter(
+    (row) =>
+      cleanText(row.inventory?.status).toLowerCase() === 'personal'
+  ).length
+  const sellableCount = rows.filter((row) => {
+    const status = cleanText(row.inventory?.status).toLowerCase()
+
+    return Boolean(row.inventory) && status !== 'personal'
+  }).length
+
+  const mixedPersonalStatus =
+    personalCount > 0 && sellableCount > 0
+
+  const protectedCount = listedCount + (
+    mixedPersonalStatus ? personalCount : 0
+  )
+
+  const resultStatus: BuildProposal['resultStatus'] =
+    unresolvedCount > 0 || listedCount > 0 || mixedPersonalStatus
+      ? null
+      : personalCount > 0
+        ? 'personal'
+        : 'available'
 
   return {
     rows,
     totalCostBasis,
-    ready: unresolvedCount === 0 && protectedCount === 0,
+    ready:
+      unresolvedCount === 0 &&
+      listedCount === 0 &&
+      !mixedPersonalStatus,
     protectedCount,
     unresolvedCount,
+    listedCount,
+    personalCount,
+    sellableCount,
+    mixedPersonalStatus,
+    resultStatus,
   }
 }
 
@@ -595,6 +653,30 @@ function LoadingSpinner({
   )
 }
 
+
+function BuildSetSubmitButton({
+  disabled,
+  title,
+}: {
+  disabled: boolean
+  title: string
+}) {
+  const { pending } = useFormStatus()
+
+  return (
+    <button
+      type="submit"
+      className="app-button-primary inline-flex items-center gap-2"
+      disabled={disabled || pending}
+      title={title}
+      aria-busy={pending}
+    >
+      {pending ? <LoadingSpinner size="sm" /> : null}
+      {pending ? 'Building Set...' : 'Build Set'}
+    </button>
+  )
+}
+
 export default function ChecklistBrowser({
   checklistId,
 }: ChecklistBrowserProps) {
@@ -632,8 +714,18 @@ export default function ChecklistBrowser({
   const [buildOpportunitiesOpen, setBuildOpportunitiesOpen] = useState(false)
   const [reviewBuildSectionId, setReviewBuildSectionId] = useState('')
   const [selectedChecklistItemId, setSelectedChecklistItemId] = useState('')
+  const [buildStatusUpdatingItemId, setBuildStatusUpdatingItemId] = useState('')
+  const [buildStatusError, setBuildStatusError] = useState('')
+  const [buildQuote, setBuildQuote] =
+    useState<ChecklistBuildQuoteResult | null>(null)
+  const [buildQuoteLoading, setBuildQuoteLoading] = useState(false)
+  const [
+    buildPreferredInventoryByChecklistItemId,
+    setBuildPreferredInventoryByChecklistItemId,
+  ] = useState<Map<string, string>>(new Map())
 
   const rightPaneRef = useRef<HTMLDivElement | null>(null)
+  const reviewBuildRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -685,6 +777,17 @@ export default function ChecklistBrowser({
   }, [checklistId])
 
   useEffect(() => {
+    if (!reviewBuildSectionId) return
+
+    requestAnimationFrame(() => {
+      reviewBuildRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    })
+  }, [reviewBuildSectionId])
+
+  useEffect(() => {
     setPeople([])
     setPlayerDataLoaded(false)
     setPlayerDataLoading(false)
@@ -707,6 +810,11 @@ export default function ChecklistBrowser({
     setReviewBuildSectionId('')
     setSelectedChecklistItemId('')
     setSelectedChecklistItemId('')
+    setBuildStatusUpdatingItemId('')
+    setBuildStatusError('')
+    setBuildQuote(null)
+    setBuildQuoteLoading(false)
+    setBuildPreferredInventoryByChecklistItemId(new Map())
     setMode('team')
   }, [checklistId])
 
@@ -1109,13 +1217,15 @@ export default function ChecklistBrowser({
       reviewBuildSummary && reviewBuildItems.length > 0
         ? buildProposalForSection(
             reviewBuildItems,
-            matchesByChecklistItemId
+            matchesByChecklistItemId,
+            buildPreferredInventoryByChecklistItemId
           )
         : null,
     [
       matchesByChecklistItemId,
       reviewBuildItems,
       reviewBuildSummary,
+      buildPreferredInventoryByChecklistItemId,
     ]
   )
 
@@ -1123,6 +1233,74 @@ export default function ChecklistBrowser({
 
   const reviewBuildMatchedCount =
     reviewBuildRows.filter((row) => row.inventory !== null).length
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadBuildQuote() {
+      if (!reviewBuildProposal?.ready) {
+        setBuildQuote(null)
+        setBuildQuoteLoading(false)
+        return
+      }
+
+      const components = reviewBuildProposal.rows
+        .filter((row) => row.inventory)
+        .map((row) => ({
+          inventory_item_id: row.inventory!.id,
+          checklist_item_id: row.checklistItem.id,
+        }))
+
+      if (
+        components.length === 0 ||
+        components.length !== reviewBuildProposal.rows.length
+      ) {
+        setBuildQuote(null)
+        setBuildQuoteLoading(false)
+        return
+      }
+
+      setBuildQuoteLoading(true)
+
+      try {
+        const result = await quoteChecklistBuild(components)
+
+        if (!cancelled) {
+          setBuildQuote(result)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setBuildQuote({
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Unable to confirm current build cost.',
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setBuildQuoteLoading(false)
+        }
+      }
+    }
+
+    void loadBuildQuote()
+
+    return () => {
+      cancelled = true
+    }
+  }, [reviewBuildProposal])
+
+  const reviewBuildAuthoritativeCost =
+    buildQuote?.ok === true
+      ? buildQuote.total_cost_basis
+      : reviewBuildProposal?.totalCostBasis ?? 0
+
+  const reviewBuildQuoteReady =
+    Boolean(reviewBuildProposal?.ready) &&
+    !buildQuoteLoading &&
+    buildQuote?.ok === true
 
   const selectedTeamSectionItems = useMemo(() => {
     if (
@@ -1357,6 +1535,44 @@ export default function ChecklistBrowser({
     return data.matches ?? []
   }
 
+  async function updateBuildInventoryStatus(
+    checklistItemId: string,
+    inventoryItemId: string,
+    requestedStatus: SharedInventoryBulkStatus
+  ) {
+    if (!inventoryItemId || buildStatusUpdatingItemId) return
+
+    setBuildStatusUpdatingItemId(inventoryItemId)
+    setBuildStatusError('')
+
+    try {
+      const result = await updateInventoryBulkStatusShared({
+        itemIds: [inventoryItemId],
+        requestedStatus,
+      })
+
+      if (!result.ok) {
+        throw new Error(result.error)
+      }
+
+      setBuildPreferredInventoryByChecklistItemId((current) => {
+        const next = new Map(current)
+        next.set(checklistItemId, inventoryItemId)
+        return next
+      })
+
+      await loadInventoryResults()
+    } catch (err) {
+      setBuildStatusError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to update inventory status.'
+      )
+    } finally {
+      setBuildStatusUpdatingItemId('')
+    }
+  }
+
   async function checkInventory() {
     if (inventoryChecking) return
 
@@ -1365,9 +1581,7 @@ export default function ChecklistBrowser({
     setInventoryCheckMessage('')
 
     try {
-      const result = await ensureChecklistInventoryMatches(checklistId, {
-        force: true,
-      })
+      const result = await ensureChecklistInventoryMatches(checklistId, { force: true })
 
       if (!result.ok) {
         throw new Error(result.error)
@@ -2712,13 +2926,23 @@ export default function ChecklistBrowser({
 
                             <button
                               type="button"
-                              onClick={() =>
+                              onClick={() => {
+                                setBuildStatusError('')
+
+                                if (
+                                  reviewBuildSectionId !== summary.sectionId
+                                ) {
+                                  setBuildPreferredInventoryByChecklistItemId(
+                                    new Map()
+                                  )
+                                }
+
                                 setReviewBuildSectionId(
                                   reviewBuildSectionId === summary.sectionId
                                     ? ''
                                     : summary.sectionId
                                 )
-                              }
+                              }}
                               className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
                                 reviewBuildSectionId === summary.sectionId
                                   ? 'border-cyan-500 bg-cyan-950 text-cyan-100'
@@ -2739,7 +2963,10 @@ export default function ChecklistBrowser({
                     </div>
 
                     {reviewBuildSummary ? (
-                      <div className="mt-4 rounded-xl border border-slate-700 bg-black p-4">
+                      <div
+                        ref={reviewBuildRef}
+                        className="mt-4 scroll-mt-3 rounded-xl border border-slate-700 bg-black p-4"
+                      >
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div>
                             <div className="text-base font-semibold text-white">
@@ -2759,9 +2986,15 @@ export default function ChecklistBrowser({
                               {reviewBuildRows.length} matched
                             </span>
 
-                            {reviewBuildProposal?.protectedCount ? (
+                            {reviewBuildProposal?.listedCount ? (
                               <span className="app-badge app-badge-info">
-                                {reviewBuildProposal.protectedCount} protected
+                                {reviewBuildProposal.listedCount} listed
+                              </span>
+                            ) : null}
+
+                            {reviewBuildProposal?.personalCount ? (
+                              <span className="app-badge app-badge-info">
+                                {reviewBuildProposal.personalCount} personal
                               </span>
                             ) : null}
 
@@ -2769,25 +3002,108 @@ export default function ChecklistBrowser({
                               <span className="app-badge app-badge-info">
                                 {reviewBuildProposal.unresolvedCount} unresolved
                               </span>
-                            ) : (
-                              <span className="app-badge app-badge-success">
-                                Ready
+                            ) : reviewBuildProposal?.mixedPersonalStatus ||
+                              reviewBuildProposal?.listedCount ? (
+                              <span className="app-badge app-badge-info">
+                                Review Required
                               </span>
-                            )}
+                            ) : reviewBuildProposal?.ready ? (
+                              <span className="app-badge app-badge-success">
+                                Ready ·{' '}
+                                {reviewBuildProposal.resultStatus === 'personal'
+                                  ? 'Personal Set'
+                                  : 'Available Set'}
+                              </span>
+                            ) : null}
 
                             <span className="app-badge">
-                              ${Number(
-                                reviewBuildProposal?.totalCostBasis ?? 0
-                              ).toFixed(2)} cost
+                              {buildQuoteLoading
+                                ? 'Checking cost...'
+                                : `$${Number(
+                                    reviewBuildAuthoritativeCost
+                                  ).toFixed(2)} cost`}
                             </span>
                           </div>
                         </div>
 
+                        {reviewBuildProposal?.mixedPersonalStatus ? (
+                          <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/30 px-4 py-3">
+                            <div className="font-semibold text-amber-200">
+                              Mixed inventory statuses need a decision before building.
+                            </div>
+
+                            <div className="mt-1 text-sm text-amber-100/90">
+                              This proposal uses{' '}
+                              {reviewBuildProposal.personalCount.toLocaleString()}{' '}
+                              Personal item
+                              {reviewBuildProposal.personalCount === 1 ? '' : 's'} and{' '}
+                              {reviewBuildProposal.sellableCount.toLocaleString()}{' '}
+                              non-Personal item
+                              {reviewBuildProposal.sellableCount === 1 ? '' : 's'}.
+                              Use the Status controls below to make the exact proposed
+                              copies all Personal for a personal set, or change the
+                              Personal item(s) to Available for a sellable set. HITS
+                              will keep the physical copy you intentionally changed
+                              selected for this build.
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {reviewBuildProposal?.listedCount ? (
+                          <div className="mt-3 rounded-xl border border-amber-700 bg-amber-950/30 px-4 py-3">
+                            <div className="font-semibold text-amber-200">
+                              Listed inventory must be reviewed before building.
+                            </div>
+
+                            <div className="mt-1 text-sm text-amber-100/90">
+                              Use the Status controls below to change the listed source
+                              item(s) to the status you intend before completing this
+                              build.
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {reviewBuildProposal?.ready &&
+                        reviewBuildProposal.resultStatus === 'personal' ? (
+                          <div className="mt-3 rounded-xl border border-cyan-800 bg-cyan-950/20 px-4 py-3 text-sm text-cyan-100">
+                            All proposed source cards are Personal. Building will create
+                            one finished Personal team set.
+                          </div>
+                        ) : null}
+
+                        {reviewBuildProposal?.ready &&
+                        reviewBuildProposal.resultStatus === 'available' ? (
+                          <div className="mt-3 rounded-xl border border-emerald-800 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100">
+                            The proposed source cards are ready for a sellable build.
+                            Building will create one Available team set.
+                          </div>
+                        ) : null}
+
+                        {buildQuote?.ok === false ? (
+                          <div className="mt-3 rounded-xl border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+                            {buildQuote.error}
+                          </div>
+                        ) : null}
+
+                        {reviewBuildProposal?.ready && buildQuoteLoading ? (
+                          <div className="mt-3 flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+                            <LoadingSpinner size="sm" />
+                            Confirming current inventory cost...
+                          </div>
+                        ) : null}
+
+                        {buildStatusError ? (
+                          <div className="mt-3 rounded-xl border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+                            {buildStatusError}
+                          </div>
+                        ) : null}
+
                         <div className="mt-3 overflow-hidden rounded-xl border border-slate-800">
-                          <div className="grid grid-cols-[90px_minmax(160px,1fr)_minmax(220px,1.5fr)_85px_90px] gap-3 border-b border-slate-800 bg-slate-950 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          <div className="grid grid-cols-[90px_minmax(160px,1fr)_minmax(220px,1.5fr)_130px_70px_80px] gap-3 border-b border-slate-800 bg-slate-950 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <div>Card #</div>
                             <div>Checklist Card</div>
                             <div>Matched Inventory</div>
+                            <div>Status</div>
                             <div>Qty</div>
                             <div>Open</div>
                           </div>
@@ -2803,7 +3119,7 @@ export default function ChecklistBrowser({
                               }) => (
                                 <div
                                   key={checklistItem.id}
-                                  className="grid grid-cols-[90px_minmax(160px,1fr)_minmax(220px,1.5fr)_85px_90px] items-center gap-3 border-b border-slate-900 px-3 py-3 text-sm last:border-b-0"
+                                  className="grid grid-cols-[90px_minmax(160px,1fr)_minmax(220px,1.5fr)_130px_70px_80px] items-center gap-3 border-b border-slate-900 px-3 py-3 text-sm last:border-b-0"
                                 >
                                   <div className="font-mono text-slate-300">
                                     {cleanText(checklistItem.card_number) || '—'}
@@ -2832,21 +3148,30 @@ export default function ChecklistBrowser({
 
                                       <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-slate-500">
                                         <span>
-                                          {inventoryStatusLabel(inventory.status)}
-                                        </span>
-                                        <span>
                                           Match {Number(
                                             match?.match_score ?? 0
                                           ).toLocaleString()}
                                         </span>
-                                        {protectedStatus ? (
+                                        {protectedStatus &&
+                                        !(
+                                          reviewBuildProposal?.ready &&
+                                          reviewBuildProposal.resultStatus ===
+                                            'personal'
+                                        ) ? (
                                           <span className="text-amber-300">
                                             Protected
                                           </span>
                                         ) : null}
                                       </div>
 
-                                      {issue ? (
+                                      {issue &&
+                                      !(
+                                        reviewBuildProposal?.ready &&
+                                        reviewBuildProposal.resultStatus ===
+                                          'personal' &&
+                                        cleanText(inventory.status).toLowerCase() ===
+                                          'personal'
+                                      ) ? (
                                         <div className="mt-1 text-xs text-amber-300">
                                           {issue}
                                         </div>
@@ -2857,6 +3182,47 @@ export default function ChecklistBrowser({
                                       Missing
                                     </div>
                                   )}
+
+                                  <div>
+                                    {inventory ? (
+                                      <div className="flex items-center gap-2">
+                                        <select
+                                          value={
+                                            cleanText(inventory.status).toLowerCase() ||
+                                            'available'
+                                          }
+                                          disabled={Boolean(buildStatusUpdatingItemId)}
+                                          onChange={(event) => {
+                                            const requestedStatus = event.target
+                                              .value as SharedInventoryBulkStatus
+
+                                            void updateBuildInventoryStatus(
+                                              checklistItem.id,
+                                              inventory.id,
+                                              requestedStatus
+                                            )
+                                          }}
+                                          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 disabled:cursor-wait disabled:opacity-60"
+                                          aria-label={`Status for ${
+                                            cleanText(inventory.title) ||
+                                            cleanText(inventory.player_name) ||
+                                            'inventory item'
+                                          }`}
+                                        >
+                                          <option value="available">Available</option>
+                                          <option value="personal">Personal</option>
+                                          <option value="listed">Listed</option>
+                                          <option value="junk">Junk</option>
+                                        </select>
+
+                                        {buildStatusUpdatingItemId === inventory.id ? (
+                                          <LoadingSpinner size="sm" />
+                                        ) : null}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-600">—</span>
+                                    )}
+                                  </div>
 
                                   <div className="text-slate-300">
                                     {inventory
@@ -2887,8 +3253,12 @@ export default function ChecklistBrowser({
                         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-900/70 bg-cyan-950/20 px-4 py-3">
                           <div className="text-sm text-cyan-100">
                             Building creates one finished inventory item and
-                            atomically reduces the exact proposed source
-                            quantities. If validation fails, nothing changes.
+                            atomically reduces the exact proposed source quantities.
+                            Review Build confirms the current database cost for those
+                            exact physical records before Build Set is enabled.
+                            All-Personal components create a Personal set; otherwise
+                            the finished set is Available. Mixed Personal/sellable or
+                            Listed components must be resolved first.
                           </div>
 
                           <form action={buildChecklistSetAction}>
@@ -2918,18 +3288,21 @@ export default function ChecklistBrowser({
                               )}
                             />
 
-                            <button
-                              type="submit"
-                              className="app-button-primary"
-                              disabled={!reviewBuildProposal?.ready}
+                            <BuildSetSubmitButton
+                              disabled={!reviewBuildQuoteReady}
                               title={
-                                reviewBuildProposal?.ready
-                                  ? 'Create this finished team set'
-                                  : 'Resolve protected or missing components before building'
+                                !reviewBuildProposal?.ready
+                                  ? 'Resolve mixed Personal/sellable, Listed, or missing components before building'
+                                  : buildQuoteLoading
+                                    ? 'Confirming current inventory cost'
+                                    : buildQuote?.ok === false
+                                      ? 'Current inventory cost could not be confirmed'
+                                      : reviewBuildProposal.resultStatus ===
+                                          'personal'
+                                        ? 'Create this finished Personal team set'
+                                        : 'Create this finished Available team set'
                               }
-                            >
-                              Build Set
-                            </button>
+                            />
                           </form>
                         </div>
                       </div>

@@ -379,7 +379,7 @@ function EstimateValueMetric({
       />
 
       <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-[140px]">
+        <div className="min-w-35">
           <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
             Estimated Value
           </div>
@@ -632,12 +632,20 @@ export default async function InventoryDetailPage({
   const canDelete =
     activeSales.length === 0 && !isFinalizedBuild && !isDisassembledBuild;
   const buildHasAnySaleHistory = sales.length > 0;
+  const isUntouchedAvailableBuild =
+    item.status === "available" &&
+    Number(item.quantity ?? 0) === 1 &&
+    Number(item.available_quantity ?? 0) === 1;
+
+  const isUntouchedPersonalBuild =
+    item.status === "personal" &&
+    Number(item.quantity ?? 0) === 1 &&
+    Number(item.available_quantity ?? 0) === 0;
+
   const canDisassembleBuild =
     Boolean(isFinalizedBuild) &&
     !buildHasAnySaleHistory &&
-    item.status === "available" &&
-    Number(item.quantity ?? 0) === 1 &&
-    Number(item.available_quantity ?? 0) === 1 &&
+    (isUntouchedAvailableBuild || isUntouchedPersonalBuild) &&
     !isFinalizedDisposal &&
     !isFinalizedGiveaway;
   const itemFormId = "inventory-inline-edit-form";
@@ -963,15 +971,16 @@ export default async function InventoryDetailPage({
                   <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-400">
                     Restores the exact component quantities to their original
                     inventory records and removes this finished set from active
-                    inventory. This is only allowed while the finished item is
-                    still completely available and has no sale history.
+                    inventory. This is allowed while the finished build is still
+                    untouched in its original Available or Personal state and has
+                    no sale history.
                   </p>
 
                   {!canDisassembleBuild ? (
                     <div className="mt-2 text-xs text-amber-300">
                       Disassembly is unavailable because this finished item has
-                      sale history, is no longer fully available, or has another
-                      finalized business event.
+                      sale history, no longer matches its original build state,
+                      or has another finalized business event.
                     </div>
                   ) : null}
                 </div>
@@ -1378,7 +1387,7 @@ export default async function InventoryDetailPage({
                     className="flex flex-col gap-1 px-3 py-2.5 transition hover:bg-zinc-900/70 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="min-w-0">
-                      <div className="break-words text-sm font-medium text-zinc-100">
+                      <div className="wrap-break-word text-sm font-medium text-zinc-100">
                         {buildRelatedSourceItemDisplay(relatedItem)}
                       </div>
                       <div className="mt-0.5 text-xs text-zinc-500">
@@ -1408,9 +1417,10 @@ export default async function InventoryDetailPage({
         </div>
       )}
 
-      {effectiveStatus === "personal" ||
-      effectiveStatus === "giveaway" ||
-      effectiveStatus === "junk" ? (
+      {!isDisassembledBuild &&
+      (effectiveStatus === "personal" ||
+        effectiveStatus === "giveaway" ||
+        effectiveStatus === "junk") ? (
         <div className="app-alert-warning">
           This status change affects tax reporting. Ensure this item is not also
           counted as an expense or inventory elsewhere to avoid double counting.
@@ -1424,7 +1434,7 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      {effectiveStatus === "personal" ? (
+      {effectiveStatus === "personal" && !isDisassembledBuild ? (
         <div className="app-alert-info">
           This item is marked as Personal Collection and is not currently part
           of your active sell inventory.
@@ -2087,7 +2097,7 @@ export default async function InventoryDetailPage({
                               name="reversal_reason"
                               rows={2}
                               placeholder="Optional reversal reason"
-                              className="app-textarea min-w-[200px]"
+                              className="app-textarea min-w-50"
                             />
                             <AppLoadingButton
                               type="submit"
