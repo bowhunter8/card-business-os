@@ -175,6 +175,18 @@ function normalizeText(value: unknown) {
     .trim()
 }
 
+
+function expandProductAliases(value: unknown) {
+  return normalizeText(value)
+    .replace(/\ba\s*&?\s*g\b/g, ' allen ginter ')
+    .replace(/\ballen\s+and\s+ginter\b/g, ' allen ginter ')
+    .replace(/\bb\s*&?\s*w\b/g, ' black white ')
+    .replace(/\bblack\s+and\s+white\b/g, ' black white ')
+    .replace(/\bcosmic\b/g, ' cosmic chrome ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function normalizeCardNumber(value: unknown) {
   return clean(value)
     .toUpperCase()
@@ -277,54 +289,33 @@ function hasMeaningfulProductOverlap(checklist: ChecklistRow, inventory: Invento
  * making a 2026 Bowman Chrome checklist card look owned.  It is used ONLY by
  * the grouped-notes fallback; the existing structured matcher is unchanged.
  */
-function checklistProductCompatible(
+function productCompatibilityScore(
   checklist: ChecklistRow,
   inventory: InventoryRow
 ) {
-  // Product identity is a gate, not a scoring bonus. A card from another
-  // product must never satisfy this checklist just because the player and/or
-  // card number happen to match.
-  //
-  // Prefer checklist brand/product metadata and inventory brand/set metadata,
-  // while still allowing the inventory title to supply missing wording.
-  const checklistText = normalizeText(
-    [checklist.brand, checklist.product_name, checklist.name]
+  const checklistText = expandProductAliases(
+    [checklist.manufacturer, checklist.brand, checklist.product_name, checklist.name]
       .filter(Boolean)
       .join(' ')
   )
 
-  // Prefer structured product fields. A word such as "Chrome" in the title
-  // can describe the card itself (for example, "Gage Jump Chrome 1st") even
-  // when the actual product is plain Bowman. Only fall back to the title when
-  // brand/set_name do not provide product identity.
-  const structuredInventoryProductText = normalizeText(
+  const structuredInventoryText = expandProductAliases(
     [inventory.brand, inventory.set_name]
       .filter(Boolean)
       .join(' ')
   )
 
   const inventoryText =
-    structuredInventoryProductText || normalizeText(inventory.title)
+    structuredInventoryText || expandProductAliases(inventory.title)
 
-  if (!checklistText || !inventoryText) return false
+  if (!checklistText || !inventoryText) return 0
 
-  const ignoredTokens = new Set([
-    'baseball',
-    'card',
-    'cards',
-    'checklist',
-    'the',
-  ])
-
-  const checklistTokens = checklistText
-    .split(' ')
-    .map((token) => token.trim())
-    .filter(
-      (token) =>
-        token &&
-        !ignoredTokens.has(token) &&
-        !/^(?:19|20)\d{2}$/.test(token)
-    )
+  const checklistTokens = new Set(
+    checklistText
+      .split(' ')
+      .map((token) => token.trim())
+      .filter(Boolean)
+  )
 
   const inventoryTokens = new Set(
     inventoryText
@@ -333,42 +324,36 @@ function checklistProductCompatible(
       .filter(Boolean)
   )
 
-  // Every meaningful checklist product token should be represented by the
-  // inventory record. Example: "Bowman Chrome" requires both BOWMAN and
-  // CHROME; "Bowman" alone is not enough.
-  if (
-    checklistTokens.length > 0 &&
-    !checklistTokens.every((token) => inventoryTokens.has(token))
-  ) {
-    return false
+  const ignoredTokens = new Set([
+    'baseball',
+    'card',
+    'cards',
+    'checklist',
+    'the',
+    'series',
+    'set',
+  ])
+
+  const meaningfulChecklistTokens = Array.from(checklistTokens).filter(
+    (token) =>
+      !ignoredTokens.has(token) &&
+      !/^(?:19|20)\d{2}$/.test(token)
+  )
+
+  let shared = 0
+
+  for (const token of meaningfulChecklistTokens) {
+    if (inventoryTokens.has(token)) shared += 1
   }
 
-  // These words distinguish sibling products that commonly share the same
-  // manufacturer/brand. If the inventory explicitly names one that the
-  // checklist does not, treat it as a different product.
-  const productDiscriminators = [
-    'chrome',
-    'draft',
-    'sapphire',
-    'finest',
-    'heritage',
-    'prizm',
-    'select',
-    'donruss',
-    'sterling',
-    'logofractor',
-    'pro',
-    'debut',
-  ]
+  // Product text is supporting evidence, not a hard gate. This deliberately
+  // tolerates manual shorthand such as "Topps", "Cosmic", "A&G", or "B&W".
+  // Exact player + exact card number remain the primary identity.
+  if (shared >= 3) return 12
+  if (shared === 2) return 9
+  if (shared === 1) return 5
 
-  for (const discriminator of productDiscriminators) {
-    const checklistHas = checklistTokens.includes(discriminator)
-    const inventoryHas = inventoryTokens.has(discriminator)
-
-    if (checklistHas !== inventoryHas) return false
-  }
-
-  return true
+  return 0
 }
 
 function splitPrintedTeams(value: string | null) {
@@ -817,8 +802,10 @@ function scoreStructuredCandidate({
   inventory: InventoryRow
   peopleByItemId: Map<string, ChecklistItemPersonRow[]>
 }): ScoredCandidate | null {
+  // Player + card number are the primary manual-entry identity.
+  // Keep an explicit year conflict as a safety guard against annual repeats,
+  // but do not require literal product/set wording before considering a match.
   if (yearsExplicitlyConflict(checklist.year, inventory.year)) return null
-  if (!checklistProductCompatible(checklist, inventory)) return null
 
   const checklistPlayers = getChecklistPlayerNames(item, peopleByItemId)
   const inventoryPlayer = normalizePlayerName(inventory.player_name)
@@ -953,8 +940,10 @@ function scoreStructuredCandidate({
     reasons.push('year')
   }
 
-  if (hasMeaningfulProductOverlap(checklist, inventory)) {
-    score += 8
+  const productScore = productCompatibilityScore(checklist, inventory)
+
+  if (productScore > 0) {
+    score += productScore
     reasons.push('product')
   }
 
@@ -1274,7 +1263,6 @@ function scoreNotesCandidate({
   if (!checklistItemIsOrdinary(item)) return null
   if (looksLikeSpecialVariant(inventory)) return null
   if (!groupedNotesFamilyCompatible(section, item, inventory)) return null
-  if (!checklistProductCompatible(checklist, inventory)) return null
   if (yearsExplicitlyConflict(checklist.year, inventory.year)) return null
 
   const checklistPlayers = getChecklistPlayerNames(item, peopleByItemId)
@@ -1338,8 +1326,10 @@ function scoreNotesCandidate({
     reasons.push('year')
   }
 
-  if (hasMeaningfulProductOverlap(checklist, inventory)) {
-    score += 7
+  const notesProductScore = productCompatibilityScore(checklist, inventory)
+
+  if (notesProductScore > 0) {
+    score += Math.min(notesProductScore, 7)
     reasons.push('product')
   }
 
@@ -1358,7 +1348,7 @@ function scoreNotesCandidate({
         normalizeYear(inventory.year) &&
         normalizeYear(checklist.year) === normalizeYear(inventory.year)
     ),
-    hasMeaningfulProductOverlap(checklist, inventory),
+    productCompatibilityScore(checklist, inventory) > 0,
     inventoryFamily === checklistFamily ||
       (checklistFamily === 'paper' && inventoryFamily === 'unknown'),
   ].filter(Boolean).length

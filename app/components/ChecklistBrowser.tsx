@@ -1365,7 +1365,9 @@ export default function ChecklistBrowser({
     setInventoryCheckMessage('')
 
     try {
-      const result = await ensureChecklistInventoryMatches(checklistId)
+      const result = await ensureChecklistInventoryMatches(checklistId, {
+        force: true,
+      })
 
       if (!result.ok) {
         throw new Error(result.error)

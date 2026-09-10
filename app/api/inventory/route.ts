@@ -57,6 +57,54 @@ type CreateInventoryPayload = {
   } | null;
 };
 
+
+type AutoLinkChecklistRow = {
+  id: string;
+  year: string | number | null;
+  manufacturer: string | null;
+  brand: string | null;
+  product_name: string | null;
+  name: string | null;
+};
+
+type AutoLinkChecklistItemRow = {
+  id: string;
+  checklist_id: string;
+  section_id: string | null;
+  card_number: string | null;
+  player_name: string | null;
+  parallel_name: string | null;
+  variation: string | null;
+  auto_flag: boolean | null;
+  relic_flag: boolean | null;
+  serial_flag: boolean | null;
+  print_run: number | null;
+};
+
+type AutoLinkSectionRow = {
+  id: string;
+  name: string | null;
+};
+
+type AutoLinkInventoryRow = {
+  id: string;
+  title: string | null;
+  player_name: string | null;
+  year: string | number | null;
+  brand: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  parallel_name: string | null;
+  notes: string | null;
+  checklist_id: string | null;
+  checklist_item_id: string | null;
+};
+
+type AutoLinkResult = {
+  checklistId: string;
+  checklistItemId: string;
+};
+
 type InventoryRowInsert = {
   user_id: string;
   title: string;
@@ -160,6 +208,413 @@ function isFilledBulkItem(item: BulkLotItemInput | null | undefined): boolean {
       toSafeString(item.notes) ||
       toSafeNumber(item.estimatedValue, 0)
   );
+}
+
+
+function normalizeAutoLinkText(value: unknown): string {
+  return toSafeString(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeAutoLinkYear(value: unknown): string {
+  return toSafeString(value).toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizeAutoLinkCardNumber(value: unknown): string {
+  return toSafeString(value)
+    .toUpperCase()
+    .replace(/^#/, "")
+    .replace(/\s+/g, "")
+    .replace(/[–—]/g, "-")
+    .trim();
+}
+
+function normalizeAutoLinkPlayer(value: unknown): string {
+  return normalizeAutoLinkText(value)
+    .replace(/\b(?:chrome|paper)\b/g, " ")
+    .replace(/\b(?:rc|rookie|rookie card)\b/g, " ")
+    .replace(/\b(?:1st|first bowman|1st bowman)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function autoLinkTokenSet(value: unknown): Set<string> {
+  return new Set(
+    normalizeAutoLinkText(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+  );
+}
+
+function autoLinkProductCompatible(
+  checklist: AutoLinkChecklistRow,
+  inventory: AutoLinkInventoryRow
+): boolean {
+  if (
+    normalizeAutoLinkYear(checklist.year) &&
+    normalizeAutoLinkYear(inventory.year) &&
+    normalizeAutoLinkYear(checklist.year) !== normalizeAutoLinkYear(inventory.year)
+  ) {
+    return false;
+  }
+
+  const checklistText = normalizeAutoLinkText(
+    [checklist.brand, checklist.product_name, checklist.name]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  const inventoryText = normalizeAutoLinkText(
+    [inventory.brand, inventory.set_name, inventory.title]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  if (!checklistText || !inventoryText) return false;
+
+  const ignoredTokens = new Set([
+    "baseball",
+    "card",
+    "cards",
+    "checklist",
+    "the",
+  ]);
+
+  const checklistTokens = checklistText
+    .split(" ")
+    .filter(
+      (token) =>
+        token &&
+        !ignoredTokens.has(token) &&
+        !/^(?:19|20)\d{2}$/.test(token)
+    );
+
+  const inventoryTokens = autoLinkTokenSet(inventoryText);
+
+  const productDiscriminators = [
+    "chrome",
+    "draft",
+    "sapphire",
+    "finest",
+    "heritage",
+    "prizm",
+    "select",
+    "donruss",
+    "sterling",
+    "pro",
+    "debut",
+    "update",
+  ];
+
+  for (const discriminator of productDiscriminators) {
+    const checklistHas = checklistTokens.includes(discriminator);
+    const inventoryHas = inventoryTokens.has(discriminator);
+
+    if (checklistHas !== inventoryHas) return false;
+  }
+
+  const manufacturerTokens = new Set([
+    "topps",
+    "bowman",
+    "panini",
+    "donruss",
+    "upper",
+    "deck",
+  ]);
+
+  const checklistMakerTokens = checklistTokens.filter((token) =>
+    manufacturerTokens.has(token)
+  );
+
+  if (
+    checklistMakerTokens.length > 0 &&
+    !checklistMakerTokens.some((token) => inventoryTokens.has(token))
+  ) {
+    return false;
+  }
+
+  const meaningfulChecklistTokens = checklistTokens.filter(
+    (token) => !manufacturerTokens.has(token)
+  );
+
+  if (meaningfulChecklistTokens.length === 0) return true;
+
+  return meaningfulChecklistTokens.some((token) =>
+    inventoryTokens.has(token)
+  );
+}
+
+function autoLinkSpecialEvidence(inventory: AutoLinkInventoryRow): string {
+  return normalizeAutoLinkText(
+    [
+      inventory.parallel_name,
+      inventory.notes,
+      inventory.title,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
+
+function autoLinkSectionIdentity(sectionName: string | null): string {
+  const genericWords = new Set([
+    "base",
+    "chrome",
+    "prospect",
+    "prospects",
+    "autograph",
+    "autographs",
+    "auto",
+    "autos",
+    "cards",
+    "card",
+    "set",
+    "retail",
+  ]);
+
+  return normalizeAutoLinkText(sectionName)
+    .split(" ")
+    .filter((token) => token && !genericWords.has(token))
+    .join(" ")
+    .trim();
+}
+
+function autoLinkSpecialness(
+  item: AutoLinkChecklistItemRow,
+  sectionName: string | null
+): number {
+  let score = 0;
+
+  if (toSafeString(item.parallel_name)) score += 4;
+  if (toSafeString(item.variation)) score += 4;
+  if (item.auto_flag === true) score += 2;
+  if (item.relic_flag === true) score += 2;
+  if (item.serial_flag === true || Number(item.print_run ?? 0) > 0) score += 2;
+  if (autoLinkSectionIdentity(sectionName)) score += 1;
+
+  return score;
+}
+
+function autoLinkEvidenceScore(
+  item: AutoLinkChecklistItemRow,
+  sectionName: string | null,
+  inventoryEvidence: string
+): number {
+  if (!inventoryEvidence) return 0;
+
+  let score = 0;
+
+  const phrases = [
+    toSafeString(item.parallel_name),
+    toSafeString(item.variation),
+    autoLinkSectionIdentity(sectionName),
+  ].filter(Boolean);
+
+  for (const phrase of phrases) {
+    const normalizedPhrase = normalizeAutoLinkText(phrase);
+
+    if (normalizedPhrase && inventoryEvidence.includes(normalizedPhrase)) {
+      score += 10;
+      continue;
+    }
+
+    const tokens = normalizedPhrase
+      .split(" ")
+      .filter((token) => token.length >= 3);
+
+    if (
+      tokens.length > 0 &&
+      tokens.every((token) => inventoryEvidence.includes(token))
+    ) {
+      score += 6;
+    }
+  }
+
+  if (
+    item.auto_flag === true &&
+    /\b(auto|autograph|signed)\b/.test(inventoryEvidence)
+  ) {
+    score += 4;
+  }
+
+  if (
+    item.relic_flag === true &&
+    /\b(relic|patch|jersey|memorabilia)\b/.test(inventoryEvidence)
+  ) {
+    score += 4;
+  }
+
+  if (
+    (item.serial_flag === true || Number(item.print_run ?? 0) > 0) &&
+    /(?:\/\s*\d+\b|\b\d+\s*\/\s*\d+\b|numbered|serial)/.test(inventoryEvidence)
+  ) {
+    score += 4;
+  }
+
+  return score;
+}
+
+async function tryAutoLinkInventoryItem({
+  supabase,
+  inventory,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  inventory: AutoLinkInventoryRow;
+}): Promise<AutoLinkResult | null> {
+  if (inventory.checklist_item_id || inventory.checklist_id) return null;
+
+  const year = normalizeAutoLinkYear(inventory.year);
+  const player = normalizeAutoLinkPlayer(inventory.player_name);
+  const cardNumber = normalizeAutoLinkCardNumber(inventory.card_number);
+  const productText = normalizeAutoLinkText(
+    [inventory.brand, inventory.set_name, inventory.title]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  // Do not guess. These four pieces are the minimum identity needed for the
+  // save-time shortcut. Older/unlinked inventory remains handled by the normal
+  // checklist matcher.
+  if (!year || !player || !cardNumber || !productText) return null;
+
+  const { data: checklistData, error: checklistError } = await supabase
+    .from("checklists")
+    .select("id, year, manufacturer, brand, product_name, name")
+    .eq("is_active", true)
+    .is("superseded_by_checklist_id", null);
+
+  if (checklistError || !Array.isArray(checklistData)) return null;
+
+  const compatibleChecklists = (checklistData as AutoLinkChecklistRow[]).filter(
+    (checklist) =>
+      normalizeAutoLinkYear(checklist.year) === year &&
+      autoLinkProductCompatible(checklist, inventory)
+  );
+
+  if (compatibleChecklists.length === 0) return null;
+
+  const checklistIds = compatibleChecklists.map((checklist) => checklist.id);
+
+  const rawCardNumber = toSafeString(inventory.card_number);
+  const cardNumberCandidates = Array.from(
+    new Set([
+      rawCardNumber,
+      cardNumber,
+      `#${cardNumber}`,
+    ].filter(Boolean))
+  );
+
+  const { data: itemData, error: itemError } = await supabase
+    .from("checklist_items")
+    .select(
+      "id, checklist_id, section_id, card_number, player_name, parallel_name, variation, auto_flag, relic_flag, serial_flag, print_run"
+    )
+    .in("checklist_id", checklistIds)
+    .in("card_number", cardNumberCandidates);
+
+  if (itemError || !Array.isArray(itemData)) return null;
+
+  const playerAndNumberMatches = (
+    itemData as AutoLinkChecklistItemRow[]
+  ).filter(
+    (item) =>
+      normalizeAutoLinkCardNumber(item.card_number) === cardNumber &&
+      normalizeAutoLinkPlayer(item.player_name) === player
+  );
+
+  if (playerAndNumberMatches.length === 0) return null;
+
+  const sectionIds = Array.from(
+    new Set(
+      playerAndNumberMatches
+        .map((item) => item.section_id)
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+
+  const sectionNameById = new Map<string, string | null>();
+
+  if (sectionIds.length > 0) {
+    const { data: sectionData, error: sectionError } = await supabase
+      .from("checklist_sections")
+      .select("id, name")
+      .in("id", sectionIds);
+
+    if (!sectionError && Array.isArray(sectionData)) {
+      for (const section of sectionData as AutoLinkSectionRow[]) {
+        sectionNameById.set(section.id, section.name);
+      }
+    }
+  }
+
+  const evidence = autoLinkSpecialEvidence(inventory);
+
+  const ranked = playerAndNumberMatches
+    .map((item) => {
+      const sectionName = item.section_id
+        ? sectionNameById.get(item.section_id) ?? null
+        : null;
+
+      return {
+        item,
+        evidenceScore: autoLinkEvidenceScore(item, sectionName, evidence),
+        specialness: autoLinkSpecialness(item, sectionName),
+      };
+    })
+    .sort((left, right) => {
+      if (right.evidenceScore !== left.evidenceScore) {
+        return right.evidenceScore - left.evidenceScore;
+      }
+
+      return left.specialness - right.specialness;
+    });
+
+  if (ranked.length === 0) return null;
+
+  const best = ranked[0];
+  const second = ranked[1];
+
+  if (best.evidenceScore > 0) {
+    if (
+      second &&
+      second.evidenceScore === best.evidenceScore &&
+      second.specialness === best.specialness
+    ) {
+      return null;
+    }
+  } else {
+    // No special-version evidence: use the unique least-special/default row.
+    // This follows the same family-first rule used by the checklist matcher.
+    if (
+      second &&
+      second.specialness === best.specialness
+    ) {
+      return null;
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from(INVENTORY_TABLE)
+    .update({
+      checklist_id: best.item.checklist_id,
+      checklist_item_id: best.item.id,
+    })
+    .eq("id", inventory.id);
+
+  if (updateError) return null;
+
+  return {
+    checklistId: best.item.checklist_id,
+    checklistItemId: best.item.id,
+  };
 }
 
 function buildSingleTitle(body: CreateInventoryPayload): string {
@@ -555,9 +1010,40 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let returnedItem = data;
+
+    // Manual single-card entry shortcut:
+    // if the card was not already launched from a checklist and the saved
+    // structured identity is strong enough, quietly attach the exact checklist
+    // IDs. Failure or ambiguity never blocks the inventory save.
+    if (
+      data &&
+      typeof data === "object" &&
+      !row.checklist_id &&
+      !row.checklist_item_id
+    ) {
+      try {
+        const autoLink = await tryAutoLinkInventoryItem({
+          supabase,
+          inventory: data as AutoLinkInventoryRow,
+        });
+
+        if (autoLink) {
+          returnedItem = {
+            ...data,
+            checklist_id: autoLink.checklistId,
+            checklist_item_id: autoLink.checklistItemId,
+          };
+        }
+      } catch {
+        // Auto-linking is a convenience only. The normal checklist matcher
+        // remains the fallback, so a lookup failure must never fail the save.
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      item: data,
+      item: returnedItem,
       message: "Inventory item created successfully.",
     });
   } catch (error: unknown) {
