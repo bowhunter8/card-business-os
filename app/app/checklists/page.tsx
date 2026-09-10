@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ChecklistLoadingLink from '@/app/components/ChecklistLoadingLink'
+import ChecklistSearchAutocomplete from '@/app/components/ChecklistSearchAutocomplete'
 
 type ChecklistRow = {
   id: string
@@ -257,28 +258,17 @@ export default async function ChecklistsPage() {
           </p>
         </div>
 
-        <form
-          method="get"
-          action="/app/checklists/search"
-          target="_blank"
-          className="flex flex-col gap-2 sm:flex-row"
-        >
-          <input
-            type="search"
-            name="q"
-            placeholder="Example: Kurtz RC, PD-1 Nick Kurtz, 2025 Pro Debut Kurtz..."
-            autoComplete="off"
-            className="min-w-0 flex-1 rounded-xl border border-zinc-700 bg-black px-4 py-3 text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-cyan-600"
-          />
-
-          <button type="submit" className="app-button-primary">
-            Search Checklists
-          </button>
-        </form>
-
-        <p className="text-xs text-zinc-500">
-          Results open in a new tab so the Checklist Library stays open.
-        </p>
+        <ChecklistSearchAutocomplete
+          checklists={checklists.map((checklist) => ({
+            id: checklist.id,
+            sport: clean(checklist.sport),
+            year: clean(checklist.year),
+            manufacturer: clean(checklist.manufacturer),
+            brand: clean(checklist.brand),
+            productName: clean(checklist.product_name),
+            name: checklistTitle(checklist),
+          }))}
+        />
       </section>
 
       <section className="app-section space-y-4">

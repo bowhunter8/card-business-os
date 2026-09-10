@@ -35,6 +35,20 @@ function normalize(value: unknown) {
   return clean(value).toLowerCase()
 }
 
+function costBasisUnits(value: unknown) {
+  const amount = Number(value ?? 0)
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return 0
+  }
+
+  // inventory_items.cost_basis_unit is stored with four-decimal precision.
+  // Sum in 1/10,000-dollar units so browser floating-point math cannot turn
+  // an exact half-cent total (for example 6.2750) into 6.274999... and show
+  // a penny less than PostgreSQL.
+  return Math.round(amount * 10000)
+}
+
 function splitTeams(value: string | null | undefined) {
   const source = clean(value)
 
@@ -147,10 +161,18 @@ export async function quoteChecklistBuild(
     rows.map((row) => [row.inventory_item_id, row])
   )
 
-  const totalCostBasis = safeComponents.reduce((sum, component) => {
-    const row = rowById.get(component.inventory_item_id)
-    return sum + Number(row?.cost_basis_unit ?? 0)
-  }, 0)
+  const totalCostBasisUnits = safeComponents.reduce(
+    (sum, component) => {
+      const row = rowById.get(component.inventory_item_id)
+      return sum + costBasisUnits(row?.cost_basis_unit)
+    },
+    0
+  )
+
+  // Match the cents users see on the finalized build. PostgreSQL keeps the
+  // exact four-decimal component sum; HITS displays that total as currency.
+  const totalCostBasis =
+    Math.round(totalCostBasisUnits / 100) / 100
 
   return {
     ok: true,
