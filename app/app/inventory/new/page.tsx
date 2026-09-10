@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppLoadingButton } from "../../components/AppLoadingButton";
 
 type InventoryStatus =
@@ -116,6 +116,8 @@ function buildLotTitleFromForm(form: FormState): string {
 
 export default function NewInventoryPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const checklistPrefillAppliedRef = useRef(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>("");
@@ -157,7 +159,56 @@ export default function NewInventoryPage() {
 
   const [bulkItems, setBulkItems] = useState<BulkLotItem[]>([createBulkItem()]);
 
+  const fromChecklist = searchParams.get("from") === "checklist";
+  const checklistId = searchParams.get("checklist_id")?.trim() || "";
+  const checklistItemId =
+    searchParams.get("checklist_item_id")?.trim() || "";
+
   const isBulkLot = form.entryMode === "bulk_lot";
+
+  useEffect(() => {
+    if (!fromChecklist || checklistPrefillAppliedRef.current) {
+      return;
+    }
+
+    checklistPrefillAppliedRef.current = true;
+
+    const player = searchParams.get("player_name")?.trim() || "";
+    const year = searchParams.get("year")?.trim() || "";
+    const brand = searchParams.get("brand")?.trim() || "";
+    const setName = searchParams.get("set_name")?.trim() || "";
+    const cardNumber = searchParams.get("card_number")?.trim() || "";
+    const team = searchParams.get("team")?.trim() || "";
+    const parallel = searchParams.get("parallel_name")?.trim() || "";
+    const variation = searchParams.get("variation")?.trim() || "";
+    const rookie = searchParams.get("rookie") === "1";
+    const autograph = searchParams.get("autograph") === "1";
+    const relic = searchParams.get("relic") === "1";
+
+    setTitleManuallyEdited(false);
+
+    setForm((prev) => {
+      const next: FormState = {
+        ...prev,
+        entryMode: "single_card",
+        player,
+        year,
+        brand,
+        setName,
+        cardNumber,
+        team,
+        parallel,
+        variation,
+        rookie,
+        autograph,
+        relic,
+      };
+
+      next.title = buildSingleTitleFromForm(next);
+
+      return next;
+    });
+  }, [fromChecklist, searchParams]);
 
   const quantityNumber = useMemo(() => {
     return Math.max(1, Math.floor(asNumber(form.quantity) || 1));
@@ -385,6 +436,8 @@ export default function NewInventoryPage() {
         breakId: form.breakId.trim(),
         acquiredDate: form.acquiredDate,
         notes: form.notes.trim(),
+        checklistId: fromChecklist ? checklistId : "",
+        checklistItemId: fromChecklist ? checklistItemId : "",
 
         bulkLot: isBulkLot
           ? {
@@ -447,6 +500,23 @@ export default function NewInventoryPage() {
 
   return (
     <div className="app-page-wide">
+      {saving && (
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="flex min-w-56 flex-col items-center gap-3 rounded-2xl border border-zinc-700 bg-zinc-950 px-6 py-5 shadow-2xl">
+            <div
+              aria-hidden="true"
+              className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-300 border-r-transparent"
+            />
+            <div className="text-sm font-semibold text-zinc-100">
+              Saving inventory item...
+            </div>
+            <div className="text-center text-xs text-zinc-400">
+              Please wait while HITS creates the inventory record.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="app-page-header">
         <div>
           <h1 className="app-title">New Inventory Entry</h1>
@@ -455,6 +525,25 @@ export default function NewInventoryPage() {
           </p>
         </div>
       </div>
+
+      {fromChecklist && (
+        <div className="mb-4 rounded-2xl border border-cyan-900 bg-cyan-950/20 px-4 py-3">
+          <div className="text-sm font-semibold text-cyan-100">
+            Prefilled from Checklist
+          </div>
+          <div className="mt-1 text-xs text-cyan-200/70">
+            Card details were carried over from the checklist. Review quantity,
+            cost, acquisition details, and any card-specific changes before
+            saving.
+          </div>
+          {(checklistId || checklistItemId) && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+              {checklistId && <span>Checklist: {checklistId}</span>}
+              {checklistItemId && <span>Checklist item: {checklistItemId}</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="sticky top-3 z-40 mb-4 rounded-2xl border border-zinc-800 bg-zinc-950/95 px-4 py-3 shadow-lg backdrop-blur">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -844,7 +933,7 @@ export default function NewInventoryPage() {
                     Lot Description / Notes
                   </label>
                   <textarea
-                    className="app-textarea min-h-[96px]"
+                    className="app-textarea min-h-24"
                     value={form.lotDescription}
                     onChange={(e) =>
                       updateForm("lotDescription", e.target.value)
@@ -1032,7 +1121,7 @@ export default function NewInventoryPage() {
         <section className="app-section">
           <h2 className="mb-3 text-lg font-semibold">General Notes</h2>
           <textarea
-            className="app-textarea min-h-[120px]"
+            className="app-textarea min-h-30"
             value={form.notes}
             onChange={(e) => updateForm("notes", e.target.value)}
             placeholder="Optional notes for this entry"

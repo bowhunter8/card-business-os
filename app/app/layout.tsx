@@ -333,6 +333,7 @@ export default async function AppLayout({
             <Link href="/app" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Dashboard</Link>
             <Link href="/app/inventory" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Inventory Items</Link>
             <Link href="/app/breaks" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Orders</Link>
+            <Link href="/app/checklists" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Checklists</Link>
             <Link href="/app/hits-pulse" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">HITS Pulse™</Link>
             <Link href="/app/settings" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Settings</Link>
             <Link href="/app/utilities" className="app-button w-full justify-start hover:border-cyan-500/40 hover:text-cyan-300">Utilities</Link>

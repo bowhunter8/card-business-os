@@ -259,6 +259,9 @@ export default async function NewBreakPage({
               <div className="mt-0.5 text-xs text-zinc-500">
                 Optional. Leave unchecked to use the normal Manual Entry workflow.
               </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Some older products may not yet have a checklist available in HITS. If you can&apos;t find your product, leave Checklist Entry unchecked and use Manual Entry instead. Checklist coverage will continue to expand over time.
+              </div>
             </div>
           </label>
         </div>

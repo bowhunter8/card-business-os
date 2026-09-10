@@ -246,6 +246,205 @@ function readWorkbookSheetNames(buffer: Buffer) {
   return names
 }
 
+function xmlAttribute(tag: string, name: string) {
+  const match = tag.match(new RegExp(`\\b${name}=([\"'])(.*?)\\1`, 'i'))
+  return match?.[2] ? decodeXmlEntities(match[2]) : ''
+}
+
+function spreadsheetColumnIndex(reference: string) {
+  const letters = reference.match(/^[A-Za-z]+/)?.[0]?.toUpperCase() ?? ''
+  let index = 0
+
+  for (const letter of letters) {
+    index = index * 26 + (letter.charCodeAt(0) - 64)
+  }
+
+  return Math.max(0, index - 1)
+}
+
+function stripXmlTags(value: string) {
+  return decodeXmlEntities(value.replace(/<[^>]+>/g, ''))
+}
+
+function readSharedStrings(buffer: Buffer) {
+  const sharedStringsXml = readZipEntry(buffer, 'xl/sharedStrings.xml')
+  if (!sharedStringsXml) return [] as string[]
+
+  const xml = sharedStringsXml.toString('utf8')
+  const values: string[] = []
+  const itemPattern = /<si\b[^>]*>([\s\S]*?)<\/si>/gi
+
+  let itemMatch: RegExpExecArray | null
+  while ((itemMatch = itemPattern.exec(xml)) !== null) {
+    const textParts: string[] = []
+    const textPattern = /<t\b[^>]*>([\s\S]*?)<\/t>/gi
+    let textMatch: RegExpExecArray | null
+
+    while ((textMatch = textPattern.exec(itemMatch[1])) !== null) {
+      textParts.push(stripXmlTags(textMatch[1]))
+    }
+
+    values.push(textParts.join(''))
+  }
+
+  return values
+}
+
+function workbookSheetPath(buffer: Buffer, sheetName: string) {
+  const workbookXml = readZipEntry(buffer, 'xl/workbook.xml')
+  const relsXml = readZipEntry(buffer, 'xl/_rels/workbook.xml.rels')
+  if (!workbookXml || !relsXml) return null
+
+  const workbook = workbookXml.toString('utf8')
+  const relationships = relsXml.toString('utf8')
+  const sheetPattern = /<(?:[A-Za-z_][\w.-]*:)?sheet\b[^>]*>/gi
+
+  let sheetMatch: RegExpExecArray | null
+  let relationshipId = ''
+
+  while ((sheetMatch = sheetPattern.exec(workbook)) !== null) {
+    const tag = sheetMatch[0]
+    if (normalizedKey(xmlAttribute(tag, 'name')) !== normalizedKey(sheetName)) {
+      continue
+    }
+
+    relationshipId = xmlAttribute(tag, 'r:id') || xmlAttribute(tag, 'id')
+    break
+  }
+
+  if (!relationshipId) return null
+
+  const relationshipPattern = /<Relationship\b[^>]*>/gi
+  let relationshipMatch: RegExpExecArray | null
+
+  while ((relationshipMatch = relationshipPattern.exec(relationships)) !== null) {
+    const tag = relationshipMatch[0]
+    if (xmlAttribute(tag, 'Id') !== relationshipId) continue
+
+    const target = xmlAttribute(tag, 'Target').replace(/^\/+/, '')
+    if (!target) return null
+
+    return target.startsWith('xl/')
+      ? target
+      : `xl/${target.replace(/^\.?\//, '')}`
+  }
+
+  return null
+}
+
+function readSheetWithoutRecursiveXmlParser(
+  buffer: Buffer,
+  sheetName: string
+): SheetRow[] {
+  const sheetPath = workbookSheetPath(buffer, sheetName)
+  if (!sheetPath) {
+    throw new Error(`Worksheet "${sheetName}" could not be located in the XLSX archive.`)
+  }
+
+  const sheetXmlBuffer = readZipEntry(buffer, sheetPath)
+  if (!sheetXmlBuffer) {
+    throw new Error(`Worksheet "${sheetName}" could not be read from the XLSX archive.`)
+  }
+
+  const sharedStrings = readSharedStrings(buffer)
+  const xml = sheetXmlBuffer.toString('utf8')
+  const rows: SheetRow[] = []
+  const rowPattern = /<row\b[^>]*>([\s\S]*?)<\/row>/gi
+
+  let rowMatch: RegExpExecArray | null
+  while ((rowMatch = rowPattern.exec(xml)) !== null) {
+    const cells: SheetRow = []
+    const cellPattern = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/gi
+    let cellMatch: RegExpExecArray | null
+
+    while ((cellMatch = cellPattern.exec(rowMatch[1])) !== null) {
+      const attributes = cellMatch[1] ?? cellMatch[3] ?? ''
+      const body = cellMatch[2] ?? ''
+      const reference = xmlAttribute(`<c ${attributes}>`, 'r')
+      const type = xmlAttribute(`<c ${attributes}>`, 't')
+      const columnIndex = reference
+        ? spreadsheetColumnIndex(reference)
+        : cells.length
+
+      while (cells.length <= columnIndex) cells.push(null)
+
+      if (!body) {
+        cells[columnIndex] = null
+        continue
+      }
+
+      if (type === 'inlineStr') {
+        const parts: string[] = []
+        const textPattern = /<t\b[^>]*>([\s\S]*?)<\/t>/gi
+        let textMatch: RegExpExecArray | null
+
+        while ((textMatch = textPattern.exec(body)) !== null) {
+          parts.push(stripXmlTags(textMatch[1]))
+        }
+
+        cells[columnIndex] = parts.join('')
+        continue
+      }
+
+      const valueMatch = body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)
+      const rawValue = valueMatch?.[1] ? stripXmlTags(valueMatch[1]).trim() : ''
+
+      if (type === 's') {
+        const sharedIndex = Number(rawValue)
+        cells[columnIndex] =
+          Number.isInteger(sharedIndex) && sharedIndex >= 0
+            ? sharedStrings[sharedIndex] ?? ''
+            : ''
+        continue
+      }
+
+      if (type === 'b') {
+        cells[columnIndex] = rawValue === '1'
+        continue
+      }
+
+      if (type === 'str') {
+        cells[columnIndex] = rawValue
+        continue
+      }
+
+      if (rawValue === '') {
+        cells[columnIndex] = null
+        continue
+      }
+
+      const numericValue = Number(rawValue)
+      cells[columnIndex] = Number.isFinite(numericValue)
+        ? numericValue
+        : rawValue
+    }
+
+    rows.push(cells)
+  }
+
+  return rows
+}
+
+async function readSheetSafely(
+  buffer: Buffer,
+  sheetName: string
+): Promise<SheetRow[]> {
+  try {
+    return (await readSheet(buffer, sheetName)) as SheetRow[]
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+
+    if (
+      error instanceof RangeError ||
+      /maximum call stack|call stack size exceeded/i.test(message)
+    ) {
+      return readSheetWithoutRecursiveXmlParser(buffer, sheetName)
+    }
+
+    throw error
+  }
+}
+
 function newStats(): ImportStats {
   return {
     totalRowsSeen: 0,
@@ -829,46 +1028,64 @@ function applyTeamSetData(items: ParsedItem[], teamRows: TeamRow[]) {
   return matched
 }
 
+function inferSportOrGameFromName(value: string) {
+  const normalized = normalizedKey(value)
+
+  if (/\bbasketball\b/.test(normalized)) return 'Basketball'
+  if (/\bfootball\b/.test(normalized)) return 'Football'
+  if (/\bhockey\b/.test(normalized)) return 'Hockey'
+  if (/\bsoccer\b/.test(normalized)) return 'Soccer'
+  if (/\bbaseball\b/.test(normalized)) return 'Baseball'
+
+  // Preserve the existing baseball default for older filenames that do not
+  // explicitly include a sport. Existing proven imports therefore stay intact.
+  return 'Baseball'
+}
+
 function inferProductMetadata(fileName: string): ProductMetadata {
-  const base = fileName
+  const rawBase = fileName
     .replace(/\.xlsx$/i, '')
-    .replace(/[-_]+/g, ' ')
+    .replace(/[_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 
-  const yearMatch = base.match(/\b(19|20)\d{2}\b/)
-  const year = yearMatch?.[0] ?? null
+  const seasonMatch = rawBase.match(/\b((?:19|20)\d{2})[-–](\d{2})\b/)
+  const singleYearMatch = rawBase.match(/\b(19|20)\d{2}\b/)
+  const year = seasonMatch?.[0] ?? singleYearMatch?.[0] ?? null
 
-  const withoutYear = year ? base.replace(year, '').trim() : base
+  const withoutYear = year
+    ? rawBase.replace(year, ' ').replace(/\s+/g, ' ').trim()
+    : rawBase
+
   const withoutChecklist = withoutYear
+    .replace(/[-_]+/g, ' ')
     .replace(/\bchecklist\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
 
   const category = 'Sports Cards'
-  const sportOrGame = 'Baseball'
+  const sportOrGame = inferSportOrGameFromName(rawBase)
   const manufacturer =
-    /\b(topps|bowman)\b/i.test(base)
+    /\b(topps|bowman)\b/i.test(rawBase)
       ? 'Topps'
-      : /\bpanini\b/i.test(base)
+      : /\bpanini\b/i.test(rawBase)
         ? 'Panini'
         : null
 
   const brand =
-    /\bbowman\b/i.test(base)
+    /\bbowman\b/i.test(rawBase)
       ? 'Bowman'
-      : /\btopps chrome\b/i.test(base)
+      : /\btopps chrome\b/i.test(rawBase)
         ? 'Topps Chrome'
-        : /\bprizm\b/i.test(base)
+        : /\bprizm\b/i.test(rawBase)
           ? 'Prizm'
-          : /\bdonruss\b/i.test(base)
+          : /\bdonruss\b/i.test(rawBase)
             ? 'Donruss'
-            : /\btopps\b/i.test(base)
+            : /\btopps\b/i.test(rawBase)
               ? 'Topps'
               : null
 
-  let cleanedProductName =
-    withoutChecklist.replace(/\bbaseball\b/gi, 'Baseball').trim()
+  let cleanedProductName = withoutChecklist.trim()
 
   if (manufacturer && brand && normalizedKey(manufacturer) !== normalizedKey(brand)) {
     cleanedProductName = cleanedProductName
@@ -876,9 +1093,6 @@ function inferProductMetadata(fileName: string): ProductMetadata {
       .trim()
   }
 
-  // Preserve release-defining product modifiers. Bowman Draft, Bowman Chrome,
-  // Mega Box, Sapphire, Logofractor, Update, etc. are distinct products and
-  // must never collapse into the parent brand simply because they share a year.
   if (/\bbowman\s+draft\b/i.test(withoutChecklist)) {
     cleanedProductName = /\bbaseball\b/i.test(cleanedProductName)
       ? cleanedProductName
@@ -1064,6 +1278,11 @@ function isDescriptiveParallelHeading(value: string) {
   return (
     /\b1\s*\/\s*1\b/.test(candidate) ||
     /(?:^|\s)\/\s*\d+\b/.test(candidate) ||
+    // Pack odds frequently appear as one-cell rows such as:
+    // "1:409 packs", "Emerald (1:560)", or "Gold (1:1,047 packs)".
+    // These describe odds/parallel availability and must never replace the
+    // current structural checklist section.
+    /\b\d+\s*:\s*\d[\d,]*\b/.test(candidate) ||
     /\bprinting plates?\b/.test(candidate) ||
     /\bparallel(?:s)?\b/.test(candidate) ||
     /\bplatinum\b/.test(candidate) ||
@@ -1080,10 +1299,28 @@ function isDescriptiveParallelHeading(value: string) {
   )
 }
 
+function isGenericEnrichmentHeading(value: string) {
+  const candidate = normalizedKey(value)
+
+  // These labels commonly introduce descriptive parallel/odds blocks. They
+  // are useful source metadata but are too generic to organize the checklist
+  // by themselves. Keeping the last confirmed structural section produces a
+  // cleaner Team/Player/Section experience and avoids manual cleanup.
+  return [
+    'parallel',
+    'parallels',
+    'version',
+    'versions',
+    'odds',
+    'pack odds',
+  ].includes(candidate)
+}
+
 function isTrustworthySectionHeading(value: string) {
   const candidate = value.trim()
   if (!candidate || isCountRow(candidate)) return false
   if (isDescriptiveParallelHeading(candidate)) return false
+  if (isGenericEnrichmentHeading(candidate)) return false
 
   if (
     /\b(?:download|spreadsheet|excel)\b/i.test(candidate) ||
@@ -3013,6 +3250,19 @@ function inferStructuredMetadataFromRows(
   })
 }
 
+/**
+ * Source-specific adapters are enrichment paths, not admission gates.
+ *
+ * HITS checklist admission is based on core card identity:
+ *   - product year + set/product identity (from file metadata, filename, or admin override)
+ *   - player/item name
+ *   - card number
+ *
+ * Team, section, variation, autograph/relic flags, affiliations, and other
+ * fields improve organization when present, but their absence must not reject
+ * an otherwise valid checklist. Existing richer adapters remain in place and
+ * this structured importer is the source-agnostic fallback.
+ */
 async function handleStructuredWorkbookImport(params: {
   uploaded: File
   buffer: Buffer
@@ -3033,7 +3283,7 @@ async function handleStructuredWorkbookImport(params: {
     const normalizedSheetName = normalizedKey(sheetName)
     if (normalizedSheetName !== 'teams' && normalizedSheetName !== 'team sets') continue
 
-    const hierarchyRows = (await readSheet(buffer, sheetName)) as SheetRow[]
+    const hierarchyRows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
     if (!looksLikeParentAffiliateTeamIndex(hierarchyRows)) continue
 
     const hierarchyParsed = parseParentAffiliateTeamIndex(hierarchyRows, stats)
@@ -3110,11 +3360,11 @@ async function handleStructuredWorkbookImport(params: {
     sheetNames.find((name) => normalizedKey(name) === 'teams') ?? null
 
   if (pairedMasterSheetName && pairedTeamsSheetName) {
-    const pairedMasterRows = (await readSheet(
+    const pairedMasterRows = (await readSheetSafely(
       buffer,
       pairedMasterSheetName
     )) as SheetRow[]
-    const pairedTeamRows = (await readSheet(
+    const pairedTeamRows = (await readSheetSafely(
       buffer,
       pairedTeamsSheetName
     )) as SheetRow[]
@@ -3133,12 +3383,25 @@ async function handleStructuredWorkbookImport(params: {
         stats
       )
 
-      validateParsedChecklistStructure(
-        pairedParsed,
-        `Paired ${pairedMasterSheetName}/${pairedTeamsSheetName} workbook`
-      )
+      // A paired Master/Teams profile is an enrichment shortcut, not an
+      // admission gate. Some valid workbooks use:
+      //   Section | Card # | Player | Team
+      // on both Master and Teams sheets. If this heuristic profile assigns
+      // those roles incorrectly, do not reject the workbook here. Let the
+      // existing source-agnostic canonical/header fallbacks inspect it.
+      let pairedProfileIsValid = true
 
-      const metadata = applyProductMetadataOverride(
+      try {
+        validateParsedChecklistStructure(
+          pairedParsed,
+          `Paired ${pairedMasterSheetName}/${pairedTeamsSheetName} workbook`
+        )
+      } catch {
+        pairedProfileIsValid = false
+      }
+
+      if (pairedProfileIsValid) {
+        const metadata = applyProductMetadataOverride(
         inferProductMetadata(uploaded.name),
         metadataOverride
       )
@@ -3186,37 +3449,38 @@ async function handleStructuredWorkbookImport(params: {
           }; confidence ${Math.round(pairedProfile.confidence * 100)}%. `,
       })
 
-      return NextResponse.json({
-        ok: true,
-        detectedSource:
-          pairedSourceType === 'beckett'
-            ? 'Beckett paired Master/Teams checklist'
-            : 'Paired Master/Teams XLSX checklist',
-        checklistId: persisted.checklist.id,
-        checklistName: persisted.checklist.name,
-        productId: persisted.product.id,
-        productName: persisted.product.display_name,
-        importMode: persisted.importMode,
-        structure: {
-          sectionColumn: pairedProfile.sectionColumn,
-          cardNumberColumn: pairedProfile.cardNumberColumn,
-          personColumns: pairedProfile.personColumns,
-          personMode: pairedProfile.personMode,
-          teamColumn: pairedProfile.teamColumn,
-          confidence: pairedProfile.confidence,
-        },
-        files: [{ fileName: uploaded.name, ...stats }],
-        totals: {
-          files: 1,
-          totalRowsSeen: stats.totalRowsSeen,
-          normalizedRows: stats.normalizedRows,
-          insertedRows: stats.insertedRows,
-          skippedRows: stats.skippedRows,
-          sectionsCreated: stats.sectionsCreated,
-          checklistItemsCreated: stats.checklistItemsCreated,
-          teamRowsSeen: stats.teamRowsSeen,
-        },
-      })
+        return NextResponse.json({
+          ok: true,
+          detectedSource:
+            pairedSourceType === 'beckett'
+              ? 'Beckett paired Master/Teams checklist'
+              : 'Paired Master/Teams XLSX checklist',
+          checklistId: persisted.checklist.id,
+          checklistName: persisted.checklist.name,
+          productId: persisted.product.id,
+          productName: persisted.product.display_name,
+          importMode: persisted.importMode,
+          structure: {
+            sectionColumn: pairedProfile.sectionColumn,
+            cardNumberColumn: pairedProfile.cardNumberColumn,
+            personColumns: pairedProfile.personColumns,
+            personMode: pairedProfile.personMode,
+            teamColumn: pairedProfile.teamColumn,
+            confidence: pairedProfile.confidence,
+          },
+          files: [{ fileName: uploaded.name, ...stats }],
+          totals: {
+            files: 1,
+            totalRowsSeen: stats.totalRowsSeen,
+            normalizedRows: stats.normalizedRows,
+            insertedRows: stats.insertedRows,
+            skippedRows: stats.skippedRows,
+            sectionsCreated: stats.sectionsCreated,
+            checklistItemsCreated: stats.checklistItemsCreated,
+            teamRowsSeen: stats.teamRowsSeen,
+          },
+        })
+      }
     }
   }
 
@@ -3236,7 +3500,7 @@ async function handleStructuredWorkbookImport(params: {
     | null = null
 
   for (const sheetName of sheetNames) {
-    const rows = (await readSheet(buffer, sheetName)) as SheetRow[]
+    const rows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
     const headerRowIndex = guessHeaderRowIndex(rows)
     if (headerRowIndex < 0) continue
 
@@ -3343,7 +3607,7 @@ async function handleStructuredWorkbookImport(params: {
     | null = null
 
   for (const sheetName of sheetNames) {
-    const rows = (await readSheet(buffer, sheetName)) as SheetRow[]
+    const rows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
     if (!looksLikeMasterChecklistRows(rows)) continue
 
     const probeStats = newStats()
@@ -3365,7 +3629,7 @@ async function handleStructuredWorkbookImport(params: {
 
   if (!canonical) {
     for (const sheetName of sheetNames) {
-      const rows = (await readSheet(buffer, sheetName)) as SheetRow[]
+      const rows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
       if (!looksLikeSectionPlayerTeamRows(rows)) continue
 
       const probeStats = newStats()
@@ -3452,7 +3716,7 @@ async function handleStructuredWorkbookImport(params: {
   let metadataRows: SheetRow[] | null = null
 
   for (const sheetName of sheetNames) {
-    const rows = (await readSheet(buffer, sheetName)) as SheetRow[]
+    const rows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
 
     let parsedSheet:
       | { sections: string[]; items: ParsedItem[]; sortOrder?: number }
@@ -3620,7 +3884,7 @@ async function handleBeckettImport(params: {
     null
 
   try {
-    fullRows = (await readSheet(buffer, 'Full Checklist')) as SheetRow[]
+    fullRows = (await readSheetSafely(buffer, 'Full Checklist')) as SheetRow[]
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? '')
 
@@ -3653,7 +3917,7 @@ async function handleBeckettImport(params: {
   }
 
   try {
-    teamRowsRaw = (await readSheet(buffer, beckettTeamSheetName)) as SheetRow[]
+    teamRowsRaw = (await readSheetSafely(buffer, beckettTeamSheetName)) as SheetRow[]
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error ?? '')
 
@@ -3689,19 +3953,17 @@ async function handleBeckettImport(params: {
     )
   }
 
+  // Team / affiliation data is enrichment, not a requirement for checklist
+  // admission. The Full Checklist card identity remains valid when it provides
+  // the core card fields even if a companion Teams/Team Sets index uses
+  // different section labels or cannot be reconciled exactly.
+  //
+  // Preserve the richer team enrichment when it matches. If it does not, keep
+  // the parsed checklist and import it without guessed team assignments rather
+  // than rejecting an otherwise valid checklist.
   if (teamRows.length > 0 && teamMatches === 0) {
     stats.errors.push(
-      'The Team Sets sheet was found, but no rows matched Full Checklist rows exactly. The checklist was not imported.'
-    )
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          'Team Sets could not be matched to the Full Checklist. Import stopped so the source data can be reviewed safely.',
-        files: [{ fileName: uploaded.name, ...stats }],
-      },
-      { status: 400 }
+      'The team index could not be reconciled exactly with the checklist rows, so HITS imported the core checklist without team enrichment.'
     )
   }
 
@@ -3762,7 +4024,7 @@ function inferChecklistInsiderMetadata(fileName: string): ProductMetadata {
   const year = yearMatch?.[0] ?? null
   const withoutYear = year ? base.replace(year, '').trim() : base
   const productName = withoutYear || 'Imported Checklist'
-  const sportOrGame = 'Baseball'
+  const sportOrGame = inferSportOrGameFromName(base)
   const manufacturer = /\bbowman\b/i.test(base) ? 'Topps' : null
   const brand = /\bbowman\b/i.test(base) ? 'Bowman' : null
 
@@ -3985,7 +4247,7 @@ async function handleChecklistInsiderImport(params: {
   let parsed: { sections: string[]; items: ParsedItem[] } | null = null
 
   if (teamsSheetName) {
-    const rawTeamRows = (await readSheet(buffer, teamsSheetName)) as SheetRow[]
+    const rawTeamRows = (await readSheetSafely(buffer, teamsSheetName)) as SheetRow[]
     const teamRows: SheetRow[] = rawTeamRows.map((row) =>
       row.map((value) => {
         if (value === null || value === undefined) return null
@@ -4179,7 +4441,7 @@ export async function POST(request: Request) {
         null
 
       if (beckettTeamSheetName) {
-        const beckettTeamRows = (await readSheet(
+        const beckettTeamRows = (await readSheetSafely(
           buffer,
           beckettTeamSheetName
         )) as SheetRow[]
@@ -4198,12 +4460,26 @@ export async function POST(request: Request) {
         }
       }
 
-      return handleBeckettImport({
-        uploaded,
-        supabase,
-        userId: user.id,
-        metadataOverride,
-      })
+      try {
+        return await handleBeckettImport({
+          uploaded,
+          supabase,
+          userId: user.id,
+          metadataOverride,
+        })
+      } catch (beckettAdapterError) {
+        const structuredFallback = await handleStructuredWorkbookImport({
+          uploaded,
+          buffer,
+          sheetNames,
+          supabase,
+          userId: user.id,
+          metadataOverride,
+        })
+
+        if (structuredFallback) return structuredFallback
+        throw beckettAdapterError
+      }
     }
 
     const hasMasterLikeSheet = sheetNames.some((name) => {
@@ -4234,7 +4510,7 @@ export async function POST(request: Request) {
       const normalized = normalizedKey(sheetName)
       if (normalized !== 'teams' && normalized !== 'team sets') continue
 
-      const candidateRows = (await readSheet(buffer, sheetName)) as SheetRow[]
+      const candidateRows = (await readSheetSafely(buffer, sheetName)) as SheetRow[]
       if (looksLikeParentAffiliateTeamIndex(candidateRows)) {
         hasParentAffiliateIndex = true
         break

@@ -1457,36 +1457,19 @@ function BulkOrderActionsControl({
         <div className="sticky-bulk-info">
           <div className="text-sm font-semibold text-zinc-200">Bulk actions</div>
           <div className="mt-0.5 text-xs text-zinc-500">
-            Select unassigned orders, then combine them into one break or delete them.
+            Select one order to enter items, or select multiple orders to combine them and continue to item entry.
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <details className="group">
-            <summary className="app-button cursor-pointer list-none whitespace-nowrap">
-              Combine Selected
-            </summary>
-
-            <div className="mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-3 shadow-xl md:min-w-80">
-              <div className="text-sm font-semibold text-zinc-200">Create combined break?</div>
-              <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-                This creates one order from the selected unassigned orders and sends you to the normal sorting tray / item entry page.
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  form={formId}
-                  formAction={bulkCombineOrdersAction}
-                  className="app-button-primary whitespace-nowrap"
-                >
-                  Yes, Combine Selected
-                </button>
-
-                <CancelDetailsButton />
-              </div>
-            </div>
-          </details>
+          <button
+            type="submit"
+            form={formId}
+            formAction={bulkCombineOrdersAction}
+            className="app-button-primary whitespace-nowrap"
+          >
+            Enter Items / Combine &amp; Continue
+          </button>
 
           <details className="group">
             <summary className="app-button cursor-pointer list-none whitespace-nowrap border-red-900/60 bg-red-950/30 text-red-200 hover:bg-red-900/40">

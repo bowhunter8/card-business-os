@@ -154,43 +154,6 @@ function parseRestoreRows(value: string | undefined): EntryRow[] {
   }
 }
 
-async function loadChecklistItems(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  checklistIds: string[]
-) {
-  const rows: ChecklistItem[] = []
-  const pageSize = 500
-
-  for (const checklistId of checklistIds) {
-    let from = 0
-
-    while (true) {
-      const to = from + pageSize - 1
-
-      const { data, error } = await supabase
-        .from('checklist_items')
-        .select(
-          'id, checklist_id, section_id, card_number, player_name, printed_team, parallel_name, variation, rookie_flag, auto_flag, relic_flag, serial_flag, print_run, quantity_required, sort_order, notes'
-        )
-        .eq('checklist_id', checklistId)
-        .order('sort_order', { ascending: true })
-        .range(from, to)
-
-      if (error) {
-        throw new Error(`Unable to load checklist items: ${error.message}`)
-      }
-
-      const batch = (data ?? []) as ChecklistItem[]
-      rows.push(...batch)
-
-      if (batch.length < pageSize) break
-      from += pageSize
-    }
-  }
-
-  return rows
-}
-
 export default async function AddBreakCardsPage({
   params,
   searchParams,
@@ -270,6 +233,8 @@ export default async function AddBreakCardsPage({
         'id, name, year, manufacturer, brand, product_name, sport'
       )
       .or(`visibility.eq.global,owner_user_id.eq.${user.id}`)
+      .eq('is_active', true)
+      .is('superseded_by_checklist_id', null)
       .order('year', { ascending: false })
       .order('name', { ascending: true }),
   ])
@@ -285,25 +250,12 @@ export default async function AddBreakCardsPage({
   const item = breakResponse.data as BreakRow
   const linkedOrders = (linkedOrdersResponse.data ?? []) as LinkedWhatnotOrderRow[]
   const checklists = (checklistResponse.data ?? []) as ChecklistOption[]
-  const checklistIds = checklists.map((checklist) => checklist.id)
 
-  let checklistSections: ChecklistSection[] = []
-  let checklistItems: ChecklistItem[] = []
-
-  if (entryMode === 'checklist' && checklistIds.length > 0) {
-    const { data: sectionsData, error: sectionsError } = await supabase
-      .from('checklist_sections')
-      .select('id, checklist_id, name, sort_order')
-      .in('checklist_id', checklistIds)
-      .order('sort_order', { ascending: true })
-
-    if (sectionsError) {
-      throw new Error(`Unable to load checklist sections: ${sectionsError.message}`)
-    }
-
-    checklistSections = (sectionsData ?? []) as ChecklistSection[]
-    checklistItems = await loadChecklistItems(supabase, checklistIds)
-  }
+  // Load only the selected checklist on demand in ChecklistBreakEntry.
+  // Keeping these empty prevents checklist mode from preloading the entire
+  // checklist library before the user has chosen a product.
+  const checklistSections: ChecklistSection[] = []
+  const checklistItems: ChecklistItem[] = []
 
   const linkedOrderProductNames = linkedOrders
     .map((row) => row.product_name || '')

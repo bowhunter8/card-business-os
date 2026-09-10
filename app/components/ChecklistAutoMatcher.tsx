@@ -114,6 +114,10 @@ export default function ChecklistAutoMatcher({ checklistId }: Props) {
               <div className="mt-1 text-sm text-zinc-400">
                 Checking this checklist against your inventory.
               </div>
+              <div className="mt-3 max-w-sm text-xs leading-relaxed text-amber-300">
+                Large checklists may take a while to process. Please don&apos;t
+                refresh or leave this page while HITS is finding your inventory.
+              </div>
             </div>
           </div>
         </div>

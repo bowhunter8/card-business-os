@@ -7,6 +7,7 @@ import {
   getBreakChecklistEntryProgressAction,
   updateBreakCardsReceivedFromChecklistAction,
 } from '@/app/actions/breaks'
+import ChecklistAlphabetRail from '@/app/components/ChecklistAlphabetRail'
 
 type ChecklistOption = {
   id: string
@@ -123,8 +124,41 @@ function matchesSearchTokens(checklist: ChecklistOption, query: string) {
   const tokens = normalize(query).split(' ').filter(Boolean)
   if (tokens.length === 0) return true
 
+  const haystackTokens = checklistSearchText(checklist).split(' ').filter(Boolean)
+
+  return tokens.every((token) => {
+    if (/^\d+$/.test(token)) {
+      return haystackTokens.includes(token)
+    }
+
+    return haystackTokens.some((haystackToken) => haystackToken.includes(token))
+  })
+}
+
+function checklistSearchScore(checklist: ChecklistOption, query: string) {
+  const normalizedQuery = normalize(query)
+  if (!normalizedQuery) return 0
+
   const haystack = checklistSearchText(checklist)
-  return tokens.every((token) => haystack.includes(token))
+  const productName = normalize(checklist.product_name)
+  const checklistName = normalize(checklist.name)
+
+  let score = 0
+
+  if (checklistName === normalizedQuery) score += 1000
+  if (productName === normalizedQuery) score += 900
+  if (checklistName.includes(normalizedQuery)) score += 500
+  if (productName.includes(normalizedQuery)) score += 450
+  if (haystack.includes(normalizedQuery)) score += 300
+
+  const queryTokens = normalizedQuery.split(' ').filter(Boolean)
+  const haystackTokens = haystack.split(' ').filter(Boolean)
+
+  for (const token of queryTokens) {
+    if (haystackTokens.includes(token)) score += 25
+  }
+
+  return score
 }
 
 function checklistCategory(checklist: ChecklistOption): ChecklistCategory {
@@ -180,6 +214,11 @@ function compareNatural(a: string, b: string) {
   })
 }
 
+function alphabetLetter(value: string) {
+  const first = clean(value).charAt(0).toUpperCase()
+  return /^[A-Z]$/.test(first) ? first : '#'
+}
+
 function focusQuantityInput(
   sectionId: string,
   currentInput: HTMLInputElement,
@@ -201,6 +240,56 @@ function focusQuantityInput(
   next.select()
 }
 
+function uniqueValues(values: string[]) {
+  const seen = new Set<string>()
+  const output: string[] = []
+
+  for (const value of values) {
+    const cleaned = String(value ?? '').trim()
+    const key = cleaned.toLowerCase()
+
+    if (!cleaned || seen.has(key)) continue
+
+    seen.add(key)
+    output.push(cleaned)
+  }
+
+  return output
+}
+
+function findUniqueExcelLikeCompletion(
+  previousValues: string[],
+  typedValue: string
+) {
+  const typed = String(typedValue ?? '')
+  const normalizedTyped = typed.trim().toLowerCase()
+
+  if (!normalizedTyped) return null
+
+  const matches = uniqueValues(previousValues).filter((value) =>
+    value.toLowerCase().startsWith(normalizedTyped)
+  )
+
+  if (matches.length !== 1) return null
+
+  const match = matches[0]
+  if (match.toLowerCase() === normalizedTyped) return null
+
+  return match
+}
+
+function shouldTryCompletion(e: React.ChangeEvent<HTMLInputElement>) {
+  const nativeEvent = e.nativeEvent as InputEvent
+
+  if (!nativeEvent?.inputType) return true
+
+  return (
+    nativeEvent.inputType === 'insertText' ||
+    nativeEvent.inputType === 'insertCompositionText' ||
+    nativeEvent.inputType === 'insertFromPaste'
+  )
+}
+
 export default function ChecklistBreakEntry({
   breakId,
   cardsReceived,
@@ -218,6 +307,9 @@ export default function ChecklistBreakEntry({
   const [availableItems, setAvailableItems] = useState<ChecklistItem[]>(items)
   const [checklistImportMessage, setChecklistImportMessage] =
     useState<string | null>(null)
+  const [checklistLoadMessage, setChecklistLoadMessage] =
+    useState<string | null>(null)
+  const [loadingChecklistId, setLoadingChecklistId] = useState<string | null>(null)
   const [checklistPickerOpen, setChecklistPickerOpen] = useState(false)
   const [selectedChecklistId, setSelectedChecklistId] = useState('')
   const [selectedTeam, setSelectedTeam] = useState('')
@@ -237,6 +329,8 @@ export default function ChecklistBreakEntry({
   const [progressReady, setProgressReady] = useState(false)
   const [manualDraftJson, setManualDraftJson] = useState('')
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const baseNotesRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const parallelNotesRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const draftStorageKey = `hits:break-checklist-entry:${breakId}`
 
@@ -251,155 +345,217 @@ export default function ChecklistBreakEntry({
   }, [breakId])
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(draftStorageKey)
+    let cancelled = false
 
-      if (!raw) {
-        setDraftReady(true)
-        return
-      }
+    async function restoreDraft() {
+      try {
+        const raw = window.localStorage.getItem(draftStorageKey)
 
-      const parsed = JSON.parse(raw) as Omit<
-        Partial<ChecklistEntryDraft>,
-        'version'
-      > & { version?: 1 | 2 }
+        if (!raw) {
+          if (!cancelled) setDraftReady(true)
+          return
+        }
 
-      if (parsed.version !== 1 && parsed.version !== 2) {
-        window.localStorage.removeItem(draftStorageKey)
-        setDraftReady(true)
-        return
-      }
+        const parsed = JSON.parse(raw) as Omit<
+          Partial<ChecklistEntryDraft>,
+          'version'
+        > & { version?: 1 | 2 }
 
-      if (
-        parsed.activeCategory &&
-        CHECKLIST_CATEGORIES.some(
-          (category) => category.id === parsed.activeCategory
-        )
-      ) {
-        setActiveCategory(parsed.activeCategory)
-      }
-
-      if (
-        parsed.selectedChecklistId &&
-        checklists.some(
-          (checklist) => checklist.id === parsed.selectedChecklistId
-        )
-      ) {
-        setSelectedChecklistId(parsed.selectedChecklistId)
-
-        const restoredChecklistItems = items.filter(
-          (item) => item.checklist_id === parsed.selectedChecklistId
-        )
+        if (parsed.version !== 1 && parsed.version !== 2) {
+          window.localStorage.removeItem(draftStorageKey)
+          if (!cancelled) setDraftReady(true)
+          return
+        }
 
         if (
-          parsed.selectedTeam &&
-          restoredChecklistItems.some(
-            (item) =>
-              (clean(item.printed_team) || 'Other / Unassigned') ===
-              parsed.selectedTeam
+          parsed.activeCategory &&
+          CHECKLIST_CATEGORIES.some(
+            (category) => category.id === parsed.activeCategory
           )
         ) {
-          setSelectedTeam(parsed.selectedTeam)
+          setActiveCategory(parsed.activeCategory)
+        }
+
+        let restoredItems = items
+
+        if (
+          parsed.selectedChecklistId &&
+          checklists.some(
+            (checklist) => checklist.id === parsed.selectedChecklistId
+          )
+        ) {
+          const alreadyLoaded = items.some(
+            (item) => item.checklist_id === parsed.selectedChecklistId
+          )
+
+          if (!alreadyLoaded) {
+            const response = await fetch(
+              `/api/checklists/${encodeURIComponent(parsed.selectedChecklistId)}/entry-data`,
+              { cache: 'no-store' }
+            )
+
+            const json = (await response.json()) as {
+              ok?: boolean
+              checklist?: ChecklistOption
+              sections?: ChecklistSection[]
+              items?: ChecklistItem[]
+              error?: string
+            }
+
+            if (!response.ok || !json.ok || !json.checklist) {
+              throw new Error(
+                json.error || 'The saved checklist draft could not be loaded.'
+              )
+            }
+
+            if (cancelled) return
+
+            setAvailableChecklists((current) => [
+              ...current.filter(
+                (checklist) => checklist.id !== parsed.selectedChecklistId
+              ),
+              json.checklist as ChecklistOption,
+            ])
+
+            setAvailableSections((current) => [
+              ...current.filter(
+                (section) => section.checklist_id !== parsed.selectedChecklistId
+              ),
+              ...(json.sections ?? []),
+            ])
+
+            setAvailableItems((current) => [
+              ...current.filter(
+                (item) => item.checklist_id !== parsed.selectedChecklistId
+              ),
+              ...(json.items ?? []),
+            ])
+
+            restoredItems = json.items ?? []
+          } else {
+            restoredItems = items.filter(
+              (item) => item.checklist_id === parsed.selectedChecklistId
+            )
+          }
+
+          setSelectedChecklistId(parsed.selectedChecklistId)
 
           if (
-            parsed.selectedSectionId &&
-            restoredChecklistItems.some(
+            parsed.selectedTeam &&
+            restoredItems.some(
               (item) =>
                 (clean(item.printed_team) || 'Other / Unassigned') ===
-                  parsed.selectedTeam &&
-                (item.section_id ||
-                  `other:${parsed.selectedChecklistId}`) ===
-                  parsed.selectedSectionId
+                parsed.selectedTeam
             )
           ) {
-            setSelectedSectionId(parsed.selectedSectionId)
-          }
-        }
-      }
+            setSelectedTeam(parsed.selectedTeam)
 
-      if (parsed.entries && typeof parsed.entries === 'object') {
-        const validItemIds = new Set(items.map((item) => item.id))
-        const restoredEntries: EntryState = {}
-
-        for (const [itemId, entry] of Object.entries(parsed.entries)) {
-          if (!validItemIds.has(itemId) || !entry || typeof entry !== 'object') {
-            continue
-          }
-
-          const candidate = entry as {
-            quantity?: unknown
-            notes?: unknown
-            status?: unknown
-          }
-
-          restoredEntries[itemId] = {
-            quantity:
-              typeof candidate.quantity === 'string'
-                ? candidate.quantity
-                : '',
-            notes:
-              typeof candidate.notes === 'string' ? candidate.notes : '',
-            status:
-              typeof candidate.status === 'string'
-                ? candidate.status
-                : 'available',
+            if (
+              parsed.selectedSectionId &&
+              restoredItems.some(
+                (item) =>
+                  (clean(item.printed_team) || 'Other / Unassigned') ===
+                    parsed.selectedTeam &&
+                  (item.section_id ||
+                    `other:${parsed.selectedChecklistId}`) ===
+                    parsed.selectedSectionId
+              )
+            ) {
+              setSelectedSectionId(parsed.selectedSectionId)
+            }
           }
         }
 
-        setEntries(restoredEntries)
-      }
+        if (parsed.entries && typeof parsed.entries === 'object') {
+          const validItemIds = new Set(restoredItems.map((item) => item.id))
+          const restoredEntries: EntryState = {}
 
-      if (
-        parsed.version === 2 &&
-        parsed.parallelEntries &&
-        typeof parsed.parallelEntries === 'object'
-      ) {
-        const validItemIds = new Set(items.map((item) => item.id))
-        const restoredParallelEntries: ParallelEntryState = {}
+          for (const [itemId, entry] of Object.entries(parsed.entries)) {
+            if (!validItemIds.has(itemId) || !entry || typeof entry !== 'object') {
+              continue
+            }
 
-        for (const [itemId, rows] of Object.entries(parsed.parallelEntries)) {
-          if (!validItemIds.has(itemId) || !Array.isArray(rows)) continue
+            const candidate = entry as {
+              quantity?: unknown
+              notes?: unknown
+              status?: unknown
+            }
 
-          restoredParallelEntries[itemId] = rows
-            .filter((row) => row && typeof row === 'object')
-            .map((row) => {
-              const candidate = row as Partial<ParallelEntry>
+            restoredEntries[itemId] = {
+              quantity:
+                typeof candidate.quantity === 'string'
+                  ? candidate.quantity
+                  : '',
+              notes:
+                typeof candidate.notes === 'string' ? candidate.notes : '',
+              status:
+                typeof candidate.status === 'string'
+                  ? candidate.status
+                  : 'available',
+            }
+          }
 
-              return {
-                id:
-                  typeof candidate.id === 'string' && candidate.id
-                    ? candidate.id
-                    : crypto.randomUUID(),
-                quantity:
-                  typeof candidate.quantity === 'string'
-                    ? candidate.quantity
-                    : '',
-                notes:
-                  typeof candidate.notes === 'string'
-                    ? candidate.notes
-                    : '',
-                status:
-                  typeof candidate.status === 'string'
-                    ? candidate.status
-                    : 'available',
-              }
-            })
+          setEntries(restoredEntries)
         }
 
-        setParallelEntries(restoredParallelEntries)
-      }
+        if (
+          parsed.version === 2 &&
+          parsed.parallelEntries &&
+          typeof parsed.parallelEntries === 'object'
+        ) {
+          const validItemIds = new Set(restoredItems.map((item) => item.id))
+          const restoredParallelEntries: ParallelEntryState = {}
 
-      if (typeof parsed.savedAt === 'string') {
-        setDraftSavedAt(parsed.savedAt)
-      }
-    } catch {
-      try {
-        window.localStorage.removeItem(draftStorageKey)
+          for (const [itemId, rows] of Object.entries(parsed.parallelEntries)) {
+            if (!validItemIds.has(itemId) || !Array.isArray(rows)) continue
+
+            restoredParallelEntries[itemId] = rows
+              .filter((row) => row && typeof row === 'object')
+              .map((row) => {
+                const candidate = row as Partial<ParallelEntry>
+
+                return {
+                  id:
+                    typeof candidate.id === 'string' && candidate.id
+                      ? candidate.id
+                      : crypto.randomUUID(),
+                  quantity:
+                    typeof candidate.quantity === 'string'
+                      ? candidate.quantity
+                      : '',
+                  notes:
+                    typeof candidate.notes === 'string'
+                      ? candidate.notes
+                      : '',
+                  status:
+                    typeof candidate.status === 'string'
+                      ? candidate.status
+                      : 'available',
+                }
+              })
+          }
+
+          setParallelEntries(restoredParallelEntries)
+        }
+
+        if (typeof parsed.savedAt === 'string') {
+          setDraftSavedAt(parsed.savedAt)
+        }
       } catch {
-        // Ignore storage cleanup failures.
+        try {
+          window.localStorage.removeItem(draftStorageKey)
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+      } finally {
+        if (!cancelled) setDraftReady(true)
       }
-    } finally {
-      setDraftReady(true)
+    }
+
+    void restoreDraft()
+
+    return () => {
+      cancelled = true
     }
   }, [draftStorageKey, checklists, items])
 
@@ -508,6 +664,14 @@ export default function ChecklistBreakEntry({
       .filter((checklist) => checklistCategory(checklist) === activeCategory)
       .filter((checklist) => matchesSearchTokens(checklist, checklistSearch))
       .sort((a, b) => {
+        if (checklistSearch.trim()) {
+          const scoreCompare =
+            checklistSearchScore(b, checklistSearch) -
+            checklistSearchScore(a, checklistSearch)
+
+          if (scoreCompare !== 0) return scoreCompare
+        }
+
         const yearCompare = compareNatural(clean(b.year), clean(a.year))
         if (yearCompare !== 0) return yearCompare
         return compareNatural(a.name, b.name)
@@ -533,9 +697,28 @@ export default function ChecklistBreakEntry({
     }
 
     return Array.from(counts.entries())
-      .map(([name, count]) => ({ name, count }))
+      .map(([name, count]) => ({
+        name,
+        count,
+        letter: alphabetLetter(name),
+      }))
       .sort((a, b) => compareNatural(a.name, b.name))
   }, [selectedChecklistItems])
+
+  const alphabetLetters = useMemo(
+    () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+    []
+  )
+
+  const availableTeamLetters = useMemo(
+    () =>
+      new Set(
+        teamOptions
+          .map((team) => team.letter)
+          .filter((letter) => letter !== '#')
+      ),
+    [teamOptions]
+  )
 
   const selectedTeamItems = useMemo(() => {
     if (!selectedTeam) return []
@@ -606,7 +789,7 @@ export default function ChecklistBreakEntry({
       entryKind: 'base' | 'parallel'
     }> = []
 
-    for (const item of items) {
+    for (const item of availableItems) {
       const base = entries[item.id]
 
       if (Math.max(0, Number(base?.quantity || 0)) > 0) {
@@ -635,28 +818,23 @@ export default function ChecklistBreakEntry({
     }
 
     return rows
-  }, [items, entries, parallelEntries])
+  }, [availableItems, entries, parallelEntries])
 
-  const parallelSuggestions = useMemo(() => {
-    const values = new Set<string>()
+  const enteredNoteValues = useMemo(() => {
+    const values: string[] = []
 
-    for (const item of items) {
-      const knownParallel = clean(item.parallel_name)
-      const knownVariation = clean(item.variation)
-
-      if (knownParallel) values.add(knownParallel)
-      if (knownVariation) values.add(knownVariation)
+    for (const entry of Object.values(entries)) {
+      if (clean(entry.notes)) values.push(clean(entry.notes))
     }
 
     for (const rows of Object.values(parallelEntries)) {
       for (const row of rows) {
-        const value = clean(row.notes)
-        if (value) values.add(value)
+        if (clean(row.notes)) values.push(clean(row.notes))
       }
     }
 
-    return Array.from(values).sort(compareNatural)
-  }, [items, parallelEntries])
+    return uniqueValues(values)
+  }, [entries, parallelEntries])
 
   function updateEntry(
     itemId: string,
@@ -699,6 +877,60 @@ export default function ChecklistBreakEntry({
         row.id === parallelId ? { ...row, ...patch } : row
       ),
     }))
+  }
+
+  function updateBaseNotesWithCompletion(
+    itemId: string,
+    value: string,
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const completion = shouldTryCompletion(event)
+      ? findUniqueExcelLikeCompletion(enteredNoteValues, value)
+      : null
+
+    const finalValue = completion ?? value
+    updateEntry(itemId, { notes: finalValue })
+
+    if (completion) {
+      window.requestAnimationFrame(() => {
+        const input = baseNotesRefs.current[itemId]
+        if (!input || !input.isConnected) return
+
+        try {
+          input.setSelectionRange(value.length, completion.length)
+        } catch {
+          // Ignore selection errors during navigation or submit.
+        }
+      })
+    }
+  }
+
+  function updateParallelNotesWithCompletion(
+    itemId: string,
+    parallelId: string,
+    value: string,
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const completion = shouldTryCompletion(event)
+      ? findUniqueExcelLikeCompletion(enteredNoteValues, value)
+      : null
+
+    const finalValue = completion ?? value
+    updateParallelEntry(itemId, parallelId, { notes: finalValue })
+
+    if (completion) {
+      window.requestAnimationFrame(() => {
+        const key = `${itemId}:${parallelId}`
+        const input = parallelNotesRefs.current[key]
+        if (!input || !input.isConnected) return
+
+        try {
+          input.setSelectionRange(value.length, completion.length)
+        } catch {
+          // Ignore selection errors during navigation or submit.
+        }
+      })
+    }
   }
 
   function removeParallelEntry(itemId: string, parallelId: string) {
@@ -862,13 +1094,34 @@ export default function ChecklistBreakEntry({
     }
   }
 
-  function selectChecklist(checklistId: string) {
-    setSelectedChecklistId(checklistId)
-    setSelectedTeam('')
-    setSelectedSectionId('')
-    setChecklistSearch('')
-    setChecklistPickerOpen(false)
+  async function selectChecklist(checklistId: string) {
+    setChecklistLoadMessage(null)
+    setLoadingChecklistId(checklistId)
+
+    try {
+      await loadImportedChecklist(checklistId, true)
+    } catch (error) {
+      setChecklistLoadMessage(
+        error instanceof Error
+          ? error.message
+          : 'The selected checklist could not be loaded.'
+      )
+    } finally {
+      setLoadingChecklistId(null)
+    }
   }
+
+  useEffect(() => {
+    if (!selectedChecklistId) return
+
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById('checklist-break-browser')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 75)
+
+    return () => window.clearTimeout(timer)
+  }, [selectedChecklistId])
 
   function selectCategory(category: ChecklistCategory) {
     setActiveCategory(category)
@@ -1036,12 +1289,6 @@ export default function ChecklistBreakEntry({
         </div>
       ))}
 
-      <datalist id={`parallel-suggestions-${breakId}`}>
-        {parallelSuggestions.map((value) => (
-          <option key={value} value={value} />
-        ))}
-      </datalist>
-
       <section className="app-section p-4">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -1073,6 +1320,10 @@ export default function ChecklistBreakEntry({
               Remaining:{' '}
               <span className="font-semibold text-zinc-100">
                 {remainingCount}
+              </span>
+              {' · '}
+              <span className="text-zinc-500">
+                {draftSavedAt ? 'Autosaved' : 'Autosave ready'}
               </span>
             </div>
           </div>
@@ -1115,7 +1366,7 @@ export default function ChecklistBreakEntry({
             </button>
 
             {checklistPickerOpen && (
-              <div className="absolute left-0 right-0 z-50 mt-2 overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
+              <div className="absolute left-0 right-0 z-50 mt-2 flex max-h-[min(48vh,440px)] flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
                 <div className="border-b border-zinc-800 p-3">
                   <input
                     type="search"
@@ -1130,7 +1381,7 @@ export default function ChecklistBreakEntry({
                   </div>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {filteredChecklistOptions.slice(0, 25).map((checklist) => {
                     const meta = [
                       clean(checklist.year),
@@ -1145,12 +1396,18 @@ export default function ChecklistBreakEntry({
                       <button
                         key={checklist.id}
                         type="button"
-                        onClick={() => selectChecklist(checklist.id)}
-                        className="flex w-full items-start border-b border-zinc-800 px-3 py-3 text-left last:border-b-0 hover:bg-zinc-900/70"
+                        onClick={() => void selectChecklist(checklist.id)}
+                        disabled={loadingChecklistId !== null}
+                        className="flex w-full items-start border-b border-zinc-800 px-3 py-3 text-left last:border-b-0 hover:bg-zinc-900/70 disabled:cursor-wait disabled:opacity-60"
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0 xl:h-full xl:min-h-0 xl:overflow-y-scroll xl:overscroll-contain xl:pr-1">
                           <div className="font-medium text-zinc-100">
                             {checklist.name}
+                            {loadingChecklistId === checklist.id ? (
+                              <span className="ml-2 text-xs font-normal text-cyan-300">
+                                Loading...
+                              </span>
+                            ) : null}
                           </div>
                           {meta ? (
                             <div className="mt-0.5 text-xs text-zinc-500">
@@ -1213,10 +1470,19 @@ export default function ChecklistBreakEntry({
         </div>
       )}
 
+      {checklistLoadMessage && (
+        <div className="rounded-xl border border-red-900/60 bg-red-950/20 px-4 py-3 text-sm text-red-200">
+          {checklistLoadMessage}
+        </div>
+      )}
+
       {selectedChecklistId && (
-        <section className="app-section overflow-hidden">
-          <div className="grid min-h-135 xl:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="border-b border-zinc-800 bg-zinc-950/30 xl:border-b-0 xl:border-r">
+        <section
+          id="checklist-break-browser"
+          className="app-section scroll-mt-48 overflow-hidden xl:sticky xl:top-52 xl:z-20 xl:flex xl:h-[calc(100vh-231px)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+        >
+          <div className="grid min-h-135 xl:h-0 xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)] xl:overflow-hidden">
+            <aside className="border-b border-zinc-800 bg-zinc-950/30 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden xl:border-b-0 xl:border-r">
               <div className="border-b border-zinc-800 px-4 py-3">
                 <div className="font-semibold text-zinc-100">
                   {selectedChecklist?.name ?? 'Checklist'}
@@ -1226,42 +1492,62 @@ export default function ChecklistBreakEntry({
                 </div>
               </div>
 
-              <div className="max-h-155 overflow-y-auto p-2">
-                {teamOptions.map((team) => {
-                  const active = team.name === selectedTeam
-                  const saved = teamSavedCount(team.name)
-                  const entered = teamEnteredCount(team.name)
-                  const accounted = saved + entered
+              <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-2 p-2 xl:h-0 xl:min-h-0 xl:flex-1">
+                <ChecklistAlphabetRail
+                  ariaLabel="Team alphabet"
+                  letters={alphabetLetters}
+                  availableLetters={Array.from(availableTeamLetters)}
+                  listId={`break-team-list-${breakId}`}
+                  targetPrefix={`break-team-letter-${breakId}-`}
+                />
 
-                  return (
-                    <button
-                      key={team.name}
-                      type="button"
-                      onClick={() => selectTeam(team.name)}
-                      className={[
-                        'mb-1 flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left',
-                        active
-                          ? 'border-cyan-700 bg-zinc-800/80 text-cyan-200'
-                          : 'border-transparent hover:border-zinc-800 hover:bg-zinc-900/60',
-                      ].join(' ')}
-                    >
-                      <span className="min-w-0 truncate">{team.name}</span>
+                <div
+                  id={`break-team-list-${breakId}`}
+                  className="max-h-155 overflow-y-auto overscroll-contain pr-1 scroll-smooth xl:h-full xl:max-h-none xl:min-h-0 xl:flex-1"
+                >
+                  {teamOptions.map((team, index) => {
+                    const active = team.name === selectedTeam
+                    const saved = teamSavedCount(team.name)
+                    const entered = teamEnteredCount(team.name)
+                    const accounted = saved + entered
+                    const firstInLetter =
+                      index === 0 || teamOptions[index - 1]?.letter !== team.letter
 
-                      <span className="flex shrink-0 items-center gap-2 text-xs">
-                        {accounted > 0 && (
-                          <span className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-emerald-300">
-                            {saved > 0 ? `${saved} saved` : `${entered} new`}
-                          </span>
-                        )}
-                        <span className="text-zinc-500">{team.count}</span>
-                      </span>
-                    </button>
-                  )
-                })}
+                    return (
+                      <button
+                        key={team.name}
+                        id={
+                          firstInLetter && team.letter !== '#'
+                            ? `break-team-letter-${breakId}-${team.letter.toLowerCase()}`
+                            : undefined
+                        }
+                        type="button"
+                        onClick={() => selectTeam(team.name)}
+                        className={[
+                          'mb-1 flex w-full scroll-mt-2 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left',
+                          active
+                            ? 'border-cyan-700 bg-zinc-800/80 text-cyan-200'
+                            : 'border-transparent hover:border-zinc-800 hover:bg-zinc-900/60',
+                        ].join(' ')}
+                      >
+                        <span className="min-w-0 truncate">{team.name}</span>
+
+                        <span className="flex shrink-0 items-center gap-2 text-xs">
+                          {accounted > 0 && (
+                            <span className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2 py-0.5 text-emerald-300">
+                              {saved > 0 ? `${saved} saved` : `${entered} new`}
+                            </span>
+                          )}
+                          <span className="text-zinc-500">{team.count}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </aside>
 
-            <div className="min-w-0">
+            <div className="min-w-0 xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain xl:pr-1">
               {!selectedTeam ? (
                 <div className="flex min-h-135 items-center justify-center p-8 text-center">
                   <div>
@@ -1377,7 +1663,7 @@ export default function ChecklistBreakEntry({
                             {active && (
                               <div className="overflow-x-auto border-t border-zinc-800 bg-black/20">
                                 <table className="w-full min-w-190 text-left text-sm">
-                                  <thead className="bg-zinc-950/80 text-xs uppercase tracking-wide text-zinc-500">
+                                  <thead className="sticky top-0 z-20 bg-zinc-950 text-xs uppercase tracking-wide text-zinc-500 shadow-[0_1px_0_rgba(63,63,70,1)]">
                                     <tr>
                                       <th className="px-3 py-2.5">Card #</th>
                                       <th className="px-3 py-2.5">Player</th>
@@ -1484,11 +1770,16 @@ export default function ChecklistBreakEntry({
 
                                             <td className="px-3 py-2.5">
                                               <input
+                                                ref={(el) => {
+                                                  baseNotesRefs.current[item.id] = el
+                                                }}
                                                 value={entries[item.id]?.notes ?? ''}
                                                 onChange={(e) =>
-                                                  updateEntry(item.id, {
-                                                    notes: e.target.value,
-                                                  })
+                                                  updateBaseNotesWithCompletion(
+                                                    item.id,
+                                                    e.target.value,
+                                                    e
+                                                  )
                                                 }
                                                 className="app-input w-full min-w-64"
                                                 placeholder="Optional notes"
@@ -1595,18 +1886,20 @@ export default function ChecklistBreakEntry({
 
                                                 <td className="px-3 py-2">
                                                   <input
+                                                    ref={(el) => {
+                                                      parallelNotesRefs.current[
+                                                        `${item.id}:${parallel.id}`
+                                                      ] = el
+                                                    }}
                                                     value={parallel.notes}
                                                     onChange={(e) =>
-                                                      updateParallelEntry(
+                                                      updateParallelNotesWithCompletion(
                                                         item.id,
                                                         parallel.id,
-                                                        {
-                                                          notes:
-                                                            e.target.value,
-                                                        }
+                                                        e.target.value,
+                                                        e
                                                       )
                                                     }
-                                                    list={`parallel-suggestions-${breakId}`}
                                                     className="app-input w-full min-w-64"
                                                     placeholder="Parallel / variation, e.g. Reptilian"
                                                   />

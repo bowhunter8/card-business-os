@@ -1,395 +1,569 @@
-import { createHash } from 'crypto'
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
-type CsvRow = Record<string, string>
+const INVENTORY_TABLE = "inventory_items";
 
-type ImportTemplateType = 'inventory' | 'giveaway'
+type EntryMode = "single_card" | "bulk_lot";
 
-type SkippedRow = {
-  row: number
-  item: string
-  reason: string
+type BulkLotItemInput = {
+  player?: string;
+  cardNumber?: string;
+  year?: string;
+  brand?: string;
+  setName?: string;
+  parallel?: string;
+  rookie?: boolean;
+  notes?: string;
+  estimatedValue?: number;
+};
+
+type CreateInventoryPayload = {
+  entryMode?: EntryMode;
+  status?: string;
+  title?: string;
+  player?: string;
+  year?: string;
+  brand?: string;
+  setName?: string;
+  cardNumber?: string;
+  team?: string;
+  parallel?: string;
+  variation?: string;
+  rookie?: boolean;
+  autograph?: boolean;
+  relic?: boolean;
+  serialNumber?: string;
+  grade?: string;
+  quantity?: number;
+  unitCost?: number;
+  totalCost?: number;
+  shippingPaid?: number;
+  salesTaxPaid?: number;
+  otherPurchaseFees?: number;
+  totalPurchaseCost?: number;
+  estimatedValue?: number;
+  source?: string;
+  breakId?: string;
+  acquiredDate?: string;
+  notes?: string;
+  checklistId?: string;
+  checklistItemId?: string;
+  bulkLot?: {
+    lotName?: string;
+    lotDescription?: string;
+    itemCount?: number;
+    estimatedTotalValue?: number;
+    items?: BulkLotItemInput[];
+  } | null;
+};
+
+type InventoryRowInsert = {
+  user_id: string;
+  title: string;
+  player_name: string | null;
+  year: string | null;
+  brand: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  parallel_name: string | null;
+  team: string | null;
+  notes: string | null;
+  status: string;
+  item_type: string;
+  quantity: number;
+  available_quantity: number;
+  cost_basis_unit: number;
+  cost_basis_total: number;
+  shipping_paid: number;
+  sales_tax_paid: number;
+  other_purchase_fees: number;
+  total_purchase_cost: number;
+  source_type: string;
+  source_break_id: string | null;
+  checklist_id: string | null;
+  checklist_item_id: string | null;
+};
+
+function toSafeString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-type WarningRow = {
-  row: number
-  item: string
-  warning: string
+function toSafeNumber(value: unknown, fallback = 0): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
 }
 
-type ImportResult = {
-  imported: number
-  skipped: number
-  errors: string[]
-  duplicates: number
-  warnings: number
-  skippedRows: SkippedRow[]
-  warningRows: WarningRow[]
-  templateType: ImportTemplateType
+function toMoneyNumber(value: unknown): number {
+  const num = Math.max(0, toSafeNumber(value, 0));
+  return Number(num.toFixed(2));
 }
 
-function normalizeHeader(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '')
+function toSafeBool(value: unknown): boolean {
+  return value === true;
 }
 
-function parseCsvLine(line: string) {
-  const values: string[] = []
-  let current = ''
-  let insideQuotes = false
+function toSafeYear(value: unknown): string | null {
+  const text = toSafeString(value);
+  return text || null;
+}
 
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    const nextChar = line[index + 1]
+function toSafeUuid(value: unknown): string | null {
+  const text = toSafeString(value);
+  if (!text) return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ? text
+    : null;
+}
 
-    if (char === '"' && insideQuotes && nextChar === '"') {
-      current += '"'
-      index += 1
-      continue
-    }
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return "Unknown error";
+}
 
-    if (char === '"') {
-      insideQuotes = !insideQuotes
-      continue
-    }
-
-    if (char === ',' && !insideQuotes) {
-      values.push(current.trim())
-      current = ''
-      continue
-    }
-
-    current += char
+function userFriendlyCreateError(message: string) {
+  if (
+    message.includes("row-level security") ||
+    message.includes("violates row-level security")
+  ) {
+    return (
+      "Inventory could not be saved because your signed-in user could not be attached to the new inventory row. " +
+      "This is not caused by your entry. Please refresh the page and try again. Technical detail: " +
+      message
+    );
   }
 
-  values.push(current.trim())
-  return values
+  if (
+    message.includes("schema cache") ||
+    message.includes("Could not find") ||
+    message.includes("column")
+  ) {
+    return (
+      "Inventory could not be saved because the manual inventory form and database fields are out of sync. " +
+      "This is not caused by your entry. Technical detail: " +
+      message
+    );
+  }
+
+  return message;
 }
 
-function parseCsv(text: string) {
-  const cleanText = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-  const lines = cleanText
-    .split('\n')
-    .map((line) => line.trim())
+function isFilledBulkItem(item: BulkLotItemInput | null | undefined): boolean {
+  if (!item) return false;
+
+  return Boolean(
+    toSafeString(item.player) ||
+      toSafeString(item.cardNumber) ||
+      toSafeString(item.year) ||
+      toSafeString(item.brand) ||
+      toSafeString(item.setName) ||
+      toSafeString(item.parallel) ||
+      toSafeString(item.notes) ||
+      toSafeNumber(item.estimatedValue, 0)
+  );
+}
+
+function buildSingleTitle(body: CreateInventoryPayload): string {
+  const manualTitle = toSafeString(body.title);
+  if (manualTitle) return manualTitle;
+
+  return [
+    toSafeString(body.year),
+    toSafeString(body.brand),
+    toSafeString(body.setName),
+    toSafeString(body.player),
+    toSafeString(body.cardNumber) ? `#${toSafeString(body.cardNumber)}` : "",
+    toSafeString(body.parallel),
+    toSafeString(body.variation),
+  ]
     .filter(Boolean)
-
-  if (lines.length < 2) {
-    return { headers: [], rows: [] as CsvRow[] }
-  }
-
-  const headers = parseCsvLine(lines[0]).map(normalizeHeader)
-  const rows = lines.slice(1).map((line) => {
-    const values = parseCsvLine(line)
-    return headers.reduce<CsvRow>((row, header, index) => {
-      row[header] = values[index]?.trim() || ''
-      return row
-    }, {})
-  })
-
-  return { headers, rows }
+    .join(" ");
 }
 
-function toNumber(value: string | undefined) {
-  const cleaned = String(value || '').replace(/[$,]/g, '').trim()
-  if (!cleaned) return Number.NaN
+function buildBulkChildTitle(
+  item: BulkLotItemInput,
+  fallbackLotName: string,
+  index: number
+): string {
+  const built = [
+    toSafeString(item.year),
+    toSafeString(item.brand),
+    toSafeString(item.setName),
+    toSafeString(item.player),
+    toSafeString(item.cardNumber) ? `#${toSafeString(item.cardNumber)}` : "",
+    toSafeString(item.parallel),
+  ]
+    .filter(Boolean)
+    .join(" ");
 
-  const number = Number(cleaned)
-  return Number.isFinite(number) ? number : Number.NaN
+  return built || `${fallbackLotName} Item ${index + 1}`;
 }
 
-function cleanText(value: string | undefined) {
-  return String(value || '').trim()
+function buildNotes(parts: Array<string | null | undefined>) {
+  const text = parts
+    .map((part) => toSafeString(part))
+    .filter(Boolean)
+    .join("\n");
+
+  return text || null;
 }
 
-function firstValue(row: CsvRow, keys: string[]) {
-  for (const key of keys) {
-    const value = cleanText(row[key])
-    if (value) return value
-  }
+function buildBaseRow({
+  body,
+  userId,
+  title,
+  quantity,
+  unitCost,
+  totalCost,
+  shippingPaid = 0,
+  salesTaxPaid = 0,
+  otherPurchaseFees = 0,
+  totalPurchaseCost = totalCost,
+  itemType,
+  status,
+  notes,
+  playerName,
+  year,
+  brand,
+  setName,
+  cardNumber,
+  parallelName,
+  team,
+}: {
+  body: CreateInventoryPayload;
+  userId: string;
+  title: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  shippingPaid?: number;
+  salesTaxPaid?: number;
+  otherPurchaseFees?: number;
+  totalPurchaseCost?: number;
+  itemType: string;
+  status: string;
+  notes: string | null;
+  playerName?: string | null;
+  year?: string | null;
+  brand?: string | null;
+  setName?: string | null;
+  cardNumber?: string | null;
+  parallelName?: string | null;
+  team?: string | null;
+}): InventoryRowInsert {
+  const sourceText = toSafeString(body.source);
+  const breakUuid = toSafeUuid(body.breakId);
+  const checklistUuid = toSafeUuid(body.checklistId);
+  const checklistItemUuid = toSafeUuid(body.checklistItemId);
 
-  return ''
+  return {
+    user_id: userId,
+    title,
+    player_name: playerName ?? (toSafeString(body.player) || null),
+    year: year ?? toSafeYear(body.year),
+    brand: brand ?? (toSafeString(body.brand) || null),
+    set_name: setName ?? (toSafeString(body.setName) || null),
+    card_number: cardNumber ?? (toSafeString(body.cardNumber) || null),
+    parallel_name: parallelName ?? (toSafeString(body.parallel) || null),
+    team: team ?? (toSafeString(body.team) || null),
+    notes,
+    status,
+    item_type: itemType,
+    quantity,
+    available_quantity: quantity,
+    cost_basis_unit: unitCost,
+    cost_basis_total: totalCost,
+    shipping_paid: shippingPaid,
+    sales_tax_paid: salesTaxPaid,
+    other_purchase_fees: otherPurchaseFees,
+    total_purchase_cost: totalPurchaseCost,
+    source_type: breakUuid ? "break" : "manual",
+    source_break_id: breakUuid,
+    checklist_id: checklistUuid,
+    checklist_item_id: checklistItemUuid,
+  };
 }
 
-function getItemName(row: CsvRow) {
-  return firstValue(row, ['item', 'player_item_name', 'player', 'item_name', 'title'])
-}
+export async function GET() {
+  try {
+    const supabase = await createClient();
 
-function getPurchasePrice(row: CsvRow) {
-  return toNumber(firstValue(row, ['purchase_price', 'cost_basis', 'cost', 'price_paid']))
-}
+    const { data, error } = await supabase
+      .from(INVENTORY_TABLE)
+      .select("*")
+      .order("created_at", { ascending: false });
 
-function getImportTemplateType(formData: FormData, file: File): ImportTemplateType {
-  const rawTemplateType = String(formData.get('templateType') || formData.get('importType') || '')
-    .trim()
-    .toLowerCase()
-  const fileName = file.name.toLowerCase()
+    if (error) {
+      return NextResponse.json(
+        { error: `Failed to load inventory: ${error.message}` },
+        { status: 500 }
+      );
+    }
 
-  if (rawTemplateType === 'giveaway' || rawTemplateType === 'giveaways') {
-    return 'giveaway'
-  }
-
-  if (fileName.includes('giveaway') || fileName.includes('giveaways') || fileName.includes('givvy')) {
-    return 'giveaway'
-  }
-
-  return 'inventory'
-}
-
-function addSkipped(result: ImportResult, row: number, item: string, reason: string) {
-  result.skipped += 1
-  result.errors.push(`Row ${row}: ${reason}`)
-  result.skippedRows.push({
-    row,
-    item: item || '—',
-    reason,
-  })
-}
-
-function addDuplicateSkipped(result: ImportResult, row: number, item: string) {
-  result.skipped += 1
-  result.duplicates += 1
-  result.skippedRows.push({
-    row,
-    item: item || '—',
-    reason: 'This exact CSV row was already imported.',
-  })
-}
-
-function buildCsvRowFingerprint(row: CsvRow, templateType: ImportTemplateType) {
-  const normalizedRow = Object.keys(row)
-    .sort()
-    .map((key) => `${key}:${cleanText(row[key]).toLowerCase()}`)
-    .join('|')
-
-  return createHash('sha256')
-    .update(`${templateType}|${normalizedRow}`)
-    .digest('hex')
-    .slice(0, 24)
-}
-
-function buildSourceReference(row: CsvRow, templateType: ImportTemplateType) {
-  return `csv-row:${buildCsvRowFingerprint(row, templateType)}`
-}
-
-function getInventoryItemType(row: CsvRow, quantity: number) {
-  const explicitType = cleanText(row.item_type)
-
-  const allowedTypes = new Set([
-    'single_card',
-    'multi_quantity_card',
-    'bulk_lot_line',
-    'team_lot_line',
-    'insert_lot_line',
-    'common_lot_line',
-    'sealed_item',
-    'set_piece',
-  ])
-
-  if (allowedTypes.has(explicitType)) {
-    return explicitType
-  }
-
-  const category = cleanText(row.category).toLowerCase()
-  const item = getItemName(row).toLowerCase()
-
-  if (
-    category.includes('sealed') ||
-    item.includes('sealed') ||
-    item.includes('box') ||
-    item.includes('pack') ||
-    item.includes('blaster') ||
-    item.includes('mega')
-  ) {
-    return 'sealed_item'
-  }
-
-  if (
-    category.includes('lot') ||
-    item.includes(' lot') ||
-    item.endsWith('lot') ||
-    quantity > 1
-  ) {
-    return 'multi_quantity_card'
-  }
-
-  return 'single_card'
-}
-
-function buildNotes(row: CsvRow, templateType: ImportTemplateType) {
-  const notes = cleanText(row.notes)
-  const purchaseDate = cleanText(row.purchase_date || row.date_purchased)
-  const category = cleanText(row.category)
-  const subcategory = cleanText(row.subcategory)
-  const platform = cleanText(row.platform)
-  const orderNumber = cleanText(row.order_number)
-
-  const extras = [
-    templateType === 'giveaway' ? 'Template: Giveaway Import' : '',
-    purchaseDate ? `Purchase Date: ${purchaseDate}` : '',
-    category ? `Category: ${category}` : '',
-    subcategory ? `Subcategory: ${subcategory}` : '',
-    platform ? `Platform: ${platform}` : '',
-    orderNumber ? `Order Number: ${orderNumber}` : '',
-  ].filter(Boolean)
-
-  if (notes && extras.length > 0) {
-    return `${notes}\n\nCSV Import Details: ${extras.join(' | ')}`
-  }
-
-  if (notes) return notes
-  if (extras.length > 0) return `CSV Import Details: ${extras.join(' | ')}`
-
-  return null
-}
-
-export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const formData = await request.formData()
-  const file = formData.get('file')
-
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: 'CSV file is required.' }, { status: 400 })
-  }
-
-  const templateType = getImportTemplateType(formData, file)
-  const text = await file.text()
-  const { headers, rows } = parseCsv(text)
-
-  if (headers.length === 0 || rows.length === 0) {
-    return NextResponse.json({ error: 'CSV file does not contain any inventory rows.' }, { status: 400 })
-  }
-
-  const hasItemColumn = ['item', 'player_item_name', 'player', 'item_name', 'title'].some((header) =>
-    headers.includes(header)
-  )
-  const hasPurchasePriceColumn = ['purchase_price', 'cost_basis', 'cost', 'price_paid'].some((header) =>
-    headers.includes(header)
-  )
-
-  if (!hasItemColumn || !hasPurchasePriceColumn) {
-    const missingHeaders = [
-      !hasItemColumn ? 'item' : null,
-      !hasPurchasePriceColumn ? 'purchase_price' : null,
-    ].filter(Boolean)
-
+    return NextResponse.json({ items: data ?? [] });
+  } catch (error: unknown) {
     return NextResponse.json(
-      {
-        error: `Missing required column${missingHeaders.length === 1 ? '' : 's'}: ${missingHeaders.join(', ')}`,
-      },
-      { status: 400 },
-    )
+      { error: `Failed to load inventory: ${getErrorMessage(error)}` },
+      { status: 500 }
+    );
   }
+}
 
-  const result: ImportResult = {
-    imported: 0,
-    skipped: 0,
-    errors: [],
-    duplicates: 0,
-    warnings: 0,
-    skippedRows: [],
-    warningRows: [],
-    templateType,
-  }
+export async function POST(req: NextRequest) {
+  try {
+    const supabase = await createClient();
 
-  for (const [index, row] of rows.entries()) {
-    const rowNumber = index + 2
-    const itemName = getItemName(row)
-    const purchasePrice = getPurchasePrice(row)
-    const quantityRaw = firstValue(row, ['quantity', 'qty'])
-    const parsedQuantity = toNumber(quantityRaw)
-    const quantity = Number.isFinite(parsedQuantity) && parsedQuantity > 0
-      ? Math.max(1, Math.floor(parsedQuantity))
-      : 1
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!itemName) {
-      addSkipped(result, rowNumber, itemName, 'Item is required.')
-      continue
+    if (!user) {
+      return NextResponse.json(
+        { error: "You must be signed in to create inventory." },
+        { status: 401 }
+      );
     }
 
-    if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
-      addSkipped(result, rowNumber, itemName, 'Purchase Price must be a valid number.')
-      continue
+    const body = (await req.json()) as CreateInventoryPayload;
+    const entryMode: EntryMode =
+      body.entryMode === "bulk_lot" ? "bulk_lot" : "single_card";
+
+    if (entryMode === "bulk_lot") {
+      const lotName = toSafeString(body.bulkLot?.lotName || body.title);
+
+      if (!lotName) {
+        return NextResponse.json(
+          { error: "Bulk lot name is required." },
+          { status: 400 }
+        );
+      }
+
+      const rawItems = Array.isArray(body.bulkLot?.items)
+        ? body.bulkLot?.items ?? []
+        : [];
+
+      const cleanItems = rawItems.filter(isFilledBulkItem);
+
+      if (cleanItems.length === 0) {
+        return NextResponse.json(
+          { error: "Bulk lot must include at least one child item." },
+          { status: 400 }
+        );
+      }
+
+      const quantity = cleanItems.length;
+      const unitCost = Math.max(0, toSafeNumber(body.unitCost, 0));
+      const totalCost = Math.max(
+        0,
+        toSafeNumber(body.totalCost, unitCost * quantity)
+      );
+      const shippingPaid = toMoneyNumber(body.shippingPaid);
+      const salesTaxPaid = toMoneyNumber(body.salesTaxPaid);
+      const otherPurchaseFees = toMoneyNumber(body.otherPurchaseFees);
+      const totalPurchaseCost = toMoneyNumber(
+        totalCost + shippingPaid + salesTaxPaid + otherPurchaseFees
+      );
+
+      const parentNotes = buildNotes([
+        toSafeString(body.notes),
+        toSafeString(body.bulkLot?.lotDescription),
+        "Entry Mode: bulk_lot",
+        `Bulk Lot Name: ${lotName}`,
+        `Bulk Lot Item Count: ${cleanItems.length}`,
+        toSafeString(body.acquiredDate)
+          ? `Manual acquired date: ${toSafeString(body.acquiredDate)}`
+          : "",
+      ]);
+
+      const parentRow = buildBaseRow({
+        body,
+        userId: user.id,
+        title: toSafeString(body.title) || lotName,
+        quantity,
+        unitCost,
+        totalCost,
+        shippingPaid,
+        salesTaxPaid,
+        otherPurchaseFees,
+        totalPurchaseCost,
+        itemType: "single_card",
+        status: "available",
+        notes: parentNotes,
+        playerName: lotName,
+      });
+
+      const { data: parentInsert, error: parentError } = await supabase
+        .from(INVENTORY_TABLE)
+        .insert(parentRow)
+        .select("*")
+        .single();
+
+      if (parentError) {
+        return NextResponse.json(
+          {
+            error: `Failed to create bulk lot: ${userFriendlyCreateError(
+              parentError.message
+            )}`,
+          },
+          { status: 500 }
+        );
+      }
+
+      const parentId =
+        parentInsert && typeof parentInsert === "object" && "id" in parentInsert
+          ? String(parentInsert.id)
+          : "";
+
+      const perItemCostRaw = totalCost / cleanItems.length;
+      const roundedBase = Math.floor(perItemCostRaw * 100) / 100;
+
+      const allocatedCosts: number[] = cleanItems.map(() => roundedBase);
+      let remainderCents = Math.round(
+        (totalCost - roundedBase * cleanItems.length) * 100
+      );
+
+      let distributeIndex = 0;
+      while (remainderCents > 0) {
+        allocatedCosts[distributeIndex] += 0.01;
+        remainderCents -= 1;
+        distributeIndex = (distributeIndex + 1) % allocatedCosts.length;
+      }
+
+      const childRows: InventoryRowInsert[] = cleanItems.map(
+        (item: BulkLotItemInput, index: number) => {
+          const childCost = Number(allocatedCosts[index].toFixed(2));
+
+          const childNotes = buildNotes([
+            toSafeString(item.notes),
+            "Entry Mode: bulk_lot_item",
+            parentId ? `Parent Bulk Lot ID: ${parentId}` : "",
+            `Parent Bulk Lot Name: ${lotName}`,
+          ]);
+
+          return buildBaseRow({
+            body,
+            userId: user.id,
+            title: buildBulkChildTitle(item, lotName, index),
+            quantity: 1,
+            unitCost: childCost,
+            totalCost: childCost,
+            itemType: "single_card",
+            status: "available",
+            notes: childNotes,
+            playerName: toSafeString(item.player) || null,
+            year: toSafeYear(item.year) || toSafeYear(body.year),
+            brand: toSafeString(item.brand) || toSafeString(body.brand) || null,
+            setName: toSafeString(item.setName) || toSafeString(body.setName) || null,
+            cardNumber: toSafeString(item.cardNumber) || null,
+            parallelName: toSafeString(item.parallel) || null,
+            team: null,
+          });
+        }
+      );
+
+      const { data: childInsert, error: childError } = await supabase
+        .from(INVENTORY_TABLE)
+        .insert(childRows)
+        .select("*");
+
+      if (childError) {
+        return NextResponse.json(
+          {
+            error: `Parent created, but child items failed: ${userFriendlyCreateError(
+              childError.message
+            )}`,
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        item: parentInsert,
+        childItems: childInsert ?? [],
+        message: "Bulk lot created successfully.",
+      });
     }
 
-    const sourceReference = buildSourceReference(row, templateType)
+    const title = buildSingleTitle(body);
 
-    const { data: existingImportRow, error: duplicateCheckError } = await supabase
-      .from('inventory_items')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('source_type', 'csv_import')
-      .eq('source_reference', sourceReference)
-      .is('deleted_at', null)
-      .maybeSingle()
-
-    if (duplicateCheckError) {
-      addSkipped(result, rowNumber, itemName, `Could not check whether this CSV row was already imported: ${duplicateCheckError.message}`)
-      continue
+    if (!title && !toSafeString(body.player)) {
+      return NextResponse.json(
+        { error: "Title or player is required." },
+        { status: 400 }
+      );
     }
 
-    if (existingImportRow) {
-      addDuplicateSkipped(result, rowNumber, itemName)
-      continue
-    }
+    const quantity = Math.max(1, Math.floor(toSafeNumber(body.quantity, 1)));
+    const unitCost = Math.max(0, toSafeNumber(body.unitCost, 0));
+    const totalCost = Math.max(0, toSafeNumber(body.totalCost, unitCost * quantity));
+    const shippingPaid = toMoneyNumber(body.shippingPaid);
+    const salesTaxPaid = toMoneyNumber(body.salesTaxPaid);
+    const otherPurchaseFees = toMoneyNumber(body.otherPurchaseFees);
+    const totalPurchaseCost = toMoneyNumber(
+      totalCost + shippingPaid + salesTaxPaid + otherPurchaseFees
+    );
 
-    const costBasisTotal = purchasePrice * quantity
-    const purchaseSource = firstValue(row, ['purchased_from', 'purchase_source', 'source', 'platform'])
-    const now = new Date().toISOString()
-    const status = templateType === 'giveaway' ? 'giveaway' : cleanText(row.status) || 'available'
+    const notes = buildNotes([
+      toSafeString(body.notes),
+      toSafeString(body.variation) ? `Variation: ${toSafeString(body.variation)}` : "",
+      toSafeString(body.serialNumber)
+        ? `Serial Number: ${toSafeString(body.serialNumber)}`
+        : "",
+      toSafeString(body.grade) ? `Grade: ${toSafeString(body.grade)}` : "",
+      toSafeBool(body.rookie) ? "Rookie" : "",
+      toSafeBool(body.autograph) ? "Autograph" : "",
+      toSafeBool(body.relic) ? "Relic" : "",
+      toSafeString(body.acquiredDate)
+        ? `Manual acquired date: ${toSafeString(body.acquiredDate)}`
+        : "",
+      toSafeNumber(body.estimatedValue, 0)
+        ? `Estimated Value: ${toSafeNumber(body.estimatedValue, 0).toFixed(2)}`
+        : "",
+      "Entry Mode: single_card",
+    ]);
 
-    const insertPayload = {
-      user_id: user.id,
-      source_type: 'csv_import',
-      source_reference: sourceReference,
-      item_type: getInventoryItemType(row, quantity),
-      status,
+    const row = buildBaseRow({
+      body,
+      userId: user.id,
+      title,
       quantity,
-      available_quantity: quantity,
-      title: itemName,
-      player_name: cleanText(row.player_item_name || row.player || row.item_name) || itemName,
-      year: cleanText(row.year) || null,
-      brand: cleanText(row.brand) || null,
-      set_name: cleanText(row.set_name || row.set || row.product) || null,
-      card_number: cleanText(row.card_number || row.item_number || row.number) || null,
-      parallel_name: cleanText(row.parallel_name || row.parallel) || null,
-      variation: cleanText(row.variation) || null,
-      team: cleanText(row.team) || null,
-      condition_note: cleanText(row.condition || row.condition_note) || null,
-      purchase_source: purchaseSource || (templateType === 'giveaway' ? 'CSV Giveaway Import' : 'CSV Import'),
-      cost_basis_unit: purchasePrice,
-      cost_basis_total: costBasisTotal,
-      estimated_value_unit: null,
-      estimated_value_total: null,
-      storage_location: cleanText(row.location || row.storage_location) || null,
-      tax_lot_method: cleanText(row.tax_lot_method) || 'specific',
-      notes: buildNotes(row, templateType),
-      created_at: now,
-      updated_at: now,
+      unitCost,
+      totalCost,
+      shippingPaid,
+      salesTaxPaid,
+      otherPurchaseFees,
+      totalPurchaseCost,
+      itemType: "single_card",
+      status: "available",
+      notes,
+    });
+
+    const { data, error } = await supabase
+      .from(INVENTORY_TABLE)
+      .insert(row)
+      .select("*")
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        {
+          error: `Failed to create inventory item: ${userFriendlyCreateError(
+            error.message
+          )}`,
+        },
+        { status: 500 }
+      );
     }
 
-    const { error: insertError } = await supabase.from('inventory_items').insert(insertPayload)
-
-    if (insertError) {
-      addSkipped(result, rowNumber, itemName, insertError.message)
-      continue
-    }
-
-    result.imported += 1
+    return NextResponse.json({
+      success: true,
+      item: data,
+      message: "Inventory item created successfully.",
+    });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: `Failed to create inventory item: ${getErrorMessage(error)}` },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json(result)
 }

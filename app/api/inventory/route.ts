@@ -46,6 +46,8 @@ type CreateInventoryPayload = {
   breakId?: string;
   acquiredDate?: string;
   notes?: string;
+  checklistId?: string;
+  checklistItemId?: string;
   bulkLot?: {
     lotName?: string;
     lotDescription?: string;
@@ -78,6 +80,8 @@ type InventoryRowInsert = {
   total_purchase_cost: number;
   source_type: string;
   source_break_id: string | null;
+  checklist_id: string | null;
+  checklist_item_id: string | null;
 };
 
 function toSafeString(value: unknown): string {
@@ -248,6 +252,8 @@ function buildBaseRow({
 }): InventoryRowInsert {
   const sourceText = toSafeString(body.source);
   const breakUuid = toSafeUuid(body.breakId);
+  const checklistUuid = toSafeUuid(body.checklistId);
+  const checklistItemUuid = toSafeUuid(body.checklistItemId);
 
   return {
     user_id: userId,
@@ -272,6 +278,8 @@ function buildBaseRow({
     total_purchase_cost: totalPurchaseCost,
     source_type: breakUuid ? "break" : "manual",
     source_break_id: breakUuid,
+    checklist_id: checklistUuid,
+    checklist_item_id: checklistItemUuid,
   };
 }
 

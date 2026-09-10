@@ -5,6 +5,7 @@ import ChecklistLoadingLink from '@/app/components/ChecklistLoadingLink'
 
 type ChecklistRow = {
   id: string
+  sport: string | null
   year: string | null
   manufacturer: string | null
   brand: string | null
@@ -86,45 +87,120 @@ function checklistBrandFamily(checklist: ChecklistRow) {
   return brand || manufacturer || 'Other'
 }
 
+function checklistSport(checklist: ChecklistRow) {
+  const sport = clean(checklist.sport)
+  if (!sport) return 'Other'
+
+  return sport
+    .split(/\s+/)
+    .map((part) =>
+      part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : ''
+    )
+    .join(' ')
+}
+
+const CHECKLIST_CATEGORIES = [
+  'Baseball',
+  'Basketball',
+  'Football',
+  'Hockey',
+  'Soccer',
+  'Wrestling',
+  'Racing',
+  'MMA',
+  'Multisport',
+  'TCG',
+  'Entertainment',
+  'Other',
+] as const
+
+function canonicalChecklistSport(checklist: ChecklistRow) {
+  const raw = clean(checklist.sport).toLowerCase()
+
+  if (!raw) return 'Other'
+  if (raw.includes('baseball')) return 'Baseball'
+  if (raw.includes('basketball')) return 'Basketball'
+  if (raw.includes('football')) return 'Football'
+  if (raw.includes('hockey')) return 'Hockey'
+  if (raw.includes('soccer')) return 'Soccer'
+  if (raw.includes('wrestling') || raw.includes('wwe')) return 'Wrestling'
+  if (raw.includes('racing') || raw.includes('nascar')) return 'Racing'
+  if (raw.includes('mma') || raw.includes('ufc')) return 'MMA'
+  if (raw.includes('multisport') || raw.includes('multi-sport')) return 'Multisport'
+  if (
+    raw.includes('tcg') ||
+    raw.includes('pokemon') ||
+    raw.includes('pokémon') ||
+    raw.includes('magic') ||
+    raw.includes('lorcana') ||
+    raw.includes('yu-gi-oh') ||
+    raw.includes('yugioh')
+  ) return 'TCG'
+  if (
+    raw.includes('entertainment') ||
+    raw.includes('non-sport') ||
+    raw.includes('nonsport') ||
+    raw.includes('star wars') ||
+    raw.includes('marvel')
+  ) return 'Entertainment'
+
+  return 'Other'
+}
+
 function groupedChecklistLibrary(checklists: ChecklistRow[]) {
-  const byYear = new Map<string, Map<string, ChecklistRow[]>>()
+  const bySport = new Map<
+    string,
+    Map<string, Map<string, ChecklistRow[]>>
+  >()
 
   for (const checklist of checklists) {
+    const sport = canonicalChecklistSport(checklist)
     const year = clean(checklist.year) || 'Unknown Year'
     const family = checklistBrandFamily(checklist)
 
+    if (!bySport.has(sport)) bySport.set(sport, new Map())
+    const byYear = bySport.get(sport)!
+
     if (!byYear.has(year)) byYear.set(year, new Map())
     const byBrand = byYear.get(year)!
+
     if (!byBrand.has(family)) byBrand.set(family, [])
     byBrand.get(family)!.push(checklist)
   }
 
-  return Array.from(byYear.entries())
-    .map(([year, brands]) => ({
-      year,
-      brands: Array.from(brands.entries())
-        .map(([brand, rows]) => ({
-          brand,
-          rows: rows.sort((a, b) =>
-            checklistTitle(a).localeCompare(checklistTitle(b), undefined, {
-              numeric: true,
-              sensitivity: 'base',
-            })
-          ),
+  return CHECKLIST_CATEGORIES.map((sport) => {
+    const years = bySport.get(sport) ?? new Map<string, Map<string, ChecklistRow[]>>()
+
+    return {
+      sport,
+      years: Array.from(years.entries())
+        .map(([year, brands]) => ({
+          year,
+          brands: Array.from(brands.entries())
+            .map(([brand, rows]) => ({
+              brand,
+              rows: rows.sort((a, b) =>
+                checklistTitle(a).localeCompare(checklistTitle(b), undefined, {
+                  numeric: true,
+                  sensitivity: 'base',
+                })
+              ),
+            }))
+            .sort((a, b) =>
+              a.brand.localeCompare(b.brand, undefined, {
+                numeric: true,
+                sensitivity: 'base',
+              })
+            ),
         }))
         .sort((a, b) =>
-          a.brand.localeCompare(b.brand, undefined, {
+          b.year.localeCompare(a.year, undefined, {
             numeric: true,
             sensitivity: 'base',
           })
         ),
-    }))
-    .sort((a, b) => {
-      const ay = Number(a.year)
-      const by = Number(b.year)
-      if (Number.isFinite(ay) && Number.isFinite(by)) return by - ay
-      return b.year.localeCompare(a.year)
-    })
+    }
+  })
 }
 
 export default async function ChecklistsPage() {
@@ -139,7 +215,7 @@ export default async function ChecklistsPage() {
   const { data, error } = await supabase
     .from('checklists')
     .select(
-      'id, year, manufacturer, brand, product_name, name, source_type, source_reference, visibility, verified, created_at, is_active'
+      'id, sport, year, manufacturer, brand, product_name, name, source_type, source_reference, visibility, verified, created_at, is_active'
     )
     .eq('is_active', true)
     .order('year', { ascending: false })
@@ -155,8 +231,8 @@ export default async function ChecklistsPage() {
         <div>
           <h1 className="app-title">Checklist Library</h1>
           <p className="app-subtitle">
-            Search every HITS checklist or browse products by year and brand to
-            organize inventory, build sets, and work through breaks.
+            Search every HITS checklist or browse products by sport, year, and brand
+            to organize inventory, build sets, and work through breaks.
           </p>
         </div>
 
@@ -245,92 +321,120 @@ export default async function ChecklistsPage() {
         )}
 
         {!error && checklists.length > 0 && (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {groupedLibrary.map((yearGroup) => (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
+            {groupedLibrary.map((sportGroup) => (
               <details
-                key={yearGroup.year}
+                key={sportGroup.sport}
                 className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/30 open:col-span-full"
               >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 transition hover:bg-zinc-900/70 [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 transition hover:bg-zinc-900/70 [&::-webkit-details-marker]:hidden">
                   <div className="flex items-center gap-2.5">
                     <span className="text-sm text-cyan-300">▶</span>
-                    <span className="text-lg font-bold text-zinc-100">
-                      {yearGroup.year}
+                    <span className="text-xl font-bold text-zinc-100">
+                      {sportGroup.sport}
                     </span>
                   </div>
 
                   <span className="app-badge">
-                    {yearGroup.brands.reduce(
-                      (sum, brandGroup) => sum + brandGroup.rows.length,
+                    {sportGroup.years.reduce(
+                      (sportSum, yearGroup) =>
+                        sportSum +
+                        yearGroup.brands.reduce(
+                          (yearSum, brandGroup) =>
+                            yearSum + brandGroup.rows.length,
+                          0
+                        ),
                       0
                     )}
                   </span>
                 </summary>
 
                 <div className="grid gap-3 border-t border-zinc-800 p-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                  {yearGroup.brands.map((brandGroup) => (
+                  {sportGroup.years.map((yearGroup) => (
                     <details
-                      key={`${yearGroup.year}-${brandGroup.brand}`}
+                      key={`${sportGroup.sport}-${yearGroup.year}`}
                       className="overflow-hidden rounded-xl border border-zinc-800 bg-black/20 open:col-span-full"
                     >
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 transition hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
-                        <div className="flex min-w-0 items-center gap-2.5">
-                          <span className="shrink-0 text-sm text-cyan-300">
-                            ▶
-                          </span>
-                          <span className="min-w-0 font-semibold text-zinc-100">
-                            {brandGroup.brand}
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-sm text-cyan-300">▶</span>
+                          <span className="text-lg font-bold text-zinc-100">
+                            {yearGroup.year}
                           </span>
                         </div>
 
-                        <span className="app-badge">{brandGroup.rows.length}</span>
+                        <span className="app-badge">
+                          {yearGroup.brands.reduce(
+                            (sum, brandGroup) => sum + brandGroup.rows.length,
+                            0
+                          )}
+                        </span>
                       </summary>
 
                       <div className="grid gap-3 border-t border-zinc-800 p-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                        {brandGroup.rows.map((checklist) => {
-                          const meta = checklistMeta(checklist)
-
-                          return (
-                            <ChecklistLoadingLink
-                              key={checklist.id}
-                              href={`/app/checklists/${checklist.id}`}
-                              prefetch={false}
-                              className="block rounded-xl border border-zinc-800 bg-zinc-950/50 p-3 transition hover:border-cyan-700/70 hover:bg-zinc-900/70"
-                            >
-                              <div className="flex h-full flex-col justify-between gap-3">
-                                <div className="min-w-0">
-                                  <h3 className="text-base font-semibold leading-snug text-zinc-100">
-                                    {checklistTitle(checklist)}
-                                  </h3>
-
-                                  {meta && (
-                                    <div className="mt-1 text-xs leading-relaxed text-zinc-400">
-                                      {meta}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="app-badge app-badge-info">
-                                    {checklist.visibility === 'global'
-                                      ? 'HITS Library'
-                                      : 'Private'}
-                                  </span>
-
-                                  {checklist.verified && (
-                                    <span className="app-badge app-badge-success">
-                                      Verified
-                                    </span>
-                                  )}
-
-                                  <span className="ml-auto text-sm font-semibold text-cyan-300">
-                                    Open →
-                                  </span>
-                                </div>
+                        {yearGroup.brands.map((brandGroup) => (
+                          <details
+                            key={`${sportGroup.sport}-${yearGroup.year}-${brandGroup.brand}`}
+                            className="overflow-hidden rounded-xl border border-zinc-800 bg-black/20 open:col-span-full"
+                          >
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 transition hover:bg-zinc-900/60 [&::-webkit-details-marker]:hidden">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <span className="shrink-0 text-sm text-cyan-300">
+                                  ▶
+                                </span>
+                                <span className="min-w-0 font-semibold text-zinc-100">
+                                  {brandGroup.brand}
+                                </span>
                               </div>
-                            </ChecklistLoadingLink>
-                          )
-                        })}
+
+                              <span className="app-badge">
+                                {brandGroup.rows.length}
+                              </span>
+                            </summary>
+
+                            <div className="grid gap-3 border-t border-zinc-800 p-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                              {brandGroup.rows.map((checklist) => {
+                                const meta = checklistMeta(checklist)
+
+                                return (
+                                  <ChecklistLoadingLink
+                                    key={checklist.id}
+                                    href={`/app/checklists/${checklist.id}`}
+                                    prefetch={false}
+                                    className="flex h-full flex-col justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/50 p-3 transition hover:border-cyan-700 hover:bg-zinc-900/60"
+                                  >
+                                    <div className="min-w-0">
+                                      <h3 className="text-base font-semibold leading-snug text-zinc-100">
+                                        {checklistTitle(checklist)}
+                                      </h3>
+
+                                      {meta && (
+                                        <div className="mt-1 text-xs leading-relaxed text-zinc-400">
+                                          {meta}
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="app-badge app-badge-info">
+                                        {checklist.visibility === 'global'
+                                          ? 'HITS Library'
+                                          : 'Private'}
+                                      </span>
+
+                                      {checklist.verified && (
+                                        <span className="app-badge app-badge-success">
+                                          Verified
+                                        </span>
+                                      )}
+                                    </div>
+
+                                  </ChecklistLoadingLink>
+                                )
+                              })}
+                            </div>
+                          </details>
+                        ))}
                       </div>
                     </details>
                   ))}
@@ -341,31 +445,7 @@ export default async function ChecklistsPage() {
         )}
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-3">
-        <div className="app-section p-4">
-          <h2 className="text-base font-semibold">Browse by Team</h2>
-          <p className="mt-1.5 text-sm text-zinc-400">
-            Work through team sets and breaker-style organization, including
-            parent organizations when the checklist provides them.
-          </p>
-        </div>
 
-        <div className="app-section p-4">
-          <h2 className="text-base font-semibold">Browse by Player</h2>
-          <p className="mt-1.5 text-sm text-zinc-400">
-            Find every appearance for a player within a product, including
-            multi-player cards when that information is available.
-          </p>
-        </div>
-
-        <div className="app-section p-4">
-          <h2 className="text-base font-semibold">Browse by Section</h2>
-          <p className="mt-1.5 text-sm text-zinc-400">
-            View base, prospects, Chrome, inserts, autographs, variations, and
-            other sections without flattening the product into one giant list.
-          </p>
-        </div>
-      </section>
     </div>
   )
 }

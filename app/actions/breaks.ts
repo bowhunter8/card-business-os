@@ -1270,6 +1270,8 @@ export async function addBreakChecklistCardsAction(formData: FormData) {
     source_type: string
     source_reference: string | null
     source_break_id: string
+    checklist_id: string | null
+    checklist_item_id: string | null
     product_id: string | null
     item_type: string
     status: string
@@ -1341,6 +1343,8 @@ export async function addBreakChecklistCardsAction(formData: FormData) {
       source_type: 'break',
       source_reference: `checklist_item:${item.id}`,
       source_break_id: breakId,
+      checklist_id: String(item.checklist_id),
+      checklist_item_id: String(item.id),
       product_id: checklist.product_id ? String(checklist.product_id) : null,
       item_type: 'single_card',
       status: normalizedStatus,
@@ -1386,6 +1390,8 @@ export async function addBreakChecklistCardsAction(formData: FormData) {
       source_type: 'break',
       source_reference: null,
       source_break_id: breakId,
+      checklist_id: null,
+      checklist_item_id: null,
       product_id: null,
       item_type: itemType,
       status,

@@ -59,9 +59,29 @@ function fileIdentity(file: File) {
 }
 
 function inferProductIdentity(fileName: string): ProductIdentity {
-  const base = fileName
+  const rawBase = fileName
     .replace(/\.xlsx$/i, '')
     .replace(/\s*\(\d+\)\s*$/i, '')
+    .trim()
+
+  // Detect the stated year/season before normalizing filename separators.
+  // This preserves 2024-25 / 2025-26 instead of turning the hyphen into a space
+  // and accidentally treating the trailing 25/26 as part of the product name.
+  const yearMatch = rawBase.match(
+    /\b((?:19|20)\d{2})(?:\s*[-–—]\s*(\d{2,4}))?\b/
+  )
+
+  const year = yearMatch
+    ? yearMatch[2]
+      ? `${yearMatch[1]}-${yearMatch[2]}`
+      : yearMatch[1]
+    : ''
+
+  const withoutRawYear = yearMatch
+    ? rawBase.replace(yearMatch[0], ' ')
+    : rawBase
+
+  const base = withoutRawYear
     .replace(/[-_]+/g, ' ')
     .replace(/\bchecklist\s+insider\b/gi, ' ')
     .replace(/\bchecklist\b/gi, ' ')
@@ -71,8 +91,7 @@ function inferProductIdentity(fileName: string): ProductIdentity {
     .replace(/\s+/g, ' ')
     .trim()
 
-  const year = base.match(/\b(?:19|20)\d{2}\b/)?.[0] ?? ''
-  const withoutYear = year ? base.replace(year, '').trim() : base
+  const withoutYear = base
   const lower = withoutYear.toLowerCase()
 
   const paniniTerms = [
