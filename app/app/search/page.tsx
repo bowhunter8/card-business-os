@@ -945,7 +945,7 @@ function normalizeSearchValue(value: string | number | null | undefined) {
 function buildSearchTokens(value: string) {
   return Array.from(
     new Set(
-      normalizeSearchText(value)
+      normalizeSearchAliasPhrases(value)
         .split(' ')
         .map((token) => escapeLike(token.trim()))
         .filter((token) => token.length >= 2)
@@ -1003,32 +1003,122 @@ function parseSearchQuery(raw: string) {
   }
 }
 
-function buildTokenVariants(token: string) {
-  const variants = new Set<string>([token])
+const SEARCH_PHRASE_ALIASES: Array<[RegExp, string]> = [
+  [/\ba\s+and\s+g\b/g, 'ag'],
+  [/\ballen\s+and\s+ginter\b/g, 'ag'],
+  [/\ballen\s+ginter\b/g, 'ag'],
+  [/\bb\s+and\s+w\b/g, 'bw'],
+  [/\bblack\s+and\s+white\b/g, 'bw'],
+  [/\ba\s+s\b/g, 'as'],
+  [/\boakland\s+athletics\b/g, 'athletics'],
+  [/\bsacramento\s+athletics\b/g, 'athletics'],
+  [/\bchicago\s+white\s+sox\b/g, 'whitesox'],
+  [/\bwhite\s+sox\b/g, 'whitesox'],
+  [/\bboston\s+red\s+sox\b/g, 'redsox'],
+  [/\bred\s+sox\b/g, 'redsox'],
+  [/\bd\s+backs\b/g, 'dbacks'],
+]
 
-  if (token.endsWith('s') && token.length > 3) variants.add(token.slice(0, -1))
-  if (!token.endsWith('s') && token.length > 3) variants.add(`${token}s`)
+function normalizeSearchAliasPhrases(value: string | number | null | undefined) {
+  let normalized = normalizeSearchText(value)
+
+  for (const [pattern, replacement] of SEARCH_PHRASE_ALIASES) {
+    normalized = normalized.replace(pattern, replacement)
+  }
+
+  return normalized.replace(/\s+/g, ' ').trim()
+}
+
+function buildTokenVariants(token: string) {
+  const normalizedToken = normalizeSearchAliasPhrases(token)
+  const variants = new Set<string>([normalizedToken])
+
+  if (normalizedToken.endsWith('s') && normalizedToken.length > 3) {
+    variants.add(normalizedToken.slice(0, -1))
+  }
+
+  if (!normalizedToken.endsWith('s') && normalizedToken.length > 3) {
+    variants.add(`${normalizedToken}s`)
+  }
 
   const aliases: Record<string, string[]> = {
-    auto: ['autograph'],
-    autograph: ['auto'],
+    auto: ['autograph', 'autographed'],
+    autograph: ['auto', 'autographed'],
+    autographed: ['auto', 'autograph'],
     rc: ['rookie'],
     rookie: ['rc'],
     refractor: ['refr'],
     refr: ['refractor'],
     jr: ['junior'],
     junior: ['jr'],
+
+    as: ['athletics'],
+    athletics: ['as'],
+    dbacks: ['diamondbacks'],
+    diamondbacks: ['dbacks'],
+    chisox: ['whitesox'],
+    whitesox: ['chisox'],
+    bosox: ['redsox'],
+    redsox: ['bosox'],
+
     mariner: ['mariners'],
     mariners: ['mariner'],
     yankee: ['yankees'],
     yankees: ['yankee'],
     dodger: ['dodgers'],
     dodgers: ['dodger'],
+    met: ['mets'],
+    mets: ['met'],
+    padre: ['padres'],
+    padres: ['padre'],
+    phillie: ['phillies'],
+    phillies: ['phillie'],
+    guardian: ['guardians'],
+    guardians: ['guardian'],
+    twin: ['twins'],
+    twins: ['twin'],
+    royal: ['royals'],
+    royals: ['royal'],
+    ranger: ['rangers'],
+    rangers: ['ranger'],
+    tiger: ['tigers'],
+    tigers: ['tiger'],
+    brewer: ['brewers'],
+    brewers: ['brewer'],
+    national: ['nationals'],
+    nationals: ['national'],
+    cardinal: ['cardinals'],
+    cardinals: ['cardinal'],
+    cub: ['cubs'],
+    cubs: ['cub'],
+    giant: ['giants'],
+    giants: ['giant'],
+    ray: ['rays'],
+    rays: ['ray'],
+    oriole: ['orioles'],
+    orioles: ['oriole'],
+    pirate: ['pirates'],
+    pirates: ['pirate'],
+    brave: ['braves'],
+    braves: ['brave'],
+    angel: ['angels'],
+    angels: ['angel'],
+    astro: ['astros'],
+    astros: ['astro'],
+    rockie: ['rockies'],
+    rockies: ['rockie'],
+    marlin: ['marlins'],
+    marlins: ['marlin'],
+
+    ag: ['allen', 'ginter'],
+    bw: ['black', 'white'],
   }
 
-  for (const alias of aliases[token] ?? []) variants.add(alias)
+  for (const alias of aliases[normalizedToken] ?? []) {
+    variants.add(alias)
+  }
 
-  return Array.from(variants)
+  return Array.from(variants).filter(Boolean)
 }
 
 function buildTokenOrFilters(fields: string[], tokens: string[]) {
@@ -1046,7 +1136,9 @@ function buildYearOrFilters(tokens: string[]) {
 }
 
 function buildSearchableText(values: Array<string | number | null | undefined>) {
-  return normalizeSearchText(values.map((value) => String(value ?? '')).join(' '))
+  return normalizeSearchAliasPhrases(
+    values.map((value) => String(value ?? '')).join(' ')
+  )
 }
 
 function tokenMatchesSearchableText(searchableText: string, token: string) {
