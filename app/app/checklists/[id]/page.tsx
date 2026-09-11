@@ -26,6 +26,30 @@ type ChecklistRow = {
   created_at: string
 }
 
+type ChecklistSectionRow = {
+  id: string
+  name: string
+  sort_order: number | null
+}
+
+type ChecklistItemAdminRow = {
+  id: string
+  section_id: string
+  card_number: string | null
+  player_name: string | null
+  printed_team: string | null
+  parallel_name: string | null
+  variation: string | null
+  rookie_flag: boolean
+  auto_flag: boolean
+  relic_flag: boolean
+  serial_flag: boolean
+  print_run: number | null
+  quantity_required: number | null
+  sort_order: number | null
+  notes: string | null
+}
+
 type PageProps = {
   params: Promise<{
     id: string
@@ -35,6 +59,7 @@ type PageProps = {
     buildError?: string | string[]
     editSuccess?: string | string[]
     editError?: string | string[]
+    rowSearch?: string | string[]
   }>
 }
 
@@ -109,7 +134,486 @@ export default async function ChecklistDetailPage({
     : { data: [] }
 
   const adminChecklistOptions = adminChecklistOptionsData ?? []
+  const rowSearch = clean(firstParam(queryParams.rowSearch))
   const meta = checklistMeta(checklist)
+
+  const { data: adminSectionsData } = isAdmin
+    ? await supabase
+        .from('checklist_sections')
+        .select('id, name, sort_order')
+        .eq('checklist_id', checklist.id)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true })
+    : { data: [] }
+
+  const adminSections = (adminSectionsData ?? []) as ChecklistSectionRow[]
+
+  let adminRows: ChecklistItemAdminRow[] = []
+
+  if (isAdmin) {
+    let rowsQuery = supabase
+      .from('checklist_items')
+      .select(
+        'id, section_id, card_number, player_name, printed_team, parallel_name, variation, rookie_flag, auto_flag, relic_flag, serial_flag, print_run, quantity_required, sort_order, notes'
+      )
+      .eq('checklist_id', checklist.id)
+
+    if (rowSearch) {
+      const escaped = rowSearch.replace(/[%_,()]/g, ' ')
+      rowsQuery = rowsQuery.or(
+        `card_number.ilike.%${escaped}%,player_name.ilike.%${escaped}%,printed_team.ilike.%${escaped}%,parallel_name.ilike.%${escaped}%,variation.ilike.%${escaped}%,notes.ilike.%${escaped}%`
+      )
+    }
+
+    const { data: adminRowsData, error: adminRowsError } = await rowsQuery
+      .order('sort_order', { ascending: true })
+      .limit(rowSearch ? 100 : 30)
+
+    if (adminRowsError) {
+      throw new Error(
+        `Unable to load checklist rows for editing: ${adminRowsError.message}`
+      )
+    }
+
+    adminRows = (adminRowsData ?? []) as ChecklistItemAdminRow[]
+  }
+
+
+  async function requireAdminActionUser() {
+    'use server'
+
+    const actionSupabase = await createClient()
+    const {
+      data: { user: actionUser },
+    } = await actionSupabase.auth.getUser()
+
+    if (!actionUser?.email) redirect('/login')
+
+    const { data: actionAppUser } = await actionSupabase
+      .from('app_users')
+      .select('role, is_active')
+      .eq('email', actionUser.email)
+      .maybeSingle()
+
+    const actionIsAdmin =
+      actionAppUser?.is_active === true &&
+      clean(actionAppUser?.role).toLowerCase() === 'admin'
+
+    if (!actionIsAdmin) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Admin access is required to edit checklist rows.'
+        )}`
+      )
+    }
+
+    return actionSupabase
+  }
+
+  async function touchChecklistAfterRowChange(
+    actionSupabase: Awaited<ReturnType<typeof createClient>>
+  ) {
+    'use server'
+
+    const { error } = await actionSupabase
+      .from('checklists')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', checklist.id)
+
+    if (error) {
+      throw new Error(error.message)
+    }
+  }
+
+  async function addChecklistRowAction(formData: FormData) {
+    'use server'
+
+    const actionSupabase = await requireAdminActionUser()
+
+    const sectionId = clean(String(formData.get('section_id') ?? ''))
+    const cardNumber = clean(String(formData.get('card_number') ?? ''))
+    const playerName = clean(String(formData.get('player_name') ?? ''))
+    const printedTeam = clean(String(formData.get('printed_team') ?? ''))
+    const parallelName = clean(String(formData.get('parallel_name') ?? ''))
+    const variation = clean(String(formData.get('variation') ?? ''))
+    const notes = clean(String(formData.get('notes') ?? ''))
+    const printRunRaw = clean(String(formData.get('print_run') ?? ''))
+
+    if (!sectionId) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Choose a section before adding a checklist row.'
+        )}`
+      )
+    }
+
+    if (!cardNumber && !playerName) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Card number or player/item name is required.'
+        )}`
+      )
+    }
+
+    const { data: validSection, error: sectionError } = await actionSupabase
+      .from('checklist_sections')
+      .select('id')
+      .eq('id', sectionId)
+      .eq('checklist_id', checklist.id)
+      .maybeSingle()
+
+    if (sectionError || !validSection) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          sectionError?.message || 'The selected checklist section is invalid.'
+        )}`
+      )
+    }
+
+    const { data: lastRow } = await actionSupabase
+      .from('checklist_items')
+      .select('sort_order')
+      .eq('checklist_id', checklist.id)
+      .order('sort_order', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const nextSortOrder = Math.max(0, Number(lastRow?.sort_order ?? 0)) + 1
+    const parsedPrintRun =
+      printRunRaw && Number.isFinite(Number(printRunRaw))
+        ? Math.max(1, Math.trunc(Number(printRunRaw)))
+        : null
+
+    const { data: insertedRow, error: insertError } = await actionSupabase
+      .from('checklist_items')
+      .insert({
+        checklist_id: checklist.id,
+        section_id: sectionId,
+        card_number: cardNumber || null,
+        player_name: playerName || null,
+        printed_team: printedTeam || null,
+        franchise_id: null,
+        parallel_name: parallelName || null,
+        variation: variation || null,
+        rookie_flag: String(formData.get('rookie_flag') ?? '') === 'on',
+        auto_flag: String(formData.get('auto_flag') ?? '') === 'on',
+        relic_flag: String(formData.get('relic_flag') ?? '') === 'on',
+        serial_flag: String(formData.get('serial_flag') ?? '') === 'on',
+        print_run: parsedPrintRun,
+        quantity_required: 1,
+        sort_order: nextSortOrder,
+        notes: notes || null,
+      })
+      .select('id')
+      .single()
+
+    if (insertError || !insertedRow) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          insertError?.message || 'Unable to add checklist row.'
+        )}`
+      )
+    }
+
+    if (playerName) {
+      const { error: personInsertError } = await actionSupabase
+        .from('checklist_item_people')
+        .insert({
+          checklist_item_id: insertedRow.id,
+          player_name: playerName,
+          printed_team: printedTeam || null,
+          franchise_id: null,
+          sort_order: 1,
+        })
+
+      if (personInsertError) {
+        await actionSupabase
+          .from('checklist_items')
+          .delete()
+          .eq('id', insertedRow.id)
+          .eq('checklist_id', checklist.id)
+
+        redirect(
+          `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+            personInsertError.message
+          )}`
+        )
+      }
+    }
+
+    try {
+      await touchChecklistAfterRowChange(actionSupabase)
+    } catch (error) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          error instanceof Error ? error.message : 'Unable to refresh checklist state.'
+        )}`
+      )
+    }
+
+    revalidatePath(`/app/checklists/${checklist.id}`)
+
+    redirect(
+      `/app/checklists/${checklist.id}?editSuccess=${encodeURIComponent(
+        'Checklist row added.'
+      )}&rowSearch=${encodeURIComponent(cardNumber || playerName)}#admin-row-editor`
+    )
+  }
+
+  async function updateChecklistRowAction(formData: FormData) {
+    'use server'
+
+    const actionSupabase = await requireAdminActionUser()
+
+    const itemId = clean(String(formData.get('item_id') ?? ''))
+    const sectionId = clean(String(formData.get('section_id') ?? ''))
+    const cardNumber = clean(String(formData.get('card_number') ?? ''))
+    const playerName = clean(String(formData.get('player_name') ?? ''))
+    const printedTeam = clean(String(formData.get('printed_team') ?? ''))
+    const parallelName = clean(String(formData.get('parallel_name') ?? ''))
+    const variation = clean(String(formData.get('variation') ?? ''))
+    const notes = clean(String(formData.get('notes') ?? ''))
+    const printRunRaw = clean(String(formData.get('print_run') ?? ''))
+    const currentSearch = clean(String(formData.get('current_search') ?? ''))
+
+    if (!itemId || !sectionId) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Checklist row ID and section are required.'
+        )}`
+      )
+    }
+
+    if (!cardNumber && !playerName) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Card number or player/item name is required.'
+        )}`
+      )
+    }
+
+    const { data: existingRow, error: existingError } = await actionSupabase
+      .from('checklist_items')
+      .select('id')
+      .eq('id', itemId)
+      .eq('checklist_id', checklist.id)
+      .maybeSingle()
+
+    if (existingError || !existingRow) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          existingError?.message || 'Checklist row could not be found.'
+        )}`
+      )
+    }
+
+    const parsedPrintRun =
+      printRunRaw && Number.isFinite(Number(printRunRaw))
+        ? Math.max(1, Math.trunc(Number(printRunRaw)))
+        : null
+
+    const { error: updateError } = await actionSupabase
+      .from('checklist_items')
+      .update({
+        section_id: sectionId,
+        card_number: cardNumber || null,
+        player_name: playerName || null,
+        printed_team: printedTeam || null,
+        parallel_name: parallelName || null,
+        variation: variation || null,
+        rookie_flag: String(formData.get('rookie_flag') ?? '') === 'on',
+        auto_flag: String(formData.get('auto_flag') ?? '') === 'on',
+        relic_flag: String(formData.get('relic_flag') ?? '') === 'on',
+        serial_flag: String(formData.get('serial_flag') ?? '') === 'on',
+        print_run: parsedPrintRun,
+        notes: notes || null,
+      })
+      .eq('id', itemId)
+      .eq('checklist_id', checklist.id)
+
+    if (updateError) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          updateError.message
+        )}`
+      )
+    }
+
+    const { data: peopleRows, error: peopleLoadError } = await actionSupabase
+      .from('checklist_item_people')
+      .select('id, sort_order')
+      .eq('checklist_item_id', itemId)
+      .order('sort_order', { ascending: true })
+
+    if (peopleLoadError) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          peopleLoadError.message
+        )}`
+      )
+    }
+
+    const primaryPerson = (peopleRows ?? [])[0]
+
+    if (primaryPerson) {
+      const { error: personUpdateError } = await actionSupabase
+        .from('checklist_item_people')
+        .update({
+          player_name: playerName || null,
+          printed_team: printedTeam || null,
+        })
+        .eq('id', primaryPerson.id)
+
+      if (personUpdateError) {
+        redirect(
+          `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+            personUpdateError.message
+          )}`
+        )
+      }
+    } else if (playerName) {
+      const { error: personInsertError } = await actionSupabase
+        .from('checklist_item_people')
+        .insert({
+          checklist_item_id: itemId,
+          player_name: playerName,
+          printed_team: printedTeam || null,
+          franchise_id: null,
+          sort_order: 1,
+        })
+
+      if (personInsertError) {
+        redirect(
+          `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+            personInsertError.message
+          )}`
+        )
+      }
+    }
+
+    try {
+      await touchChecklistAfterRowChange(actionSupabase)
+    } catch (error) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          error instanceof Error ? error.message : 'Unable to refresh checklist state.'
+        )}`
+      )
+    }
+
+    revalidatePath(`/app/checklists/${checklist.id}`)
+
+    const searchSuffix = currentSearch
+      ? `&rowSearch=${encodeURIComponent(currentSearch)}`
+      : ''
+
+    redirect(
+      `/app/checklists/${checklist.id}?editSuccess=${encodeURIComponent(
+        'Checklist row updated.'
+      )}${searchSuffix}#admin-row-editor`
+    )
+  }
+
+  async function deleteChecklistRowAction(formData: FormData) {
+    'use server'
+
+    const actionSupabase = await requireAdminActionUser()
+
+    const itemId = clean(String(formData.get('item_id') ?? ''))
+    const currentSearch = clean(String(formData.get('current_search') ?? ''))
+
+    if (!itemId) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'Checklist row ID is required.'
+        )}`
+      )
+    }
+
+    const { data: existingRow, error: existingError } = await actionSupabase
+      .from('checklist_items')
+      .select('id, card_number, player_name')
+      .eq('id', itemId)
+      .eq('checklist_id', checklist.id)
+      .maybeSingle()
+
+    if (existingError || !existingRow) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          existingError?.message || 'Checklist row could not be found.'
+        )}`
+      )
+    }
+
+    const { data: savedMatches, error: savedMatchError } = await actionSupabase
+      .from('checklist_inventory_matches')
+      .select('checklist_item_id')
+      .eq('checklist_item_id', itemId)
+      .limit(1)
+
+    if (savedMatchError) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          savedMatchError.message
+        )}`
+      )
+    }
+
+    if ((savedMatches ?? []).length > 0) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          'This checklist row has saved inventory matches. Edit the row instead of deleting it so inventory links remain safe.'
+        )}&rowSearch=${encodeURIComponent(currentSearch)}#admin-row-editor`
+      )
+    }
+
+    const { error: peopleDeleteError } = await actionSupabase
+      .from('checklist_item_people')
+      .delete()
+      .eq('checklist_item_id', itemId)
+
+    if (peopleDeleteError) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          peopleDeleteError.message
+        )}`
+      )
+    }
+
+    const { error: deleteError } = await actionSupabase
+      .from('checklist_items')
+      .delete()
+      .eq('id', itemId)
+      .eq('checklist_id', checklist.id)
+
+    if (deleteError) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          deleteError.message
+        )}`
+      )
+    }
+
+    try {
+      await touchChecklistAfterRowChange(actionSupabase)
+    } catch (error) {
+      redirect(
+        `/app/checklists/${checklist.id}?editError=${encodeURIComponent(
+          error instanceof Error ? error.message : 'Unable to refresh checklist state.'
+        )}`
+      )
+    }
+
+    revalidatePath(`/app/checklists/${checklist.id}`)
+
+    redirect(
+      `/app/checklists/${checklist.id}?editSuccess=${encodeURIComponent(
+        `Checklist row deleted: ${clean(existingRow.card_number)} ${clean(
+          existingRow.player_name
+        )}`.trim()
+      )}&rowSearch=${encodeURIComponent(currentSearch)}#admin-row-editor`
+    )
+  }
 
   async function updateChecklistMetadataAction(formData: FormData) {
     'use server'
@@ -470,7 +974,7 @@ export default async function ChecklistDetailPage({
                 Edit Checklist
               </summary>
 
-              <div className="absolute right-0 z-50 mt-2 w-[min(92vw,560px)] rounded-xl border border-cyan-900 bg-zinc-950 p-4 shadow-2xl">
+              <div className="absolute right-0 z-50 mt-2 max-h-[82vh] w-[min(96vw,980px)] overflow-y-auto rounded-xl border border-cyan-900 bg-zinc-950 p-4 shadow-2xl">
                 <div className="mb-4">
                   <h2 className="text-lg font-semibold">Edit Checklist Metadata</h2>
                   <p className="mt-1 text-xs text-zinc-400">
@@ -550,6 +1054,327 @@ export default async function ChecklistDetailPage({
                     </button>
                   </div>
                 </form>
+
+                <div id="admin-row-editor" className="my-5 border-t border-zinc-800 pt-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold">Checklist Rows</h3>
+                      <p className="mt-1 max-w-2xl text-xs text-zinc-500">
+                        Admin only. Search, edit, add, or delete individual checklist
+                        rows. HITS keeps the importer permissive; use this area to clean
+                        up false positives or restore a missing card without rebuilding
+                        the whole checklist.
+                      </p>
+                    </div>
+
+                    <form method="get" className="flex min-w-72 gap-2">
+                      <input
+                        name="rowSearch"
+                        defaultValue={rowSearch}
+                        placeholder="Card #, player, team, note..."
+                        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-600"
+                      />
+                      <button type="submit" className="app-button">
+                        Search Rows
+                      </button>
+                    </form>
+                  </div>
+
+                  <details className="mt-4 rounded-xl border border-emerald-900/70 bg-emerald-950/10 p-3">
+                    <summary className="cursor-pointer list-none font-semibold text-emerald-300 [&::-webkit-details-marker]:hidden">
+                      + Add Checklist Row
+                    </summary>
+
+                    <form action={addChecklistRowAction} className="mt-3 space-y-3">
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            Section
+                          </span>
+                          <select
+                            name="section_id"
+                            required
+                            defaultValue={adminSections[0]?.id ?? ''}
+                            className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                          >
+                            {adminSections.map((section) => (
+                              <option key={section.id} value={section.id}>
+                                {section.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            Card #
+                          </span>
+                          <input
+                            name="card_number"
+                            className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                          />
+                        </label>
+
+                        <label className="block md:col-span-2">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            Player / Item
+                          </span>
+                          <input
+                            name="player_name"
+                            className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <input
+                          name="printed_team"
+                          placeholder="Team"
+                          className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                        />
+                        <input
+                          name="parallel_name"
+                          placeholder="Parallel"
+                          className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                        />
+                        <input
+                          name="variation"
+                          placeholder="Variation"
+                          className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                        />
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-[140px_1fr]">
+                        <input
+                          name="print_run"
+                          type="number"
+                          min="1"
+                          placeholder="Print run"
+                          className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                        />
+                        <input
+                          name="notes"
+                          placeholder="Notes"
+                          className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-300">
+                        {[
+                          ['rookie_flag', 'RC'],
+                          ['auto_flag', 'Auto'],
+                          ['relic_flag', 'Relic'],
+                          ['serial_flag', 'Serial'],
+                        ].map(([name, label]) => (
+                          <label key={name} className="flex items-center gap-2">
+                            <input type="checkbox" name={name} />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="submit" className="app-button-primary">
+                          Add Row
+                        </button>
+                      </div>
+                    </form>
+                  </details>
+
+                  <div className="mt-4 text-xs text-zinc-500">
+                    {rowSearch
+                      ? `Showing up to 100 rows matching "${rowSearch}".`
+                      : 'Showing the first 30 rows. Search to find a specific card or suspicious import row.'}
+                  </div>
+
+                  <div className="mt-3 space-y-3">
+                    {adminRows.length === 0 ? (
+                      <div className="rounded-lg border border-zinc-800 bg-black/30 px-3 py-4 text-sm text-zinc-500">
+                        No checklist rows matched this search.
+                      </div>
+                    ) : (
+                      adminRows.map((row) => (
+                        <details
+                          key={row.id}
+                          className="rounded-xl border border-zinc-800 bg-black/30"
+                        >
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                            <div className="min-w-0">
+                              <span className="font-semibold text-cyan-200">
+                                {clean(row.card_number) || 'No #'}
+                              </span>
+                              <span className="mx-2 text-zinc-700">•</span>
+                              <span className="text-zinc-200">
+                                {clean(row.player_name) || 'Unnamed item'}
+                              </span>
+                              {clean(row.printed_team) && (
+                                <span className="ml-2 text-xs text-zinc-500">
+                                  {row.printed_team}
+                                </span>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-xs text-zinc-600">
+                              Edit
+                            </span>
+                          </summary>
+
+                          <form
+                            action={updateChecklistRowAction}
+                            className="space-y-3 border-t border-zinc-800 p-3"
+                          >
+                            <input type="hidden" name="item_id" value={row.id} />
+                            <input
+                              type="hidden"
+                              name="current_search"
+                              value={rowSearch}
+                            />
+
+                            <div className="grid gap-3 md:grid-cols-4">
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                  Section
+                                </span>
+                                <select
+                                  name="section_id"
+                                  defaultValue={row.section_id}
+                                  className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                                >
+                                  {adminSections.map((section) => (
+                                    <option key={section.id} value={section.id}>
+                                      {section.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                  Card #
+                                </span>
+                                <input
+                                  name="card_number"
+                                  defaultValue={clean(row.card_number)}
+                                  className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                                />
+                              </label>
+
+                              <label className="block md:col-span-2">
+                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                  Player / Item
+                                </span>
+                                <input
+                                  name="player_name"
+                                  defaultValue={clean(row.player_name)}
+                                  className="w-full rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-3">
+                              <input
+                                name="printed_team"
+                                defaultValue={clean(row.printed_team)}
+                                placeholder="Team"
+                                className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                              />
+                              <input
+                                name="parallel_name"
+                                defaultValue={clean(row.parallel_name)}
+                                placeholder="Parallel"
+                                className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                              />
+                              <input
+                                name="variation"
+                                defaultValue={clean(row.variation)}
+                                placeholder="Variation"
+                                className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                              />
+                            </div>
+
+                            <div className="grid gap-3 md:grid-cols-[140px_1fr]">
+                              <input
+                                name="print_run"
+                                type="number"
+                                min="1"
+                                defaultValue={row.print_run ?? ''}
+                                placeholder="Print run"
+                                className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                              />
+                              <input
+                                name="notes"
+                                defaultValue={clean(row.notes)}
+                                placeholder="Notes"
+                                className="rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-zinc-100"
+                              />
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-300">
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  name="rookie_flag"
+                                  defaultChecked={row.rookie_flag}
+                                />
+                                RC
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  name="auto_flag"
+                                  defaultChecked={row.auto_flag}
+                                />
+                                Auto
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  name="relic_flag"
+                                  defaultChecked={row.relic_flag}
+                                />
+                                Relic
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  name="serial_flag"
+                                  defaultChecked={row.serial_flag}
+                                />
+                                Serial
+                              </label>
+                            </div>
+
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <button type="submit" className="app-button-primary">
+                                Save Row
+                              </button>
+                            </div>
+                          </form>
+
+                          <form
+                            action={deleteChecklistRowAction}
+                            className="flex items-center justify-between gap-3 border-t border-red-950/70 px-3 py-2"
+                          >
+                            <input type="hidden" name="item_id" value={row.id} />
+                            <input
+                              type="hidden"
+                              name="current_search"
+                              value={rowSearch}
+                            />
+                            <div className="text-xs text-zinc-600">
+                              Delete is blocked when this row has saved inventory matches.
+                            </div>
+                            <button
+                              type="submit"
+                              className="rounded-lg border border-red-900 bg-red-950/30 px-3 py-1.5 text-xs font-semibold text-red-200 hover:bg-red-950/60"
+                            >
+                              Delete Row
+                            </button>
+                          </form>
+                        </details>
+                      ))
+                    )}
+                  </div>
+                </div>
 
                 <div className="my-5 border-t border-zinc-800" />
 

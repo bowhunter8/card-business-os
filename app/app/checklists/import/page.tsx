@@ -20,6 +20,7 @@ type ProductIdentity = {
   year: string
   manufacturer: string
   brand: string
+  checklistSport: string
   productName: string
 }
 
@@ -60,7 +61,7 @@ function fileIdentity(file: File) {
 
 function inferProductIdentity(fileName: string): ProductIdentity {
   const rawBase = fileName
-    .replace(/\.xlsx$/i, '')
+    .replace(/\.(?:xlsx|pdf)$/i, '')
     .replace(/\s*\(\d+\)\s*$/i, '')
     .trim()
 
@@ -127,21 +128,62 @@ function inferProductIdentity(fileName: string): ProductIdentity {
   const isPanini = paniniTerms.some((term) => lower.includes(term))
   const isTopps = !isPanini && toppsTerms.some((term) => lower.includes(term))
 
-  const manufacturer = isPanini ? 'Panini' : isTopps ? 'Topps' : ''
-  const brand = lower.includes('bowman')
-    ? 'Bowman'
-    : isPanini
+  const manufacturer =
+    isPanini
       ? 'Panini'
       : isTopps
         ? 'Topps'
-        : ''
+        : /\bfleer\b/i.test(withoutYear)
+          ? 'Fleer'
+          : ''
 
-  const productName = withoutYear || 'Imported Checklist'
+  const checklistSport =
+    /\bbaseball\b/i.test(withoutYear)
+      ? 'Baseball'
+      : /\bbasketball\b/i.test(withoutYear)
+        ? 'Basketball'
+        : /\bfootball\b/i.test(withoutYear)
+          ? 'Football'
+          : /\bhockey\b/i.test(withoutYear)
+            ? 'Hockey'
+            : /\bsoccer\b/i.test(withoutYear)
+              ? 'Soccer'
+              : ''
+
+  let brand = ''
+
+  if (/\btopps chrome\b/i.test(withoutYear)) {
+    brand = 'Chrome'
+  } else if (/\bbowman chrome\b/i.test(withoutYear)) {
+    brand = 'Bowman Chrome'
+  } else if (/\bbowman\b/i.test(withoutYear)) {
+    brand = 'Bowman'
+  } else if (/\bprizm\b/i.test(withoutYear)) {
+    brand = 'Prizm'
+  } else if (/\bdonruss\b/i.test(withoutYear)) {
+    brand = 'Donruss'
+  } else if (/\bfinest\b/i.test(withoutYear)) {
+    brand = 'Finest'
+  } else if (/\bstadium club\b/i.test(withoutYear)) {
+    brand = 'Stadium Club'
+  } else if (/\bheritage\b/i.test(withoutYear)) {
+    brand = 'Heritage'
+  }
+
+  const productName = [
+    manufacturer,
+    brand,
+    checklistSport,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim() || withoutYear || 'Imported Checklist'
 
   return {
     year,
     manufacturer,
     brand,
+    checklistSport,
     productName,
   }
 }
@@ -159,11 +201,22 @@ function updateIdentityField(
         year: '',
         manufacturer: '',
         brand: '',
+        checklistSport: '',
         productName: '',
       }),
       [field]: value,
     },
   }
+}
+
+function derivedProductName(identity: ProductIdentity) {
+  const parts = [
+    identity.manufacturer.trim(),
+    identity.brand.trim(),
+    identity.checklistSport.trim(),
+  ].filter(Boolean)
+
+  return parts.join(' ').trim() || identity.productName.trim() || 'Imported Checklist'
 }
 
 function isPopupChecklistImport() {
@@ -182,6 +235,7 @@ export default function ChecklistImportPage() {
   const [results, setResults] = useState<ImportResponse[]>([])
   const [inputKey, setInputKey] = useState(0)
   const [identities, setIdentities] = useState<Record<string, ProductIdentity>>({})
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const totalFileSize = useMemo(() => {
     const bytes = files.reduce((sum, file) => sum + file.size, 0)
@@ -197,13 +251,14 @@ export default function ChecklistImportPage() {
     event.preventDefault()
 
     if (files.length === 0) {
-      alert('Choose one or more checklist XLSX files first.')
+      alert('Choose one or more checklist XLSX or PDF files first.')
       return
     }
 
-    const unsupported = files.filter(
-      (file) => !file.name.toLowerCase().endsWith('.xlsx')
-    )
+    const unsupported = files.filter((file) => {
+      const lowerName = file.name.toLowerCase()
+      return !lowerName.endsWith('.xlsx') && !lowerName.endsWith('.pdf')
+    })
 
     if (unsupported.length > 0) {
       setResults([
@@ -211,7 +266,7 @@ export default function ChecklistImportPage() {
           ok: false,
           error: `Unsupported file${unsupported.length === 1 ? '' : 's'}: ${unsupported
             .map((file) => file.name)
-            .join(', ')}. HITS currently accepts XLSX checklist files.`,
+            .join(', ')}. HITS currently accepts XLSX and PDF checklist files.`,
         },
       ])
       return
@@ -221,6 +276,7 @@ export default function ChecklistImportPage() {
     setPopupMode(currentPopupMode)
     setImporting(true)
     setResults([])
+    setSuccessMessage(null)
 
     const completedResults: ImportResponse[] = []
     const successfulChecklistIds: string[] = []
@@ -240,7 +296,8 @@ export default function ChecklistImportPage() {
               year: identity.year.trim(),
               manufacturer: identity.manufacturer.trim(),
               brand: identity.brand.trim(),
-              productName: identity.productName.trim(),
+              checklistSport: identity.checklistSport.trim(),
+              productName: derivedProductName(identity),
             })
           )
 
@@ -308,6 +365,15 @@ export default function ChecklistImportPage() {
         }
       }
 
+      if (successfulChecklistIds.length > 0) {
+        const importedCount = successfulChecklistIds.length
+        setSuccessMessage(
+          importedCount === 1
+            ? 'Checklist imported successfully.'
+            : `${importedCount} checklists imported successfully.`
+        )
+      }
+
       if (
         successfulChecklistIds.length > 0 &&
         isPopupChecklistImport() &&
@@ -333,17 +399,33 @@ export default function ChecklistImportPage() {
     setFiles([])
     setIdentities({})
     setResults([])
+    setSuccessMessage(null)
     setInputKey((value) => value + 1)
   }
 
 
   return (
     <div className="app-page-wide space-y-5">
+      {importing && (
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="flex min-w-72 flex-col items-center gap-4 rounded-2xl border border-cyan-800 bg-zinc-950 px-8 py-7 shadow-2xl">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-zinc-700 border-t-cyan-300" />
+            <div className="text-center">
+              <div className="text-base font-semibold text-zinc-100">
+                Importing checklist{files.length === 1 ? '' : 's'}...
+              </div>
+              <div className="mt-1 text-sm text-zinc-400">
+                HITS is reading and validating the checklist file. Please wait.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="app-page-header">
         <div>
           <h1 className="app-title">Import Checklist</h1>
           <p className="app-subtitle">
-            Upload one or more XLSX checklists. HITS identifies each workbook automatically.
+            Upload one or more XLSX or PDF checklists. HITS identifies each file automatically.
           </p>
         </div>
 
@@ -366,10 +448,11 @@ export default function ChecklistImportPage() {
         <div>
           <h2 className="text-lg font-semibold">Checklist Files</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Original, unmodified XLSX files from the manufacturer or an established
-            checklist provider are preferred. HITS looks for real checklist structure
-            such as card numbers, player or item names, sections, and team data, and
-            safely rejects workbooks it cannot identify with confidence.
+            Original checklist files from the manufacturer or an established provider
+            are preferred. HITS supports structured XLSX workbooks and text-based PDFs,
+            looks for real checklist structure such as card numbers, player or item names,
+            sections, and team data, and safely rejects files it cannot identify with
+            confidence.
           </p>
         </div>
 
@@ -383,6 +466,9 @@ export default function ChecklistImportPage() {
           <span className="rounded-full border border-emerald-800 bg-emerald-950/30 px-2.5 py-1 text-xs font-semibold text-emerald-200">
             Checklist Insider XLSX · Supported
           </span>
+          <span className="rounded-full border border-cyan-800 bg-cyan-950/30 px-2.5 py-1 text-xs font-semibold text-cyan-200">
+            Text-based PDF · Supported
+          </span>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -392,14 +478,14 @@ export default function ChecklistImportPage() {
             </label>
 
             <div className="mt-1 text-sm text-zinc-400">
-              Select as many XLSX checklists as you want. Browse again to add more files to the queue. Duplicate selections are ignored, and one failed file will not stop the others.
+              Select as many XLSX or PDF checklists as you want. Browse again to add more files to the queue. Duplicate selections are ignored, and one failed file will not stop the others.
             </div>
 
             <input
               key={inputKey}
               type="file"
               multiple
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".xlsx,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"
               onChange={(event) => {
                 const newlySelected = Array.from(event.target.files ?? [])
 
@@ -449,6 +535,7 @@ export default function ChecklistImportPage() {
                   return (
                     <details
                       key={key}
+                      open
                       className="overflow-hidden rounded-xl border border-cyan-900/60 bg-cyan-950/20"
                     >
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm text-zinc-200 [&::-webkit-details-marker]:hidden">
@@ -457,7 +544,12 @@ export default function ChecklistImportPage() {
                             {file.name}
                           </div>
                           <div className="mt-0.5 truncate text-xs text-zinc-400">
-                            {[identity.year, identity.brand || identity.manufacturer, identity.productName]
+                            {[
+                              identity.year,
+                              identity.manufacturer,
+                              identity.brand,
+                              identity.checklistSport,
+                            ]
                               .filter(Boolean)
                               .join(' • ') || 'Product identity needs review'}
                           </div>
@@ -496,7 +588,11 @@ export default function ChecklistImportPage() {
                         </div>
                       </summary>
 
-                      <div className="grid gap-3 border-t border-cyan-900/60 p-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="border-t border-cyan-900/60 bg-cyan-950/10 px-3 pt-3 text-xs text-cyan-100">
+                        Confirm the checklist identity before importing. Year, Manufacturer, Set, and Checklist Sport give HITS a reliable product identity even when the file name is vague or the source is an older PDF.
+                      </div>
+
+                      <div className="grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-4">
                         <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                           Year
                           <input
@@ -540,7 +636,7 @@ export default function ChecklistImportPage() {
                         </label>
 
                         <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Brand Family
+                          Set
                           <input
                             type="text"
                             value={identity.brand}
@@ -556,33 +652,33 @@ export default function ChecklistImportPage() {
                               )
                             }
                             className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
-                            placeholder="Topps, Bowman, Panini..."
+                            placeholder="Chrome, Prizm, Finest..."
                           />
                         </label>
 
                         <label className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                          Product Name
+                          Checklist Sport
                           <input
                             type="text"
-                            value={identity.productName}
+                            value={identity.checklistSport}
                             disabled={importing}
                             onChange={(event) =>
                               setIdentities((current) =>
                                 updateIdentityField(
                                   current,
                                   key,
-                                  'productName',
+                                  'checklistSport',
                                   event.target.value
                                 )
                               )
                             }
                             className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-normal normal-case tracking-normal text-zinc-100 outline-none focus:border-cyan-600"
-                            placeholder="Stadium Club Baseball"
+                            placeholder="Baseball"
                           />
                         </label>
 
                         <div className="sm:col-span-2 xl:col-span-4 text-xs text-zinc-500">
-                          HITS pre-fills these from the file name and workbook. Edit them only when the product identity is wrong.
+                          HITS pre-fills these when possible, but you can always correct them here. For example: 2026 • Topps • Chrome • Baseball. Older products may not have a separate Set, so that field can be left blank.
                         </div>
                       </div>
                     </details>
@@ -610,9 +706,10 @@ export default function ChecklistImportPage() {
         </form>
 
         <p className="text-xs text-zinc-500">
-          Worksheet names help HITS organize a checklist, but the card-row structure
-          determines whether a file is safe to import. Team data is helpful but is
-          not required.
+          HITS keeps the existing structured XLSX import paths and also accepts
+          text-based PDFs. Card-row structure determines whether a file is safe to
+          import. Team data and richer checklist details are helpful but are not required.
+          Image-only or scanned PDFs are rejected rather than guessed at.
         </p>
       </section>
 
@@ -716,6 +813,31 @@ export default function ChecklistImportPage() {
             })}
           </div>
         </section>
+      )}
+
+      {successMessage && !importing && (
+        <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-emerald-800 bg-zinc-950 p-6 shadow-2xl">
+            <div className="text-lg font-semibold text-emerald-300">
+              Import Successful
+            </div>
+            <div className="mt-2 text-sm text-zinc-300">
+              {successMessage}
+            </div>
+            <div className="mt-2 text-xs text-zinc-500">
+              Review the import results below or open the checklist to verify the imported rows.
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                className="app-button-primary"
+                onClick={() => setSuccessMessage(null)}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

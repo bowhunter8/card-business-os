@@ -79,6 +79,7 @@ type ProductMetadataOverride = {
   year?: string
   manufacturer?: string
   brand?: string
+  checklistSport?: string
   productName?: string
 }
 
@@ -1044,7 +1045,7 @@ function inferSportOrGameFromName(value: string) {
 
 function inferProductMetadata(fileName: string): ProductMetadata {
   const rawBase = fileName
-    .replace(/\.xlsx$/i, '')
+    .replace(/\.(?:xlsx|pdf)$/i, '')
     .replace(/[_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -1170,11 +1171,12 @@ function applyProductMetadataOverride(
   const year = text(override.year) || metadata.year
   const manufacturer = text(override.manufacturer) || metadata.manufacturer
   const brand = text(override.brand) || metadata.brand
+  const checklistSport = text(override.checklistSport) || metadata.sportOrGame
   const productName = text(override.productName) || metadata.productName
 
   return buildProductKey({
     category: metadata.category,
-    sportOrGame: metadata.sportOrGame,
+    sportOrGame: checklistSport,
     year,
     manufacturer,
     brand,
@@ -3188,6 +3190,471 @@ function parseSimpleChecklistSheet(
 }
 
 
+
+type InlineChecklistEntry = {
+  cardNumber: string
+  playerName: string
+  marker: string
+}
+
+type PdfTextFragment = {
+  text: string
+  x: number
+  y: number
+}
+
+const LEGACY_TRAILING_MARKERS = new Set([
+  'RC',
+  'SP',
+  'SSP',
+  'CL',
+  'UER',
+  'ERR',
+  'COR',
+  'VAR',
+])
+
+function looksLikeInlineCardIdentifier(value: string) {
+  const cleaned = value.trim().replace(/^#/, '')
+  if (!cleaned) return false
+
+  if (/^NNO$/i.test(cleaned)) return true
+  if (/^\d{1,6}$/.test(cleaned)) return true
+
+  // Legacy and modern card IDs commonly look like SP1, ATT-1, US1,
+  // 91CB-13, CPA-GJ, etc. For inline splitting, require at least one digit
+  // so flags such as RC/SP are not mistaken for the next card number.
+  if (!/^[A-Za-z0-9]{1,14}(?:-[A-Za-z0-9]{1,14}){0,3}$/.test(cleaned)) {
+    return false
+  }
+
+  return /\d/.test(cleaned)
+}
+
+function splitLegacyPlayerMarkers(value: string) {
+  let playerName = value.trim().replace(/\s+/g, ' ')
+  const markers: string[] = []
+
+  // Pull only well-known checklist markers from the END of the name.
+  // Do not disturb suffixes such as Jr., III, etc.
+  while (playerName) {
+    const match = playerName.match(/(?:\s|,)+(RC|SP|SSP|CL|UER|ERR|COR|VAR)\.?$/i)
+    if (!match) break
+
+    const marker = match[1].toUpperCase()
+    if (!LEGACY_TRAILING_MARKERS.has(marker)) break
+
+    markers.unshift(marker)
+    playerName = playerName.slice(0, match.index).trim()
+  }
+
+  return {
+    playerName,
+    marker: markers.join(', '),
+  }
+}
+
+function parseInlineChecklistEntries(value: string) {
+  const normalized = value
+    .replace(/[\u00A0\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!normalized) return [] as InlineChecklistEntry[]
+
+  const tokens = normalized.split(' ')
+  const starts: number[] = []
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (looksLikeInlineCardIdentifier(tokens[index])) {
+      starts.push(index)
+    }
+  }
+
+  if (starts.length === 0) return [] as InlineChecklistEntry[]
+
+  const entries: InlineChecklistEntry[] = []
+
+  for (let startIndex = 0; startIndex < starts.length; startIndex += 1) {
+    const tokenIndex = starts[startIndex]
+    const nextTokenIndex = starts[startIndex + 1] ?? tokens.length
+    const cardNumber = tokens[tokenIndex].replace(/^#/, '').trim()
+    const rawPlayer = tokens.slice(tokenIndex + 1, nextTokenIndex).join(' ').trim()
+
+    if (!cardNumber || !rawPlayer) continue
+
+    const split = splitLegacyPlayerMarkers(rawPlayer)
+    if (!split.playerName) continue
+
+    // Obvious webpage/PDF chrome should never become checklist cards.
+    const lowerPlayer = split.playerName.toLowerCase()
+    if (
+      lowerPlayer.includes('http://') ||
+      lowerPlayer.includes('https://') ||
+      lowerPlayer.includes('www.') ||
+      lowerPlayer.includes('trading card database') ||
+      lowerPlayer === 'of' ||
+      /^\d+\s+of\s+\d+$/i.test(split.playerName) ||
+      /^\d{1,2}\/\d{1,2}\/\d{2,4}(?:\b|,)/i.test(split.playerName)
+    ) {
+      continue
+    }
+
+    entries.push({
+      cardNumber,
+      playerName: split.playerName,
+      marker: split.marker,
+    })
+  }
+
+  return entries
+}
+
+function looksLikeInlineChecklistRows(rows: SheetRow[]) {
+  let matches = 0
+
+  for (const row of rows.slice(0, 500)) {
+    const nonBlank = row.map((value) => text(value)).filter(Boolean)
+    if (nonBlank.length !== 1) continue
+
+    const entries = parseInlineChecklistEntries(nonBlank[0])
+    if (entries.length > 0) matches += entries.length
+  }
+
+  return matches >= 5
+}
+
+function parseInlineChecklistRows(
+  rows: SheetRow[],
+  sectionName: string,
+  stats: ImportStats,
+  startingSortOrder: number
+) {
+  const items: ParsedItem[] = []
+  const sections = [sectionName || 'Base Set']
+  const seenItems = new Set<string>()
+  let sortOrder = startingSortOrder
+
+  for (const row of rows) {
+    stats.totalRowsSeen += 1
+
+    const nonBlank = row.map((value) => text(value)).filter(Boolean)
+    if (nonBlank.length !== 1) continue
+
+    const entries = parseInlineChecklistEntries(nonBlank[0])
+
+    for (const entry of entries) {
+      const key = itemKey(sectionName, entry.cardNumber, entry.playerName)
+      if (seenItems.has(key)) {
+        stats.skippedRows += 1
+        continue
+      }
+
+      seenItems.add(key)
+      sortOrder += 1
+
+      const flags = flagsFromRow(sectionName, entry.marker)
+
+      items.push({
+        sectionName,
+        cardNumber: entry.cardNumber,
+        playerName: entry.playerName,
+        printedTeam: null,
+        rookieFlag: flags.rookieFlag,
+        autoFlag: flags.autoFlag,
+        relicFlag: flags.relicFlag,
+        serialFlag: flags.serialFlag,
+        printRun: parsePrintRun(entry.marker),
+        variation: null,
+        parallelName: null,
+        notes: entry.marker || null,
+        sortOrder,
+        people: [],
+      })
+
+      stats.normalizedRows += 1
+    }
+  }
+
+  return { sections, items, sortOrder }
+}
+
+function buildPdfTextLines(fragments: PdfTextFragment[]) {
+  const sorted = [...fragments].sort((left, right) => {
+    const yDifference = right.y - left.y
+    if (Math.abs(yDifference) > 2.5) return yDifference
+    return left.x - right.x
+  })
+
+  const lines: Array<{ y: number; fragments: PdfTextFragment[] }> = []
+
+  for (const fragment of sorted) {
+    const existing = lines.find((line) => Math.abs(line.y - fragment.y) <= 2.5)
+
+    if (existing) {
+      existing.fragments.push(fragment)
+      continue
+    }
+
+    lines.push({ y: fragment.y, fragments: [fragment] })
+  }
+
+  return lines
+    .sort((left, right) => right.y - left.y)
+    .map((line) =>
+      line.fragments
+        .sort((left, right) => left.x - right.x)
+        .map((fragment) => fragment.text.trim())
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+    .filter(Boolean)
+}
+
+async function extractPdfTextLines(buffer: Buffer) {
+  // pdfjs-dist is loaded only for PDF imports so the existing XLSX path is
+  // unchanged. Next.js does not always trace PDF.js's runtime worker import
+  // into the server bundle, which can cause "Setting up fake worker failed".
+  // Import the worker with a static specifier first and register it globally so
+  // PDF.js uses the already-loaded main-thread worker handler instead of trying
+  // to resolve pdf.worker.mjs from Next's generated vendor-chunks directory.
+  // pdfjs-dist does not currently ship a declaration file for this worker
+  // entry point. Keep the static import so Next.js traces it into the server
+  // bundle, and suppress only the missing-type declaration warning.
+  // @ts-expect-error - pdfjs-dist worker entry has no bundled TypeScript declaration.
+  const pdfWorker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+
+  ;(
+    globalThis as typeof globalThis & {
+      pdfjsWorker?: typeof pdfWorker
+    }
+  ).pdfjsWorker = pdfWorker
+
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+  })
+  const document = await loadingTask.promise
+
+  if (document.numPages > 500) {
+    await loadingTask.destroy()
+    throw new Error('The PDF contains more than 500 pages and was rejected.')
+  }
+
+  const lines: string[] = []
+
+  try {
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber)
+      const content = await page.getTextContent()
+      const fragments: PdfTextFragment[] = []
+
+      for (const item of content.items) {
+        if (!('str' in item)) continue
+        const value = String(item.str ?? '').trim()
+        if (!value) continue
+
+        const transform = Array.isArray(item.transform) ? item.transform : []
+        const x = Number(transform[4] ?? 0)
+        const y = Number(transform[5] ?? 0)
+
+        fragments.push({ text: value, x, y })
+      }
+
+      lines.push(...buildPdfTextLines(fragments))
+      page.cleanup()
+    }
+  } finally {
+    document.cleanup()
+    await loadingTask.destroy()
+  }
+
+  return lines
+}
+
+
+function compareChecklistCardNumbers(left: string, right: string) {
+  const a = left.trim().replace(/^#/, '')
+  const b = right.trim().replace(/^#/, '')
+
+  const aIsNno = /^NNO$/i.test(a)
+  const bIsNno = /^NNO$/i.test(b)
+
+  if (aIsNno && !bIsNno) return 1
+  if (!aIsNno && bIsNno) return -1
+  if (aIsNno && bIsNno) return 0
+
+  const aNumeric = /^\d+$/.test(a) ? Number(a) : null
+  const bNumeric = /^\d+$/.test(b) ? Number(b) : null
+
+  if (aNumeric !== null && bNumeric !== null) {
+    return aNumeric - bNumeric
+  }
+
+  if (aNumeric !== null && bNumeric === null) return -1
+  if (aNumeric === null && bNumeric !== null) return 1
+
+  return a.localeCompare(b, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  })
+}
+
+function sortPdfChecklistItems(items: ParsedItem[]) {
+  items.sort((left, right) => {
+    const cardComparison = compareChecklistCardNumbers(
+      left.cardNumber,
+      right.cardNumber
+    )
+
+    if (cardComparison !== 0) return cardComparison
+
+    return left.playerName.localeCompare(right.playerName, undefined, {
+      sensitivity: 'base',
+    })
+  })
+
+  items.forEach((item, index) => {
+    item.sortOrder = index + 1
+  })
+}
+
+async function handlePdfChecklistImport(params: {
+  uploaded: File
+  buffer: Buffer
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+  metadataOverride?: ProductMetadataOverride | null
+}) {
+  const { uploaded, buffer, supabase, userId, metadataOverride } = params
+  const stats = newStats()
+  const lines = await extractPdfTextLines(buffer)
+
+  if (lines.length === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          'HITS could not find selectable text in this PDF. It may be a scanned/image-only PDF. Nothing was imported.',
+      },
+      { status: 400 }
+    )
+  }
+
+  const metadata = applyProductMetadataOverride(
+    inferProductMetadata(uploaded.name),
+    metadataOverride
+  )
+  const sectionName = 'Base Set'
+  const seenItems = new Set<string>()
+  const items: ParsedItem[] = []
+  let sortOrder = 0
+
+  for (const line of lines) {
+    stats.totalRowsSeen += 1
+    const entries = parseInlineChecklistEntries(line)
+
+    for (const entry of entries) {
+      // PDF headers often repeat the product year and title. When the parsed
+      // identifier exactly equals the confirmed product year, treat it as
+      // document chrome rather than a checklist card.
+      if (
+        metadata.year &&
+        normalizedKey(entry.cardNumber) === normalizedKey(metadata.year) &&
+        normalizedKey(entry.playerName).includes(normalizedKey(metadata.productName))
+      ) {
+        continue
+      }
+
+      const key = itemKey(sectionName, entry.cardNumber, entry.playerName)
+      if (seenItems.has(key)) {
+        stats.skippedRows += 1
+        continue
+      }
+
+      seenItems.add(key)
+      sortOrder += 1
+      const flags = flagsFromRow(sectionName, entry.marker)
+
+      items.push({
+        sectionName,
+        cardNumber: entry.cardNumber,
+        playerName: entry.playerName,
+        printedTeam: null,
+        rookieFlag: flags.rookieFlag,
+        autoFlag: flags.autoFlag,
+        relicFlag: flags.relicFlag,
+        serialFlag: flags.serialFlag,
+        printRun: parsePrintRun(entry.marker),
+        variation: null,
+        parallelName: null,
+        notes: entry.marker || null,
+        sortOrder,
+        people: [],
+      })
+
+      stats.normalizedRows += 1
+    }
+  }
+
+  sortPdfChecklistItems(items)
+
+  if (items.length < 5) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          'HITS found PDF text but could not confidently identify enough repeated card-number + player/item rows. Nothing was imported.',
+        files: [{ fileName: uploaded.name, ...stats }],
+      },
+      { status: 400 }
+    )
+  }
+
+  const parsed = { sections: [sectionName], items }
+  validateParsedChecklistStructure(parsed, 'PDF checklist validation')
+
+  const persisted = await persistChecklist({
+    supabase,
+    userId,
+    uploadedName: uploaded.name,
+    metadata,
+    parsed,
+    stats,
+    sourceType: 'generic',
+    importFormat: 'pdf',
+    checklistNotes:
+      'Imported directly from a text-based PDF checklist. HITS used repeated card-number + player/item identity as the safe fallback structure.',
+    importNotes:
+      `PDF text lines inspected: ${stats.totalRowsSeen}. ` +
+      'Direct PDF import preserves the existing XLSX import paths and is used only for PDF uploads.',
+  })
+
+  return NextResponse.json({
+    ok: true,
+    detectedSource: 'Text-based PDF checklist',
+    checklistId: persisted.checklist.id,
+    checklistName: persisted.checklist.name,
+    productId: persisted.product.id,
+    productName: persisted.product.display_name,
+    importMode: persisted.importMode,
+    files: [{ fileName: uploaded.name, ...stats }],
+    totals: {
+      files: 1,
+      totalRowsSeen: stats.totalRowsSeen,
+      normalizedRows: stats.normalizedRows,
+      insertedRows: stats.insertedRows,
+      skippedRows: stats.skippedRows,
+      sectionsCreated: stats.sectionsCreated,
+      checklistItemsCreated: stats.checklistItemsCreated,
+      teamRowsSeen: stats.teamRowsSeen,
+    },
+  })
+}
+
 function inferStructuredMetadataFromRows(
   fileName: string,
   rows: SheetRow[]
@@ -3755,6 +4222,26 @@ async function handleStructuredWorkbookImport(params: {
       const parsed = parseSimpleChecklistSheet(
         rows,
         sheetName,
+        stats,
+        runningSortOrder
+      )
+      runningSortOrder = parsed.sortOrder
+      parsedSheet = parsed
+      metadataRows ??= rows
+    }
+
+    // Additive legacy fallback: many older checklist exports/conversions put
+    // the entire identity in one cell, for example "43 Maury Wills RC" or
+    // "SP1 Michael Jordan". Only use this after every richer existing parser
+    // has declined the worksheet.
+    if (!parsedSheet && looksLikeInlineChecklistRows(rows)) {
+      qualifyingSheets += 1
+      const safeSectionName = isTrustworthySectionHeading(sheetName)
+        ? sheetName
+        : 'Base Set'
+      const parsed = parseInlineChecklistRows(
+        rows,
+        safeSectionName,
         stats,
         runningSortOrder
       )
@@ -4397,12 +4884,16 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!uploaded.name.toLowerCase().endsWith('.xlsx')) {
+    const lowerFileName = uploaded.name.toLowerCase()
+    const isPdf = lowerFileName.endsWith('.pdf')
+    const isXlsx = lowerFileName.endsWith('.xlsx')
+
+    if (!isPdf && !isXlsx) {
       return NextResponse.json(
         {
           ok: false,
           error:
-            'Unsupported checklist format. HITS currently supports Beckett and Checklist Insider XLSX checklist files.',
+            'Unsupported checklist format. HITS currently accepts XLSX or text-based PDF checklist files.',
         },
         { status: 400 }
       )
@@ -4412,13 +4903,26 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'The checklist workbook is empty or larger than the 15 MB import limit.',
+          error: 'The checklist file is empty or larger than the 15 MB import limit.',
         },
         { status: 400 }
       )
     }
 
     const buffer = Buffer.from(await uploaded.arrayBuffer())
+
+    // PDF is a new additive path. Existing XLSX recognition and source-specific
+    // adapters below remain unchanged.
+    if (isPdf) {
+      return handlePdfChecklistImport({
+        uploaded,
+        buffer,
+        supabase,
+        userId: user.id,
+        metadataOverride,
+      })
+    }
+
     validateXlsxArchive(buffer)
 
     const sheetNames = readWorkbookSheetNames(buffer)
