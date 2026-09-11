@@ -324,6 +324,7 @@ export default function ChecklistBreakEntry({
   const [editingReceived, setEditingReceived] = useState(false)
   const [receivedMessage, setReceivedMessage] = useState<string | null>(null)
   const [isSavingReceived, startSavingReceived] = useTransition()
+  const [isSavingChecklist, setIsSavingChecklist] = useState(false)
   const [savedByChecklistItem, setSavedByChecklistItem] = useState<Record<string, number>>({})
   const [alreadyEnteredCount, setAlreadyEnteredCount] = useState(0)
   const [progressReady, setProgressReady] = useState(false)
@@ -1234,8 +1235,11 @@ export default function ChecklistBreakEntry({
 
       if (!confirmed) {
         event.preventDefault()
+        return
       }
     }
+
+    setIsSavingChecklist(true)
   }
 
   return (
@@ -1244,6 +1248,30 @@ export default function ChecklistBreakEntry({
       onSubmit={handleChecklistSubmit}
       className="space-y-4"
     >
+      {isSavingChecklist && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-label="Saving checklist items to inventory"
+        >
+          <div className="flex min-w-72 flex-col items-center gap-4 rounded-2xl border border-zinc-700 bg-zinc-950 px-8 py-7 shadow-2xl">
+            <span
+              className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-700 border-t-cyan-300"
+              aria-hidden="true"
+            />
+            <div className="text-center">
+              <div className="font-semibold text-zinc-100">
+                Saving Items to Inventory...
+              </div>
+              <div className="mt-1 text-sm text-zinc-500">
+                Please wait while HITS saves this checklist entry.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <input type="hidden" name="break_id" value={breakId} />
       <input type="hidden" name="cards_received" value={receivedCount} />
       <input type="hidden" name="entry_mode" value="checklist" />
@@ -2022,11 +2050,23 @@ export default function ChecklistBreakEntry({
 
         <button
           type="submit"
-          className="app-button-primary"
+          className="app-button-primary inline-flex items-center justify-center gap-2"
           suppressHydrationWarning
-          disabled={!progressReady || totalEnteredQuantity <= 0}
+          disabled={
+            isSavingChecklist || !progressReady || totalEnteredQuantity <= 0
+          }
         >
-          Save All Items To Inventory
+          {isSavingChecklist ? (
+            <>
+              <span
+                className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                aria-hidden="true"
+              />
+              Saving...
+            </>
+          ) : (
+            'Save All Items To Inventory'
+          )}
         </button>
       </div>
     </form>
