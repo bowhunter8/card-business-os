@@ -1,12 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 
 export default function NavigationLoader() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const searchParamsKey = searchParams?.toString() ?? ''
   const [loading, setLoading] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -34,9 +32,28 @@ export default function NavigationLoader() {
 
   useEffect(() => {
     stopLoading()
-  }, [pathname, searchParamsKey])
+  }, [pathname])
 
   useEffect(() => {
+    const originalPushState = window.history.pushState
+    const originalReplaceState = window.history.replaceState
+
+    function handleUrlChange() {
+      stopLoading()
+    }
+
+    window.history.pushState = function (...args) {
+      originalPushState.apply(this, args)
+      handleUrlChange()
+    }
+
+    window.history.replaceState = function (...args) {
+      originalReplaceState.apply(this, args)
+      handleUrlChange()
+    }
+
+    window.addEventListener('popstate', handleUrlChange)
+
     function handleClick(event: MouseEvent) {
       const target = event.target as HTMLElement | null
       if (!target) return
@@ -86,6 +103,10 @@ export default function NavigationLoader() {
 
     return () => {
       window.removeEventListener('click', handleClick)
+      window.removeEventListener('popstate', handleUrlChange)
+
+      window.history.pushState = originalPushState
+      window.history.replaceState = originalReplaceState
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
