@@ -319,6 +319,8 @@ export default function ChecklistBreakEntry({
   const [checklistBrowseMode, setChecklistBrowseMode] =
     useState<ChecklistBrowseMode>('team')
   const [checklistCardSearch, setChecklistCardSearch] = useState('')
+  const [highlightedChecklistItemId, setHighlightedChecklistItemId] =
+    useState<string | null>(null)
   const [entries, setEntries] = useState<EntryState>({})
   const [parallelEntries, setParallelEntries] =
     useState<ParallelEntryState>({})
@@ -610,7 +612,13 @@ export default function ChecklistBreakEntry({
   ])
 
   useEffect(() => {
+    // Let the local checklist draft finish restoring first, then apply the
+    // database-backed saved progress. This prevents an older autosaved draft
+    // from restoring quantities after saved progress already cleared them.
+    if (!draftReady) return
+
     let cancelled = false
+    setProgressReady(false)
 
     async function loadSavedProgress() {
       const result = await getBreakChecklistEntryProgressAction(breakId)
@@ -629,6 +637,9 @@ export default function ChecklistBreakEntry({
       // Only clear base checklist quantities whose exact checklist item is
       // already saved. Manual inventory must never erase an unsaved checklist
       // draft when the user switches between entry modes.
+      //
+      // This cleanup now runs after draft restoration, so database progress
+      // remains authoritative instead of being overwritten by stale local data.
       if (result.alreadyEntered > 0) {
         setEntries((current) => {
           const next = { ...current }
@@ -653,7 +664,7 @@ export default function ChecklistBreakEntry({
     return () => {
       cancelled = true
     }
-  }, [breakId, draftStorageKey])
+  }, [breakId, draftReady])
 
   const checklistById = useMemo(
     () => new Map(availableChecklists.map((checklist) => [checklist.id, checklist])),
@@ -1304,12 +1315,34 @@ export default function ChecklistBreakEntry({
     setChecklistBrowseMode('team')
     setSelectedTeam(team)
     setSelectedSectionId(sectionId)
+    setHighlightedChecklistItemId(item.id)
 
-    window.setTimeout(() => {
-      document
-        .getElementById('checklist-break-browser')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 50)
+    const targetId = `checklist-break-item-${item.id}`
+
+    function scrollToExactCard(attempt = 0) {
+      const target = document.getElementById(targetId)
+
+      if (target) {
+        target.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest',
+        })
+
+        window.setTimeout(() => {
+          setHighlightedChecklistItemId((current) =>
+            current === item.id ? null : current
+          )
+        }, 2200)
+        return
+      }
+
+      if (attempt < 20) {
+        window.setTimeout(() => scrollToExactCard(attempt + 1), 50)
+      }
+    }
+
+    window.setTimeout(() => scrollToExactCard(), 0)
   }
 
   function choosePlayerFromNavigation(playerName: string) {
@@ -1388,7 +1421,7 @@ export default function ChecklistBreakEntry({
     >
       {isSavingChecklist && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 backdrop-blur-sm"
           role="status"
           aria-live="polite"
           aria-label="Saving checklist items to inventory"
@@ -2033,11 +2066,17 @@ export default function ChecklistBreakEntry({
                                       return (
                                         <Fragment key={item.id}>
                                           <tr
-                                            className={
+                                            id={`checklist-break-item-${item.id}`}
+                                            className={[
                                               savedCount > 0
                                                 ? 'bg-emerald-950/15'
-                                                : undefined
-                                            }
+                                                : '',
+                                              highlightedChecklistItemId === item.id
+                                                ? 'outline-2 outline-cyan-400 -outline-offset-2 bg-cyan-950/25'
+                                                : '',
+                                            ]
+                                              .filter(Boolean)
+                                              .join(' ')}
                                           >
                                             <td className="px-3 py-2.5 font-semibold text-cyan-200">
                                               {item.card_number}
