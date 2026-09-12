@@ -94,6 +94,8 @@ type ChecklistCategory =
   | 'tcg_other'
   | 'other_sports'
 
+type ChecklistBrowseMode = 'team' | 'player' | 'section'
+
 const CHECKLIST_CATEGORIES: Array<{
   id: ChecklistCategory
   label: string
@@ -314,6 +316,9 @@ export default function ChecklistBreakEntry({
   const [selectedChecklistId, setSelectedChecklistId] = useState('')
   const [selectedTeam, setSelectedTeam] = useState('')
   const [selectedSectionId, setSelectedSectionId] = useState('')
+  const [checklistBrowseMode, setChecklistBrowseMode] =
+    useState<ChecklistBrowseMode>('team')
+  const [checklistCardSearch, setChecklistCardSearch] = useState('')
   const [entries, setEntries] = useState<EntryState>({})
   const [parallelEntries, setParallelEntries] =
     useState<ParallelEntryState>({})
@@ -688,6 +693,112 @@ export default function ChecklistBreakEntry({
     if (!selectedChecklistId) return []
     return availableItems.filter((item) => item.checklist_id === selectedChecklistId)
   }, [availableItems, selectedChecklistId])
+
+  const playerNavigationOptions = useMemo(() => {
+    const counts = new Map<string, number>()
+
+    for (const item of selectedChecklistItems) {
+      const player = clean(item.player_name)
+      if (!player) continue
+      counts.set(player, (counts.get(player) ?? 0) + 1)
+    }
+
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => compareNatural(a.name, b.name))
+  }, [selectedChecklistItems])
+
+  const checklistSectionNavigationOptions = useMemo(() => {
+    const counts = new Map<string, { id: string; name: string; count: number }>()
+
+    for (const item of selectedChecklistItems) {
+      const id = item.section_id || `other:${selectedChecklistId}`
+      const name = sectionById.get(item.section_id)?.name ?? 'Other'
+      const existing = counts.get(id)
+
+      if (existing) {
+        existing.count += 1
+      } else {
+        counts.set(id, { id, name, count: 1 })
+      }
+    }
+
+    return Array.from(counts.values()).sort((a, b) =>
+      compareNatural(a.name, b.name)
+    )
+  }, [selectedChecklistItems, selectedChecklistId, sectionById])
+
+  const checklistCardSearchResults = useMemo(() => {
+    const query = normalize(checklistCardSearch)
+    if (!query) return []
+
+    const tokens = query.split(' ').filter(Boolean)
+
+    return selectedChecklistItems
+      .filter((item) => {
+        const sectionName =
+          sectionById.get(item.section_id)?.name ?? 'Other'
+
+        const haystack = normalize(
+          [
+            item.card_number,
+            item.player_name,
+            item.printed_team,
+            sectionName,
+            item.parallel_name,
+            item.variation,
+            item.notes,
+            item.rookie_flag ? 'rookie rc' : '',
+            item.auto_flag ? 'auto autograph' : '',
+            item.relic_flag ? 'relic' : '',
+            item.serial_flag ? 'serial numbered' : '',
+            item.print_run ? `/${item.print_run}` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+        )
+
+        return tokens.every((token) => haystack.includes(token))
+      })
+      .sort((a, b) => {
+        const playerCompare = compareNatural(
+          clean(a.player_name),
+          clean(b.player_name)
+        )
+        if (playerCompare !== 0) return playerCompare
+
+        return compareNatural(clean(a.card_number), clean(b.card_number))
+      })
+      .slice(0, 100)
+  }, [selectedChecklistItems, checklistCardSearch, sectionById])
+
+  const filteredPlayerNavigationOptions = useMemo(() => {
+    if (checklistBrowseMode !== 'player') return playerNavigationOptions
+
+    const query = normalize(checklistCardSearch)
+    if (!query) return playerNavigationOptions
+
+    return playerNavigationOptions.filter((player) =>
+      normalize(player.name).includes(query)
+    )
+  }, [playerNavigationOptions, checklistBrowseMode, checklistCardSearch])
+
+  const filteredSectionNavigationOptions = useMemo(() => {
+    if (checklistBrowseMode !== 'section') {
+      return checklistSectionNavigationOptions
+    }
+
+    const query = normalize(checklistCardSearch)
+    if (!query) return checklistSectionNavigationOptions
+
+    return checklistSectionNavigationOptions.filter((section) =>
+      normalize(section.name).includes(query)
+    )
+  }, [
+    checklistSectionNavigationOptions,
+    checklistBrowseMode,
+    checklistCardSearch,
+  ])
 
   const teamOptions = useMemo(() => {
     const counts = new Map<string, number>()
@@ -1129,6 +1240,8 @@ export default function ChecklistBreakEntry({
     setSelectedChecklistId('')
     setSelectedTeam('')
     setSelectedSectionId('')
+    setChecklistBrowseMode('team')
+    setChecklistCardSearch('')
     setChecklistSearch('')
     setChecklistPickerOpen(false)
   }
@@ -1182,6 +1295,31 @@ export default function ChecklistBreakEntry({
       if (itemTeam !== team) return sum
       return sum + itemEnteredCount(item.id)
     }, 0)
+  }
+
+  function openChecklistItemFromNavigation(item: ChecklistItem) {
+    const team = clean(item.printed_team) || 'Other / Unassigned'
+    const sectionId = item.section_id || `other:${selectedChecklistId}`
+
+    setChecklistBrowseMode('team')
+    setSelectedTeam(team)
+    setSelectedSectionId(sectionId)
+
+    window.setTimeout(() => {
+      document
+        .getElementById('checklist-break-browser')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+  }
+
+  function choosePlayerFromNavigation(playerName: string) {
+    setChecklistBrowseMode('player')
+    setChecklistCardSearch(playerName)
+  }
+
+  function chooseSectionFromNavigation(sectionName: string) {
+    setChecklistBrowseMode('section')
+    setChecklistCardSearch(sectionName)
   }
 
   function saveReceivedCount() {
@@ -1502,6 +1640,182 @@ export default function ChecklistBreakEntry({
         <div className="rounded-xl border border-red-900/60 bg-red-950/20 px-4 py-3 text-sm text-red-200">
           {checklistLoadMessage}
         </div>
+      )}
+
+      {selectedChecklistId && (
+        <section className="app-section p-4">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-zinc-100">
+                  Find a Card in This Checklist
+                </div>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Search by player, card number, team, section, parallel, variation, RC, auto, relic, or serial details.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ['team', 'Team'],
+                    ['player', 'Player'],
+                    ['section', 'Section'],
+                  ] as Array<[ChecklistBrowseMode, string]>
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setChecklistBrowseMode(mode)
+                      setChecklistCardSearch('')
+                    }}
+                    className={
+                      checklistBrowseMode === mode
+                        ? 'app-button-primary'
+                        : 'app-button'
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <input
+                type="search"
+                value={checklistCardSearch}
+                onChange={(event) => setChecklistCardSearch(event.target.value)}
+                className="app-input w-full"
+                placeholder={
+                  checklistBrowseMode === 'player'
+                    ? 'Search players in this checklist...'
+                    : checklistBrowseMode === 'section'
+                      ? 'Search sections in this checklist...'
+                      : 'Search this checklist: player, card #, team, insert, parallel...'
+                }
+              />
+
+              {checklistCardSearch.trim() ? (
+                <div className="text-xs text-zinc-500">
+                  {checklistCardSearchResults.length} matching checklist row
+                  {checklistCardSearchResults.length === 1 ? '' : 's'}
+                  {checklistCardSearchResults.length >= 100
+                    ? ' shown (first 100)'
+                    : ''}
+                </div>
+              ) : (
+                <div className="text-xs text-zinc-500">
+                  Team remains the normal break-entry view. Player and Section are quick ways to find cards without changing the save workflow.
+                </div>
+              )}
+            </div>
+
+            {checklistBrowseMode === 'player' &&
+              !checklistCardSearch.trim() && (
+                <div className="max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
+                  <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                    {filteredPlayerNavigationOptions.map((player) => (
+                      <button
+                        key={player.name}
+                        type="button"
+                        onClick={() =>
+                          choosePlayerFromNavigation(player.name)
+                        }
+                        className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-900/70"
+                      >
+                        <span className="truncate text-zinc-200">
+                          {player.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {player.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {checklistBrowseMode === 'section' &&
+              !checklistCardSearch.trim() && (
+                <div className="max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
+                  <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                    {filteredSectionNavigationOptions.map((section) => (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() =>
+                          chooseSectionFromNavigation(section.name)
+                        }
+                        className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-900/70"
+                      >
+                        <span className="truncate text-zinc-200">
+                          {section.name}
+                        </span>
+                        <span className="shrink-0 text-xs text-zinc-500">
+                          {section.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {checklistCardSearch.trim() && (
+              <div className="max-h-96 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30">
+                {checklistCardSearchResults.length > 0 ? (
+                  <div className="divide-y divide-zinc-800">
+                    {checklistCardSearchResults.map((item) => {
+                      const sectionName =
+                        sectionById.get(item.section_id)?.name ?? 'Other'
+                      const details = [
+                        clean(item.parallel_name),
+                        clean(item.variation),
+                        item.rookie_flag ? 'RC' : '',
+                        item.auto_flag ? 'Auto' : '',
+                        item.relic_flag ? 'Relic' : '',
+                        item.serial_flag ? 'Serial' : '',
+                        item.print_run ? `/${item.print_run}` : '',
+                      ].filter(Boolean)
+
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() =>
+                            openChecklistItemFromNavigation(item)
+                          }
+                          className="grid w-full gap-1 px-4 py-3 text-left hover:bg-zinc-900/70 md:grid-cols-[90px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:items-center md:gap-3"
+                        >
+                          <span className="font-semibold text-cyan-200">
+                            {item.card_number || '—'}
+                          </span>
+                          <span className="font-medium text-zinc-100">
+                            {item.player_name || 'Unnamed item'}
+                          </span>
+                          <span className="text-sm text-zinc-400">
+                            {clean(item.printed_team) || 'Other / Unassigned'}
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            {sectionName}
+                            {details.length > 0
+                              ? ` • ${details.join(' • ')}`
+                              : ''}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="px-4 py-6 text-center text-sm text-zinc-500">
+                    No checklist cards match that search.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
       )}
 
       {selectedChecklistId && (
