@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 
 export default function NavigationLoader() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const searchParamsKey = searchParams?.toString() ?? ''
   const [loading, setLoading] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -32,7 +34,7 @@ export default function NavigationLoader() {
 
   useEffect(() => {
     stopLoading()
-  }, [pathname])
+  }, [pathname, searchParamsKey])
 
   useEffect(() => {
     function handleClick(event: MouseEvent) {
@@ -70,7 +72,12 @@ export default function NavigationLoader() {
       const nextUrl = new URL(href, window.location.href)
 
       if (nextUrl.origin !== currentUrl.origin) return
-      if (nextUrl.pathname === currentUrl.pathname) return
+
+      const sameLocation =
+        nextUrl.pathname === currentUrl.pathname &&
+        nextUrl.search === currentUrl.search
+
+      if (sameLocation) return
 
       startLoading()
     }
@@ -89,7 +96,7 @@ export default function NavigationLoader() {
   if (!loading) return null
 
   return (
-    <div className="fixed left-0 top-0 z-[9999] h-1 w-full overflow-hidden bg-cyan-950">
+    <div className="fixed left-0 top-0 z-9999 h-1 w-full overflow-hidden bg-cyan-950">
       <div className="h-full w-1/3 animate-[hitsLoadingBar_1s_ease-in-out_infinite] bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
     </div>
   )
