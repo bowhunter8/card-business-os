@@ -7,6 +7,7 @@ export default function NavigationLoader() {
   const pathname = usePathname()
   const [loading, setLoading] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const urlChangeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function stopLoading() {
     if (timeoutRef.current) {
@@ -39,7 +40,14 @@ export default function NavigationLoader() {
     const originalReplaceState = window.history.replaceState
 
     function handleUrlChange() {
-      stopLoading()
+      if (urlChangeTimeoutRef.current) {
+        clearTimeout(urlChangeTimeoutRef.current)
+      }
+
+      urlChangeTimeoutRef.current = setTimeout(() => {
+        stopLoading()
+        urlChangeTimeoutRef.current = null
+      }, 0)
     }
 
     window.history.pushState = function (...args) {
@@ -110,6 +118,10 @@ export default function NavigationLoader() {
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current)
+      }
+
+      if (urlChangeTimeoutRef.current) {
+        clearTimeout(urlChangeTimeoutRef.current)
       }
     }
   }, [])

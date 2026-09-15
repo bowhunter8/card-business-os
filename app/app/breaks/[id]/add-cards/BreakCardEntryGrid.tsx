@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useFormStatus } from 'react-dom'
 
 type EntryRow = {
   year: string
@@ -93,6 +94,40 @@ function enteredUnitsFromRows(rows: EntryRow[]) {
   }, 0)
 }
 
+function enteredUnitsFromChecklistDraft(value: string) {
+  if (!value) return 0
+
+  try {
+    const parsed = JSON.parse(value) as {
+      entries?: Record<string, { quantity?: unknown }>
+      parallelEntries?: Record<
+        string,
+        Array<{ quantity?: unknown }>
+      >
+    }
+
+    let total = 0
+
+    for (const entry of Object.values(parsed.entries ?? {})) {
+      const quantity = Math.max(0, Number(entry?.quantity ?? 0))
+      if (Number.isFinite(quantity)) total += quantity
+    }
+
+    for (const rows of Object.values(parsed.parallelEntries ?? {})) {
+      if (!Array.isArray(rows)) continue
+
+      for (const row of rows) {
+        const quantity = Math.max(0, Number(row?.quantity ?? 0))
+        if (Number.isFinite(quantity)) total += quantity
+      }
+    }
+
+    return total
+  } catch {
+    return 0
+  }
+}
+
 function uniqueValues(values: string[]) {
   const seen = new Set<string>()
   const output: string[] = []
@@ -171,6 +206,7 @@ export default function BreakCardEntryGrid({
     notes: [],
   })
   const saveTimerRef = useRef<number | null>(null)
+  const { pending: isSavingManual } = useFormStatus()
 
   const fallbackRows = useMemo(
     () =>
@@ -182,6 +218,7 @@ export default function BreakCardEntryGrid({
 
   const [rows, setRows] = useState<EntryRow[]>(fallbackRows)
   const [isDraftLoaded, setIsDraftLoaded] = useState(false)
+  const [isDraftHydrated, setIsDraftHydrated] = useState(false)
   const [lastSavedText, setLastSavedText] = useState('')
   const [checklistDraftJson, setChecklistDraftJson] = useState('')
 
@@ -197,7 +234,12 @@ export default function BreakCardEntryGrid({
     }
   }, [breakId])
 
-  const thisEntryCount = useMemo(() => enteredUnitsFromRows(rows), [rows])
+  const manualEntryCount = useMemo(() => enteredUnitsFromRows(rows), [rows])
+  const checklistEntryCount = useMemo(
+    () => enteredUnitsFromChecklistDraft(checklistDraftJson),
+    [checklistDraftJson]
+  )
+  const thisEntryCount = manualEntryCount + checklistEntryCount
   const totalAfterThisEntry = alreadyEnteredCount + thisEntryCount
   const remainingAfterThisEntry = Math.max(0, cardsReceived - totalAfterThisEntry)
 
@@ -271,6 +313,7 @@ export default function BreakCardEntryGrid({
 
     setRows((current) => (rowsMatch(current, nextRows) ? current : nextRows))
     setIsDraftLoaded(loadedDraft)
+    setIsDraftHydrated(true)
   }, [storageKey, fallbackRows, rowCount, defaultYear, defaultSet, forceFresh])
 
   useEffect(() => {
@@ -278,45 +321,73 @@ export default function BreakCardEntryGrid({
   }, [])
 
   useEffect(() => {
-    if (saveTimerRef.current != null) {
-      window.clearTimeout(saveTimerRef.current)
-    }
+    // Do not let the initial blank/default render touch localStorage.
+    // The draft-loading effect above must finish first, otherwise switching
+    // back into Manual Entry can erase a valid saved draft before it is
+    // restored into React state.
+    if (!isDraftHydrated) return
 
-    saveTimerRef.current = window.setTimeout(() => {
+    function saveDraftNow(updateSavedText: boolean) {
       try {
         const hasMeaningfulData = rows.some((row) => rowHasMeaningfulData(row))
 
         if (!hasMeaningfulData) {
           window.localStorage.removeItem(storageKey)
-          setLastSavedText('')
+          if (updateSavedText) setLastSavedText('')
           return
         }
+
+        const savedAt = new Date()
 
         window.localStorage.setItem(
           storageKey,
           JSON.stringify({
             rows,
-            savedAt: new Date().toISOString(),
+            savedAt: savedAt.toISOString(),
           })
         )
 
-        setLastSavedText(
-          `Last autosaved ${new Date().toLocaleTimeString([], {
-            hour: 'numeric',
-            minute: '2-digit',
-          })}`
-        )
+        if (updateSavedText) {
+          setLastSavedText(
+            `Last autosaved ${savedAt.toLocaleTimeString([], {
+              hour: 'numeric',
+              minute: '2-digit',
+            })}`
+          )
+        }
       } catch {
-        // ignore localStorage errors
-      }
-    }, AUTOSAVE_DELAY_MS)
-
-    return () => {
-      if (saveTimerRef.current != null) {
-        window.clearTimeout(saveTimerRef.current)
+        // Autosave should never interrupt break entry.
       }
     }
-  }, [rows, storageKey])
+
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current)
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      saveDraftNow(true)
+      saveTimerRef.current = null
+    }, AUTOSAVE_DELAY_MS)
+
+    function handlePageHide() {
+      saveDraftNow(false)
+    }
+
+    window.addEventListener('pagehide', handlePageHide)
+
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide)
+
+      if (saveTimerRef.current != null) {
+        window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+      }
+
+      // Flush the newest rows before Manual Entry unmounts so switching
+      // entry modes inside the debounce window cannot discard the draft.
+      saveDraftNow(false)
+    }
+  }, [rows, storageKey, isDraftHydrated])
 
   function setPlayerRef(index: number, el: HTMLInputElement | null) {
     playerRefs.current[index] = el
@@ -437,6 +508,30 @@ export default function BreakCardEntryGrid({
 
   return (
     <div>
+      {isSavingManual && (
+        <div
+          className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          role="status"
+          aria-live="polite"
+          aria-label="Saving manual items to inventory"
+        >
+          <div className="flex min-w-72 flex-col items-center gap-4 rounded-2xl border border-zinc-700 bg-zinc-950 px-8 py-7 shadow-2xl">
+            <span
+              className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-700 border-t-cyan-300"
+              aria-hidden="true"
+            />
+            <div className="text-center">
+              <div className="font-semibold text-zinc-100">
+                Saving Items to Inventory...
+              </div>
+              <div className="mt-1 text-sm text-zinc-500">
+                Please wait while HITS saves this manual entry.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-400">
         <span>
           Saved: <span className="font-semibold text-emerald-300">{alreadyEnteredCount}</span>
@@ -444,6 +539,11 @@ export default function BreakCardEntryGrid({
         <span>·</span>
         <span>
           This Entry: <span className="font-semibold text-zinc-100">{thisEntryCount}</span>
+          {(manualEntryCount > 0 || checklistEntryCount > 0) && (
+            <span className="ml-1 text-xs text-zinc-500">
+              (Manual {manualEntryCount} · Checklist {checklistEntryCount})
+            </span>
+          )}
         </span>
         <span>·</span>
         <span>

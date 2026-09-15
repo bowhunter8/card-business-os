@@ -187,6 +187,16 @@ export default async function AddBreakCardsPage({
 
   if (!user) return null
 
+  const { data: appUser } = await supabase
+    .from('app_users')
+    .select('role, is_active')
+    .eq('email', user.email ?? '')
+    .maybeSingle()
+
+  const isAdmin =
+    appUser?.is_active === true &&
+    String(appUser?.role ?? '').trim().toLowerCase() === 'admin'
+
   const [
     breakResponse,
     linkedOrdersResponse,
@@ -481,6 +491,7 @@ export default async function AddBreakCardsPage({
             checklists={checklists}
             sections={checklistSections}
             items={checklistItems}
+            canEditChecklistRows={isAdmin}
           />
         </div>
       )}

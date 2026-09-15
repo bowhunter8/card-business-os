@@ -2596,6 +2596,7 @@ async function persistChecklist(params: {
   importFormat: string
   checklistNotes: string
   importNotes: string
+  mergeSameSource?: boolean
 }) {
   const {
     supabase,
@@ -2608,6 +2609,7 @@ async function persistChecklist(params: {
     importFormat,
     checklistNotes,
     importNotes,
+    mergeSameSource = false,
   } = params
 
   // Final semantic guardrail shared by every importer. Source-specific adapters
@@ -2660,7 +2662,8 @@ async function persistChecklist(params: {
     const isSameSourceRebuild = Boolean(
       existingChecklist &&
         existingSource &&
-        normalizedKey(existingSource) === normalizedKey(sourceType)
+        normalizedKey(existingSource) === normalizedKey(sourceType) &&
+        !mergeSameSource
     )
     const createsReplacementChecklist = isSourceUpgrade || isSameSourceRebuild
 
@@ -3380,37 +3383,116 @@ function parseInlineChecklistRows(
 }
 
 function buildPdfTextLines(fragments: PdfTextFragment[]) {
-  const sorted = [...fragments].sort((left, right) => {
-    const yDifference = right.y - left.y
-    if (Math.abs(yDifference) > 2.5) return yDifference
-    return left.x - right.x
-  })
+  const buildLinesForFragments = (sourceFragments: PdfTextFragment[]) => {
+    const sorted = [...sourceFragments].sort((left, right) => {
+      const yDifference = right.y - left.y
+      if (Math.abs(yDifference) > 2.5) return yDifference
+      return left.x - right.x
+    })
 
-  const lines: Array<{ y: number; fragments: PdfTextFragment[] }> = []
+    const visualLines: Array<{ y: number; fragments: PdfTextFragment[] }> = []
 
-  for (const fragment of sorted) {
-    const existing = lines.find((line) => Math.abs(line.y - fragment.y) <= 2.5)
+    for (const fragment of sorted) {
+      const existing = visualLines.find(
+        (line) => Math.abs(line.y - fragment.y) <= 2.5
+      )
 
-    if (existing) {
-      existing.fragments.push(fragment)
-      continue
+      if (existing) {
+        existing.fragments.push(fragment)
+        continue
+      }
+
+      visualLines.push({ y: fragment.y, fragments: [fragment] })
     }
 
-    lines.push({ y: fragment.y, fragments: [fragment] })
+    return visualLines
+      .sort((left, right) => right.y - left.y)
+      .map((line) =>
+        line.fragments
+          .sort((left, right) => left.x - right.x)
+          .map((fragment) => fragment.text.trim())
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      )
+      .filter(Boolean)
   }
 
-  return lines
-    .sort((left, right) => right.y - left.y)
-    .map((line) =>
-      line.fragments
-        .sort((left, right) => left.x - right.x)
-        .map((fragment) => fragment.text.trim())
-        .filter(Boolean)
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    )
-    .filter(Boolean)
+  // Printable checklist PDFs are frequently laid out in multiple newspaper-
+  // style columns. Detect stable X positions where real card rows begin. When
+  // multiple columns exist, rebuild each column TOP-TO-BOTTOM before moving to
+  // the next column. This keeps wrapped player names attached to their own card
+  // instead of interleaving equal-Y rows from neighboring columns.
+  const startSamples: number[] = []
+
+  for (const fragment of fragments) {
+    const cleaned = fragment.text.trim()
+    if (!cleaned) continue
+
+    const firstToken = cleaned.split(/\s+/, 1)[0] ?? ''
+    if (!looksLikeInlineCardIdentifier(firstToken)) continue
+
+    startSamples.push(fragment.x)
+  }
+
+  const clusters: Array<{ x: number; count: number }> = []
+
+  for (const sample of startSamples.sort((a, b) => a - b)) {
+    const existing = clusters.find((cluster) => Math.abs(cluster.x - sample) <= 12)
+
+    if (existing) {
+      existing.x = (existing.x * existing.count + sample) / (existing.count + 1)
+      existing.count += 1
+    } else {
+      clusters.push({ x: sample, count: 1 })
+    }
+  }
+
+  const columnStarts = clusters
+    .filter((cluster) => cluster.count >= 3)
+    .sort((left, right) => left.x - right.x)
+    .slice(0, 6)
+    .map((cluster) => cluster.x)
+
+  if (columnStarts.length < 2) {
+    return buildLinesForFragments(fragments)
+  }
+
+  const columnBuckets = columnStarts.map(() => [] as PdfTextFragment[])
+
+  for (const fragment of fragments) {
+    let columnIndex = 0
+
+    for (let index = 0; index < columnStarts.length - 1; index += 1) {
+      const boundary = (columnStarts[index] + columnStarts[index + 1]) / 2
+      if (fragment.x >= boundary) columnIndex = index + 1
+    }
+
+    columnBuckets[columnIndex].push(fragment)
+  }
+
+  return columnBuckets.flatMap((bucket) => buildLinesForFragments(bucket))
+}
+
+function scorePdfTextLineCandidate(lines: string[]) {
+  let score = 0
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[\u00A0\t]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!line) continue
+
+    // A real card identity beginning a line is the strongest signal. This also
+    // rewards extraction that separates multiple visual columns instead of
+    // gluing several cards together onto one row.
+    if (looksLikePdfChecklistEntryStart(line)) score += 10
+
+    // Product titles are useful section boundaries but should not outweigh card
+    // rows when choosing between two extraction strategies.
+    if (parsePdfChecklistTitleIdentity(line)) score += 2
+  }
+
+  return score
 }
 
 async function extractPdfTextLines(buffer: Buffer) {
@@ -3451,20 +3533,60 @@ async function extractPdfTextLines(buffer: Buffer) {
       const page = await document.getPage(pageNumber)
       const content = await page.getTextContent()
       const fragments: PdfTextFragment[] = []
+      const readingOrderLines: string[] = []
+      let currentReadingLine = ''
 
       for (const item of content.items) {
         if (!('str' in item)) continue
-        const value = String(item.str ?? '').trim()
+        const rawValue = String(item.str ?? '')
+        const value = rawValue.trim()
         if (!value) continue
+
+        // Preserve PDF.js content-stream order when line-break information is
+        // available. Multi-column browser-generated PDFs are frequently stored
+        // column-by-column in the content stream; sorting only by Y/X can mix
+        // four unrelated cards onto one visual row and corrupt player names.
+        currentReadingLine = `${currentReadingLine} ${value}`.trim()
+        if ('hasEOL' in item && Boolean(item.hasEOL)) {
+          readingOrderLines.push(
+            currentReadingLine.replace(/\s+/g, ' ').trim()
+          )
+          currentReadingLine = ''
+        }
 
         const transform = Array.isArray(item.transform) ? item.transform : []
         const x = Number(transform[4] ?? 0)
         const y = Number(transform[5] ?? 0)
-
         fragments.push({ text: value, x, y })
       }
 
-      lines.push(...buildPdfTextLines(fragments))
+      if (currentReadingLine.trim()) {
+        readingOrderLines.push(
+          currentReadingLine.replace(/\s+/g, ' ').trim()
+        )
+      }
+
+      const usableReadingOrderLines = readingOrderLines.filter(Boolean)
+      const geometricLines = buildPdfTextLines(fragments)
+
+      // PDF.js content-stream order is excellent for some documents, while
+      // browser-generated printable checklists can merge the title with card #1
+      // or interleave several visual columns. Build BOTH candidates and keep the
+      // one that exposes more real card-row starts. Existing PDFs whose reading
+      // order is already better continue to use it.
+      if (usableReadingOrderLines.length < 5) {
+        lines.push(...geometricLines)
+      } else {
+        const readingScore = scorePdfTextLineCandidate(usableReadingOrderLines)
+        const geometricScore = scorePdfTextLineCandidate(geometricLines)
+
+        lines.push(
+          ...(geometricScore > readingScore
+            ? geometricLines
+            : usableReadingOrderLines)
+        )
+      }
+
       page.cleanup()
     }
   } finally {
@@ -3475,6 +3597,376 @@ async function extractPdfTextLines(buffer: Buffer) {
   return lines
 }
 
+
+type PdfChecklistTitleIdentity = {
+  year: string | null
+  sportOrGame: string | null
+  productRoot: string
+  sectionName: string
+  displayTitle: string
+}
+
+function cleanPdfTitleSource(value: string) {
+  return value
+    .replace(/\.pdf$/i, '')
+    .replace(/\s*\(\d+\)\s*$/i, '')
+    // Browser-generated checklist PDFs often repeat the page title together
+    // with the printable-source URL in the header/footer. The URL is document
+    // chrome, not part of the checklist identity or section name.
+    .replace(/\s+https?:\/\/\S+.*$/i, '')
+    .replace(/\s+www\.\S+.*$/i, '')
+    .replace(/\s*[-–—]\s*checklist\s*$/i, '')
+    .replace(/\s+checklist\s*$/i, '')
+    .replace(/[\u00A0\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[-–—]\s*$/g, '')
+    .trim()
+}
+
+function parsePdfChecklistTitleIdentity(
+  value: string
+): PdfChecklistTitleIdentity | null {
+  const cleaned = cleanPdfTitleSource(value)
+  if (!cleaned || cleaned.length > 180) return null
+
+  const yearMatch = cleaned.match(/^((?:19|20)\d{2}(?:\s*[-–]\s*\d{2})?)\s+(.+)$/)
+  if (!yearMatch) return null
+
+  const year = yearMatch[1].replace(/\s+/g, '')
+  let remainder = yearMatch[2]
+    .replace(/\bchecklist\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!remainder) return null
+
+  const sportMatch = remainder.match(/\b(Baseball|Basketball|Football|Hockey|Soccer)\s*$/i)
+  const sportOrGame = sportMatch
+    ? sportMatch[1][0].toUpperCase() + sportMatch[1].slice(1).toLowerCase()
+    : null
+
+  if (sportMatch) {
+    remainder = remainder.slice(0, sportMatch.index).trim()
+  }
+
+  if (!remainder || remainder.length < 2) return null
+
+  const parts = remainder
+    .split(/\s+[-–—]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  const productRoot = parts[0] ?? ''
+  const sectionName = parts.length > 1 ? parts.slice(1).join(' - ') : 'Base Set'
+
+  if (!productRoot || productRoot.length < 2) return null
+
+  return {
+    year,
+    sportOrGame,
+    productRoot,
+    sectionName,
+    displayTitle: cleaned,
+  }
+}
+
+function relatedPdfIdentityKey(identity: PdfChecklistTitleIdentity) {
+  return [
+    normalizedKey(identity.year ?? ''),
+    normalizedKey(identity.productRoot),
+    normalizedKey(identity.sportOrGame ?? ''),
+  ].join('|')
+}
+
+function choosePdfProductIdentity(
+  uploadedName: string,
+  lines: string[]
+) {
+  const fromFileName = parsePdfChecklistTitleIdentity(uploadedName)
+  const titleCandidates = lines
+    .map((line) => parsePdfChecklistTitleIdentity(line))
+    .filter((value): value is PdfChecklistTitleIdentity => Boolean(value))
+
+  const candidates = [
+    ...(fromFileName ? [fromFileName] : []),
+    ...titleCandidates,
+  ]
+
+  if (candidates.length === 0) {
+    return {
+      primary: null as PdfChecklistTitleIdentity | null,
+      relatedTitles: [] as PdfChecklistTitleIdentity[],
+    }
+  }
+
+  const counts = new Map<string, number>()
+  for (const candidate of candidates) {
+    const key = relatedPdfIdentityKey(candidate)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  const rankedKeys = [...counts.entries()].sort((left, right) => {
+    if (right[1] !== left[1]) return right[1] - left[1]
+
+    const leftMatchesFile =
+      fromFileName && relatedPdfIdentityKey(fromFileName) === left[0] ? 1 : 0
+    const rightMatchesFile =
+      fromFileName && relatedPdfIdentityKey(fromFileName) === right[0] ? 1 : 0
+
+    return rightMatchesFile - leftMatchesFile
+  })
+
+  const selectedKey = rankedKeys[0]?.[0] ?? relatedPdfIdentityKey(candidates[0])
+  const relatedTitles = candidates.filter(
+    (candidate) => relatedPdfIdentityKey(candidate) === selectedKey
+  )
+
+  const primary =
+    (fromFileName && relatedPdfIdentityKey(fromFileName) === selectedKey
+      ? fromFileName
+      : relatedTitles.find((candidate) => candidate.sectionName === 'Base Set')) ??
+    relatedTitles[0] ??
+    null
+
+  return { primary, relatedTitles }
+}
+
+function metadataForRelatedPdfProduct(
+  uploadedName: string,
+  identity: PdfChecklistTitleIdentity | null,
+  metadataOverride?: ProductMetadataOverride | null
+) {
+  const baseMetadata = applyProductMetadataOverride(
+    inferProductMetadata(uploadedName),
+    metadataOverride
+  )
+
+  if (!identity) return baseMetadata
+
+  const sportOrGame = identity.sportOrGame || baseMetadata.sportOrGame
+  const productName = [identity.productRoot, sportOrGame]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+
+  return buildProductKey({
+    category: baseMetadata.category,
+    sportOrGame,
+    year: identity.year || baseMetadata.year,
+    manufacturer: baseMetadata.manufacturer,
+    brand: baseMetadata.brand,
+    productName: productName || baseMetadata.productName,
+    editionName: baseMetadata.editionName,
+  })
+}
+
+function isPdfChecklistChromeLine(value: string) {
+  const cleaned = value.trim()
+  const normalized = normalizedKey(cleaned)
+
+  if (!cleaned) return true
+  if (normalized === 'trading card database') return true
+  if (/^https?:\/\/(?:www\.)?tcdb\.com(?:\/)?$/i.test(cleaned)) return true
+  if (/printchecklist\.cfm/i.test(cleaned)) return true
+  if (/^\d+\s+of\s+\d+(?:\s+.*)?$/i.test(cleaned)) return true
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}(?:,?\s+.*)?$/i.test(cleaned)) return true
+
+  return false
+}
+
+function looksLikePdfChecklistEntryStart(value: string) {
+  const cleaned = value.trim()
+  if (!cleaned) return false
+
+  // Paired-panel identifiers such as "1-A / 1-B" are one checklist row.
+  const paired = cleaned.match(/^(\S+)\s*\/\s*(\S+)(?:\s+|$)/)
+  if (
+    paired &&
+    looksLikeInlineCardIdentifier(paired[1]) &&
+    looksLikeInlineCardIdentifier(paired[2])
+  ) {
+    return true
+  }
+
+  const firstToken = cleaned.split(/\s+/, 1)[0] ?? ''
+  return looksLikeInlineCardIdentifier(firstToken)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function splitPdfChecklistTitlePrefix(
+  value: string,
+  primaryIdentity: PdfChecklistTitleIdentity | null
+) {
+  const line = value.replace(/[\u00A0\t]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!line || !primaryIdentity?.year || !primaryIdentity.productRoot) {
+    return null
+  }
+
+  const yearPattern = escapeRegExp(primaryIdentity.year).replace(/\-/g, '[–—-]')
+  const rootPattern = escapeRegExp(primaryIdentity.productRoot).replace(/\s+/g, '\\s+')
+  const sport = primaryIdentity.sportOrGame?.trim()
+  const sportPattern = sport ? escapeRegExp(sport).replace(/\s+/g, '\\s+') : ''
+
+  if (sportPattern) {
+    const pattern = new RegExp(
+      `^(${yearPattern}\\s+${rootPattern}(?:\\s*[-–—]\\s*.+?)?\\s+${sportPattern})(?:\\s+(.+))?$`,
+      'i'
+    )
+    const match = line.match(pattern)
+
+    if (match) {
+      const title = match[1].trim()
+      const identity = parsePdfChecklistTitleIdentity(title)
+      if (
+        identity &&
+        relatedPdfIdentityKey(identity) === relatedPdfIdentityKey(primaryIdentity)
+      ) {
+        return {
+          title,
+          remainder: String(match[2] ?? '').trim(),
+        }
+      }
+    }
+  }
+
+  const exactTitle = cleanPdfTitleSource(primaryIdentity.displayTitle)
+  if (
+    exactTitle &&
+    normalizedKey(line).startsWith(`${normalizedKey(exactTitle)} `)
+  ) {
+    return {
+      title: exactTitle,
+      remainder: line.slice(exactTitle.length).trim(),
+    }
+  }
+
+  return null
+}
+
+function coalescePdfChecklistLines(
+  lines: string[],
+  primaryIdentity: PdfChecklistTitleIdentity | null
+) {
+  const logicalLines: string[] = []
+  let pendingCardLine = ''
+
+  const flushPending = () => {
+    const value = pendingCardLine.replace(/\s+/g, ' ').trim()
+    if (value) logicalLines.push(value)
+    pendingCardLine = ''
+  }
+
+  const processContentLine = (value: string) => {
+    const line = value.replace(/[\u00A0\t]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!line) return
+
+    const titleIdentity = parsePdfChecklistTitleIdentity(line)
+    const isRelatedTitle = Boolean(
+      titleIdentity &&
+        primaryIdentity &&
+        relatedPdfIdentityKey(titleIdentity) === relatedPdfIdentityKey(primaryIdentity)
+    )
+
+    if (isRelatedTitle) {
+      flushPending()
+      logicalLines.push(line)
+      return
+    }
+
+    if (isPdfChecklistChromeLine(line)) {
+      flushPending()
+      return
+    }
+
+    if (looksLikePdfChecklistEntryStart(line)) {
+      flushPending()
+      pendingCardLine = line
+      return
+    }
+
+    // Wrapped player lists and trailing checklist markers belong to the
+    // immediately preceding card row. This is common in narrow multi-column
+    // printable PDFs such as four-player insert panels.
+    if (pendingCardLine) {
+      pendingCardLine = `${pendingCardLine} ${line}`.replace(/\s+/g, ' ').trim()
+    }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[\u00A0\t]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!line) continue
+
+    // Browser-generated printable PDFs sometimes place the page title and the
+    // first checklist row in the same PDF text line. Preserve the title as a
+    // section boundary, then feed the trailing content back through the normal
+    // card parser instead of allowing the product year to swallow card #1.
+    const titlePrefix = splitPdfChecklistTitlePrefix(line, primaryIdentity)
+    if (titlePrefix) {
+      processContentLine(titlePrefix.title)
+      if (titlePrefix.remainder) {
+        processContentLine(titlePrefix.remainder)
+      }
+      continue
+    }
+
+    processContentLine(line)
+  }
+
+  flushPending()
+  return logicalLines
+}
+
+function parsePdfInlineChecklistEntries(value: string) {
+  const normalized = value
+    .replace(/[\u00A0\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  // NNO is itself the complete card identifier. Text that follows can begin
+  // with a number (for example "NNO 98 Team Pinnacle Information Card"), so
+  // keep the remainder together instead of treating that number as a second
+  // card identifier.
+  const nno = normalized.match(/^NNO\s+(.+)$/i)
+  if (nno) {
+    const split = splitLegacyPlayerMarkers(nno[1])
+    if (split.playerName) {
+      return [
+        {
+          cardNumber: 'NNO',
+          playerName: split.playerName,
+          marker: split.marker,
+        },
+      ] satisfies InlineChecklistEntry[]
+    }
+  }
+
+  // Some legacy inserts use paired identifiers on one physical card/panel,
+  // for example "1-A / 1-B Player One / Player Two / ...". Keep the paired
+  // card identity together instead of treating the second identifier as a new
+  // card and the slash between them as a player name.
+  const paired = normalized.match(/^(\S+)\s*\/\s*(\S+)\s+(.+)$/)
+  if (
+    paired &&
+    looksLikeInlineCardIdentifier(paired[1]) &&
+    looksLikeInlineCardIdentifier(paired[2])
+  ) {
+    const split = splitLegacyPlayerMarkers(paired[3])
+    if (split.playerName) {
+      return [
+        {
+          cardNumber: `${paired[1]} / ${paired[2]}`,
+          playerName: split.playerName,
+          marker: split.marker,
+        },
+      ] satisfies InlineChecklistEntry[]
+    }
+  }
+
+  return parseInlineChecklistEntries(normalized)
+}
 
 function compareChecklistCardNumbers(left: string, right: string) {
   const a = left.trim().replace(/^#/, '')
@@ -3503,8 +3995,17 @@ function compareChecklistCardNumbers(left: string, right: string) {
   })
 }
 
-function sortPdfChecklistItems(items: ParsedItem[]) {
+function sortPdfChecklistItems(items: ParsedItem[], sections: string[]) {
+  const sectionOrder = new Map(
+    sections.map((sectionName, index) => [normalizedKey(sectionName), index])
+  )
+
   items.sort((left, right) => {
+    const leftSection = sectionOrder.get(normalizedKey(left.sectionName)) ?? 999999
+    const rightSection = sectionOrder.get(normalizedKey(right.sectionName)) ?? 999999
+
+    if (leftSection !== rightSection) return leftSection - rightSection
+
     const cardComparison = compareChecklistCardNumbers(
       left.cardNumber,
       right.cardNumber
@@ -3544,18 +4045,47 @@ async function handlePdfChecklistImport(params: {
     )
   }
 
-  const metadata = applyProductMetadataOverride(
-    inferProductMetadata(uploaded.name),
+  const pdfIdentity = choosePdfProductIdentity(uploaded.name, lines)
+  const metadata = metadataForRelatedPdfProduct(
+    uploaded.name,
+    pdfIdentity.primary,
     metadataOverride
   )
-  const sectionName = 'Base Set'
+  const logicalLines = coalescePdfChecklistLines(lines, pdfIdentity.primary)
+
+  const sections: string[] = []
+  const seenSections = new Set<string>()
   const seenItems = new Set<string>()
   const items: ParsedItem[] = []
+  let currentSection = pdfIdentity.primary?.sectionName || 'Base Set'
   let sortOrder = 0
 
-  for (const line of lines) {
+  const rememberSection = (value: string) => {
+    const safeValue = value.trim() || 'Base Set'
+    const key = normalizedKey(safeValue)
+    if (!seenSections.has(key)) {
+      seenSections.add(key)
+      sections.push(safeValue)
+    }
+    return safeValue
+  }
+
+  currentSection = rememberSection(currentSection)
+
+  for (const line of logicalLines) {
     stats.totalRowsSeen += 1
-    const entries = parseInlineChecklistEntries(line)
+
+    const titleIdentity = parsePdfChecklistTitleIdentity(line)
+    if (
+      titleIdentity &&
+      pdfIdentity.primary &&
+      relatedPdfIdentityKey(titleIdentity) === relatedPdfIdentityKey(pdfIdentity.primary)
+    ) {
+      currentSection = rememberSection(titleIdentity.sectionName)
+      continue
+    }
+
+    const entries = parsePdfInlineChecklistEntries(line)
 
     for (const entry of entries) {
       // PDF headers often repeat the product year and title. When the parsed
@@ -3564,11 +4094,21 @@ async function handlePdfChecklistImport(params: {
       if (
         metadata.year &&
         normalizedKey(entry.cardNumber) === normalizedKey(metadata.year) &&
-        normalizedKey(entry.playerName).includes(normalizedKey(metadata.productName))
+        (
+          normalizedKey(entry.playerName).includes(normalizedKey(metadata.productName)) ||
+          normalizedKey(entry.playerName).includes(
+            normalizedKey(pdfIdentity.primary?.productRoot ?? '')
+          )
+        )
       ) {
         continue
       }
 
+      if (isPdfChecklistChromeLine(entry.playerName)) {
+        continue
+      }
+
+      const sectionName = currentSection || 'Base Set'
       const key = itemKey(sectionName, entry.cardNumber, entry.playerName)
       if (seenItems.has(key)) {
         stats.skippedRows += 1
@@ -3589,19 +4129,20 @@ async function handlePdfChecklistImport(params: {
         relicFlag: flags.relicFlag,
         serialFlag: flags.serialFlag,
         printRun: parsePrintRun(entry.marker),
-        variation: null,
+        variation: normalizedKey(sectionName).includes('variation')
+          ? sectionName
+          : null,
         parallelName: null,
         notes: entry.marker || null,
         sortOrder,
-        people: [],
+        people: splitPeople(entry.playerName, null),
       })
 
       stats.normalizedRows += 1
     }
   }
 
-  sortPdfChecklistItems(items)
-
+  sortPdfChecklistItems(items, sections)
   if (items.length < 5) {
     return NextResponse.json(
       {
@@ -3614,7 +4155,7 @@ async function handlePdfChecklistImport(params: {
     )
   }
 
-  const parsed = { sections: [sectionName], items }
+  const parsed = { sections, items }
   validateParsedChecklistStructure(parsed, 'PDF checklist validation')
 
   const persisted = await persistChecklist({
@@ -3627,10 +4168,11 @@ async function handlePdfChecklistImport(params: {
     sourceType: 'generic',
     importFormat: 'pdf',
     checklistNotes:
-      'Imported directly from a text-based PDF checklist. HITS used repeated card-number + player/item identity as the safe fallback structure.',
+      'Imported directly from a text-based PDF checklist. HITS used repeated card-number + player/item identity as the safe fallback structure and preserved related PDF titles as checklist sections when confidently recognized.',
     importNotes:
-      `PDF text lines inspected: ${stats.totalRowsSeen}. ` +
-      'Direct PDF import preserves the existing XLSX import paths and is used only for PDF uploads.',
+      `PDF text lines inspected: ${stats.totalRowsSeen}. Sections recognized: ${sections.length}. ` +
+      'Related PDF files for the same normalized product are merged additively into the existing PDF checklist instead of replacing earlier sections. Existing XLSX import paths are unchanged.',
+    mergeSameSource: true,
   })
 
   return NextResponse.json({

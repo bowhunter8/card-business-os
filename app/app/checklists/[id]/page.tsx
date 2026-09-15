@@ -1546,7 +1546,7 @@ export default async function ChecklistDetailPage({
       )}
 
       <section id="checklist-browser" className="scroll-mt-6">
-        <ChecklistBrowser checklistId={checklist.id} />
+        <ChecklistBrowser checklistId={checklist.id} canEdit={isAdmin} />
       </section>
 
       {(clean(checklist.source_reference) || clean(checklist.notes)) && (

@@ -19,6 +19,11 @@ import {
   quoteChecklistBuild,
   type ChecklistBuildQuoteResult,
 } from '@/app/actions/inventory-builds'
+import ChecklistRowEditor, {
+  type ChecklistRowEditorItem,
+  type ChecklistRowEditorSection,
+} from '@/app/components/ChecklistRowEditor'
+import ChecklistCardResearch from '@/app/components/ChecklistCardResearch'
 
 type Checklist = {
   id: string
@@ -113,6 +118,7 @@ type OwnershipFilter = 'all' | 'owned' | 'missing'
 
 type ChecklistBrowserProps = {
   checklistId: string
+  canEdit?: boolean
 }
 
 function cleanText(value: unknown) {
@@ -679,6 +685,7 @@ function BuildSetSubmitButton({
 
 export default function ChecklistBrowser({
   checklistId,
+  canEdit = false,
 }: ChecklistBrowserProps) {
   const [checklist, setChecklist] = useState<Checklist | null>(null)
   const [sections, setSections] = useState<ChecklistSection[]>([])
@@ -714,6 +721,8 @@ export default function ChecklistBrowser({
   const [buildOpportunitiesOpen, setBuildOpportunitiesOpen] = useState(false)
   const [reviewBuildSectionId, setReviewBuildSectionId] = useState('')
   const [selectedChecklistItemId, setSelectedChecklistItemId] = useState('')
+  const [editingChecklistItemId, setEditingChecklistItemId] = useState('')
+  const [checklistRowEditMessage, setChecklistRowEditMessage] = useState('')
   const [buildStatusUpdatingItemId, setBuildStatusUpdatingItemId] = useState('')
   const [buildStatusError, setBuildStatusError] = useState('')
   const [buildQuote, setBuildQuote] =
@@ -809,7 +818,8 @@ export default function ChecklistBrowser({
     setBuildOpportunitiesOpen(false)
     setReviewBuildSectionId('')
     setSelectedChecklistItemId('')
-    setSelectedChecklistItemId('')
+    setEditingChecklistItemId('')
+    setChecklistRowEditMessage('')
     setBuildStatusUpdatingItemId('')
     setBuildStatusError('')
     setBuildQuote(null)
@@ -1733,6 +1743,128 @@ export default function ChecklistBrowser({
     })
   }
 
+  function openChecklistRowEditor(item: ChecklistItem) {
+    if (!canEdit) return
+
+    setChecklistRowEditMessage('')
+    setEditingChecklistItemId(item.id)
+  }
+
+  function closeChecklistRowEditor() {
+    setEditingChecklistItemId('')
+  }
+
+  function handleChecklistRowSaved(updatedItem: ChecklistItem) {
+    setItems((current) =>
+      current.map((item) =>
+        item.id === updatedItem.id
+          ? {
+              ...item,
+              ...updatedItem,
+            }
+          : item
+      )
+    )
+
+    if (playerDataLoaded) {
+      setPeople((current) => {
+        const matching = current
+          .filter((person) => person.checklist_item_id === updatedItem.id)
+          .sort(
+            (a, b) =>
+              Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) -
+              Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)
+          )
+
+        const primary = matching[0]
+
+        if (primary) {
+          return current.map((person) =>
+            person === primary
+              ? {
+                  ...person,
+                  player_name: updatedItem.player_name,
+                  printed_team: updatedItem.printed_team,
+                }
+              : person
+          )
+        }
+
+        if (cleanText(updatedItem.player_name)) {
+          return [
+            ...current,
+            {
+              checklist_item_id: updatedItem.id,
+              player_name: updatedItem.player_name,
+              printed_team: updatedItem.printed_team,
+              sort_order: 1,
+            },
+          ]
+        }
+
+        return current
+      })
+    }
+
+    setChecklistRowEditMessage('Checklist row updated.')
+    setEditingChecklistItemId('')
+  }
+
+  function handleChecklistRowDeleted(itemId: string) {
+    setItems((current) =>
+      current.filter((item) => item.id !== itemId)
+    )
+
+    setPeople((current) =>
+      current.filter((person) => person.checklist_item_id !== itemId)
+    )
+
+    setInventoryMatches((current) =>
+      current.filter((match) => match.checklist_item_id !== itemId)
+    )
+
+    setBuildPreferredInventoryByChecklistItemId((current) => {
+      if (!current.has(itemId)) return current
+
+      const next = new Map(current)
+      next.delete(itemId)
+      return next
+    })
+
+    if (selectedChecklistItemId === itemId) {
+      setSelectedChecklistItemId('')
+    }
+
+    if (expandedInventoryItemId === itemId) {
+      setExpandedInventoryItemId('')
+    }
+
+    setChecklistRowEditMessage('Checklist row deleted.')
+    setEditingChecklistItemId('')
+  }
+
+  const editingChecklistItem = editingChecklistItemId
+    ? itemById.get(editingChecklistItemId) ?? null
+    : null
+
+  const checklistRowEditorItem: ChecklistRowEditorItem | null =
+    editingChecklistItem
+      ? {
+          ...editingChecklistItem,
+          print_run:
+            cleanText(editingChecklistItem.print_run) &&
+            Number.isFinite(Number(editingChecklistItem.print_run))
+              ? Number(editingChecklistItem.print_run)
+              : null,
+        }
+      : null
+
+  const checklistRowEditorSections: ChecklistRowEditorSection[] =
+    orderedSections.map((section) => ({
+      ...section,
+      name: cleanText(section.name) || 'Uncategorized',
+    }))
+
   function inventoryPrefillHref(item: ChecklistItem) {
     const params = new URLSearchParams()
 
@@ -1916,11 +2048,27 @@ export default function ChecklistBrowser({
                     </div>
                   ) : null}
 
-                  <div className="text-slate-400">
-                    {details.length
-                      ? details.join(' • ')
-                      : cleanText(item.notes) ||
-                        '—'}
+                  <div className="flex min-w-0 items-center justify-between gap-2 text-slate-400">
+                    <span className="min-w-0 truncate">
+                      {details.length
+                        ? details.join(' • ')
+                        : cleanText(item.notes) ||
+                          '—'}
+                    </span>
+
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          openChecklistRowEditor(item)
+                        }}
+                        className="shrink-0 rounded-lg border border-cyan-800 px-2.5 py-1 text-xs font-semibold text-cyan-200 hover:bg-cyan-950"
+                        title={`Edit ${cleanText(item.player_name) || 'checklist card'}`}
+                      >
+                        Edit
+                      </button>
+                    ) : null}
                   </div>
                   </div>
 
@@ -1997,6 +2145,24 @@ export default function ChecklistBrowser({
                         link carries its checklist details forward so the
                         inventory entry page can prefill them.
                       </div>
+
+                      <ChecklistCardResearch
+                        year={checklist?.year}
+                        brand={
+                          cleanText(checklist?.brand) ||
+                          cleanText(checklist?.manufacturer)
+                        }
+                        setName={
+                          cleanText(checklist?.product_name) ||
+                          cleanText(checklist?.name)
+                        }
+                        playerName={item.player_name}
+                        cardNumber={item.card_number}
+                        parallel={item.parallel_name}
+                        variation={item.variation}
+                        rookie={item.rookie_flag}
+                        className="mt-4"
+                      />
                     </div>
                   ) : null}
 
@@ -2180,6 +2346,12 @@ export default function ChecklistBrowser({
           </form>
         </div>
       </div>
+
+      {checklistRowEditMessage ? (
+        <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+          {checklistRowEditMessage}
+        </div>
+      ) : null}
 
       <div className="flex h-[calc(100vh-18rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-slate-800 bg-black">
         <div className="flex shrink-0 flex-wrap gap-2 border-b border-slate-800 p-3">
@@ -3521,6 +3693,18 @@ export default function ChecklistBrowser({
           </div>
         </div>
       </div>
+
+      {canEdit && editingChecklistItemId ? (
+        <ChecklistRowEditor
+          open={Boolean(editingChecklistItemId)}
+          checklistId={checklistId}
+          item={checklistRowEditorItem}
+          sections={checklistRowEditorSections}
+          onClose={closeChecklistRowEditor}
+          onSaved={handleChecklistRowSaved}
+          onDeleted={handleChecklistRowDeleted}
+        />
+      ) : null}
 
       {inventoryChecking ? (
         <div

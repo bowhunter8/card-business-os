@@ -422,6 +422,7 @@ export default async function InventoryDetailPage({
     deletedSale?: string;
     buildDisassembled?: string;
     buildError?: string;
+    whatnotQueued?: string;
   }>;
 }) {
   const { id } = await params;
@@ -431,13 +432,15 @@ export default async function InventoryDetailPage({
   const successMessage =
     query?.buildDisassembled === "1"
       ? "Build disassembled successfully. Original source quantities were restored and the finished build item was removed from active inventory."
-      : query?.saleRecorded === "1" || query?.savedSale === "1"
-      ? "Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated."
-      : query?.updatedSale === "1"
-        ? "Sale updated successfully."
-        : query?.deletedSale === "1"
-          ? "Sale reversed successfully."
-          : query?.success;
+      : query?.whatnotQueued === "1"
+        ? "Item added to the current Whatnot Upload Queue."
+        : query?.saleRecorded === "1" || query?.savedSale === "1"
+          ? "Sale recorded successfully. Inventory, sales records, tax tracking, and HITS Pulse™ trend data were updated."
+          : query?.updatedSale === "1"
+            ? "Sale updated successfully."
+            : query?.deletedSale === "1"
+              ? "Sale reversed successfully."
+              : query?.success;
 
   const supabase = await createClient();
 
@@ -719,6 +722,234 @@ export default async function InventoryDetailPage({
   }
 
   const relatedBreakTitle = buildBreakTitle(relatedBreak, item.source_break_id);
+
+  const { data: whatnotQueueData, error: whatnotQueueLoadError } = await supabase
+    .from("whatnot_upload_items")
+    .select(
+      `
+      id,
+      status,
+      price,
+      quantity,
+      offerable,
+      batch:whatnot_upload_batches!inner (
+        id,
+        status
+      )
+    `,
+    )
+    .eq("user_id", user.id)
+    .eq("inventory_item_id", item.id)
+    .eq("status", "queued")
+    .eq("batch.status", "building")
+    .maybeSingle();
+
+  if (whatnotQueueLoadError) {
+    throw new Error(
+      `Unable to load Whatnot upload status: ${whatnotQueueLoadError.message}`,
+    );
+  }
+
+  const isQueuedForWhatnot = Boolean(whatnotQueueData);
+
+  async function addToWhatnotUploadAction(formData: FormData) {
+    "use server";
+
+    const { redirect } = await import("next/navigation");
+
+    const whatnotPriceRaw = String(formData.get("whatnot_price") ?? "").trim();
+    const quantityRaw = String(formData.get("whatnot_quantity") ?? "1").trim();
+    const offerable = formData.get("whatnot_offerable") === "on";
+
+    const whatnotPrice = Number(whatnotPriceRaw);
+    const whatnotQuantity = Number(quantityRaw);
+
+    if (
+      !whatnotPriceRaw ||
+      !Number.isFinite(whatnotPrice) ||
+      whatnotPrice <= 0
+    ) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent("Enter a Whatnot price greater than $0 before adding this item to the upload queue.")}`,
+      );
+    }
+
+    if (
+      !Number.isInteger(whatnotQuantity) ||
+      whatnotQuantity <= 0
+    ) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent("Enter a valid whole-number quantity for the Whatnot listing.")}`,
+      );
+    }
+    const actionSupabase = await createClient();
+
+    const {
+      data: { user: actionUser },
+    } = await actionSupabase.auth.getUser();
+
+    if (!actionUser) {
+      redirect("/login");
+      return;
+    }
+
+    const { data: inventoryItem, error: inventoryError } = await actionSupabase
+      .from("inventory_items")
+      .select("id, available_quantity, status")
+      .eq("id", id)
+      .eq("user_id", actionUser.id)
+      .single();
+
+    if (inventoryError || !inventoryItem) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent("Inventory item could not be found.")}`,
+      );
+      return;
+    }
+
+    const actionAvailableQuantity = Number(
+      inventoryItem.available_quantity ?? 0,
+    );
+
+    if (
+      actionAvailableQuantity <= 0 ||
+      inventoryItem.status === "giveaway"
+    ) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent("This item is not currently available to add to the Whatnot Upload Queue.")}`,
+      );
+    }
+
+    if (whatnotQuantity > actionAvailableQuantity) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent(`Whatnot quantity cannot exceed the ${actionAvailableQuantity} item(s) currently available.`)}`,
+      );
+    }
+
+    let { data: buildingBatch, error: batchLoadError } = await actionSupabase
+      .from("whatnot_upload_batches")
+      .select("id")
+      .eq("user_id", actionUser.id)
+      .eq("status", "building")
+      .maybeSingle();
+
+    if (batchLoadError) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent(`Unable to load the current Whatnot upload batch: ${batchLoadError.message}`)}`,
+      );
+      return;
+    }
+
+    if (!buildingBatch) {
+      const { data: createdBatch, error: createBatchError } =
+        await actionSupabase
+          .from("whatnot_upload_batches")
+          .insert({
+            user_id: actionUser.id,
+            status: "building",
+          })
+          .select("id")
+          .single();
+
+      if (createBatchError || !createdBatch) {
+        // A simultaneous request may have created the one allowed building
+        // batch first. Re-read it before reporting an error.
+        const { data: retryBatch, error: retryBatchError } =
+          await actionSupabase
+            .from("whatnot_upload_batches")
+            .select("id")
+            .eq("user_id", actionUser.id)
+            .eq("status", "building")
+            .maybeSingle();
+
+        if (retryBatchError || !retryBatch) {
+          redirect(
+            `/app/inventory/${id}?error=${encodeURIComponent(`Unable to create the Whatnot upload batch: ${createBatchError?.message || retryBatchError?.message || "Unknown error"}`)}`,
+          );
+          return;
+        }
+
+        buildingBatch = retryBatch;
+      } else {
+        buildingBatch = createdBatch;
+      }
+    }
+
+    if (!buildingBatch) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent("Unable to determine the current Whatnot upload batch.")}`,
+      );
+      return;
+    }
+
+    const { data: existingQueueItem, error: existingQueueError } =
+      await actionSupabase
+        .from("whatnot_upload_items")
+        .select("id, status")
+        .eq("user_id", actionUser.id)
+        .eq("batch_id", buildingBatch.id)
+        .eq("inventory_item_id", id)
+        .maybeSingle();
+
+    if (existingQueueError) {
+      redirect(
+        `/app/inventory/${id}?error=${encodeURIComponent(`Unable to check the Whatnot Upload Queue: ${existingQueueError.message}`)}`,
+      );
+    }
+
+    if (existingQueueItem?.status === "queued") {
+      redirect(
+        `/app/inventory/${id}?success=${encodeURIComponent("This item is already in the current Whatnot Upload Queue.")}`,
+      );
+    }
+
+    if (existingQueueItem) {
+      const { error: restoreQueueError } = await actionSupabase
+        .from("whatnot_upload_items")
+        .update({
+          status: "queued",
+          quantity: whatnotQuantity,
+          price: whatnotPrice,
+          offerable,
+          exported_at: null,
+          queued_at: new Date().toISOString(),
+        })
+        .eq("id", existingQueueItem.id)
+        .eq("user_id", actionUser.id);
+
+      if (restoreQueueError) {
+        redirect(
+          `/app/inventory/${id}?error=${encodeURIComponent(`Unable to restore this item to the Whatnot Upload Queue: ${restoreQueueError.message}`)}`,
+        );
+      }
+    } else {
+      const { error: queueInsertError } = await actionSupabase
+        .from("whatnot_upload_items")
+        .insert({
+          user_id: actionUser.id,
+          batch_id: buildingBatch.id,
+          inventory_item_id: id,
+          quantity: whatnotQuantity,
+          price: whatnotPrice,
+          offerable,
+          status: "queued",
+        });
+
+      if (queueInsertError) {
+        if (queueInsertError.code === "23505") {
+          redirect(
+            `/app/inventory/${id}?success=${encodeURIComponent("This item is already in the current Whatnot Upload Queue.")}`,
+          );
+        }
+
+        redirect(
+          `/app/inventory/${id}?error=${encodeURIComponent(`Unable to add this item to the Whatnot Upload Queue: ${queueInsertError.message}`)}`,
+        );
+      }
+    }
+
+    redirect(`/app/inventory/${id}?whatnotQueued=1`);
+  }
 
   async function markItemListedAction() {
     "use server";
@@ -1072,6 +1303,103 @@ export default async function InventoryDetailPage({
                   >
                     Export eBay Draft CSV
                   </a>
+                  <form
+                    action={addToWhatnotUploadAction}
+                    className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
+                      Whatnot Bulk Inventory
+                    </div>
+
+                    {isQueuedForWhatnot ? (
+                      <div className="mt-2 space-y-1.5 text-xs text-zinc-400">
+                        <div>
+                          Queued Price:{" "}
+                          <span className="font-semibold text-zinc-200">
+                            {money(
+                              Number(
+                                (whatnotQueueData as {
+                                  price?: number | null;
+                                } | null)?.price ?? 0,
+                              ),
+                            )}
+                          </span>
+                        </div>
+                        <div>
+                          Queued Quantity:{" "}
+                          <span className="font-semibold text-zinc-200">
+                            {Number(
+                              (whatnotQueueData as {
+                                quantity?: number | null;
+                              } | null)?.quantity ?? 1,
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                          Whatnot Price
+                        </label>
+                        <input
+                          name="whatnot_price"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          required
+                          defaultValue={
+                            Number(item.estimated_value_unit ?? 0) > 0
+                              ? moneyInput(item.estimated_value_unit)
+                              : ""
+                          }
+                          placeholder="Required"
+                          className="app-input mt-1 w-full"
+                        />
+                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                          {Number(item.estimated_value_unit ?? 0) > 0
+                            ? `Prefilled from HITS Estimated Value: ${money(item.estimated_value_unit)}. Change it here without changing the inventory estimate.`
+                            : "Whatnot requires a price for this bulk listing. HITS does not currently have an estimated value to prefill."}
+                        </div>
+
+                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                          Quantity
+                        </label>
+                        <input
+                          name="whatnot_quantity"
+                          type="number"
+                          min={1}
+                          max={availableQuantity}
+                          step={1}
+                          required
+                          defaultValue={1}
+                          className="app-input mt-1 w-full"
+                        />
+
+                        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
+                          <input
+                            name="whatnot_offerable"
+                            type="checkbox"
+                            defaultChecked
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                          Allow offers on Whatnot
+                        </label>
+                      </>
+                    )}
+
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Adding..."
+                      overlayText="Adding item to Whatnot Upload Queue..."
+                      showOverlayOnClick
+                      disabled={isQueuedForWhatnot}
+                      className="app-button mt-2 w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isQueuedForWhatnot
+                        ? "In Whatnot Upload Queue"
+                        : "Add to Whatnot Bulk Inventory"}
+                    </AppLoadingButton>
+                  </form>
                   <form action={markItemListedAction} className="mt-2">
                     <AppLoadingButton
                       type="submit"

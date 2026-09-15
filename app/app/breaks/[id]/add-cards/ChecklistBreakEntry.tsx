@@ -1,13 +1,18 @@
 'use client'
 
 import Link from 'next/link'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition, type ComponentProps } from 'react'
 import {
   addBreakChecklistCardsAction,
   getBreakChecklistEntryProgressAction,
   updateBreakCardsReceivedFromChecklistAction,
 } from '@/app/actions/breaks'
 import ChecklistAlphabetRail from '@/app/components/ChecklistAlphabetRail'
+import ChecklistRowEditor, {
+  type ChecklistRowEditorItem,
+  type ChecklistRowEditorSection,
+} from '@/app/components/ChecklistRowEditor'
+import ChecklistCardResearch from '@/app/components/ChecklistCardResearch'
 
 type ChecklistOption = {
   id: string
@@ -51,7 +56,12 @@ type Props = {
   checklists: ChecklistOption[]
   sections: ChecklistSection[]
   items: ChecklistItem[]
+  canEditChecklistRows?: boolean
 }
+
+type SavedChecklistRow = Parameters<
+  ComponentProps<typeof ChecklistRowEditor>['onSaved']
+>[0]
 
 type EntryState = Record<string, { quantity: string; notes: string; status: string }>
 
@@ -65,11 +75,12 @@ type ParallelEntry = {
 type ParallelEntryState = Record<string, ParallelEntry[]>
 
 type ChecklistEntryDraft = {
-  version: 2
+  version: 3
   activeCategory: ChecklistCategory
   selectedChecklistId: string
   selectedTeam: string
   selectedSectionId: string
+  checklistIds: string[]
   entries: EntryState
   parallelEntries: ParallelEntryState
   savedAt: string
@@ -292,12 +303,56 @@ function shouldTryCompletion(e: React.ChangeEvent<HTMLInputElement>) {
   )
 }
 
+
+function enteredUnitsFromManualDraft(value: string) {
+  if (!value) return 0
+
+  try {
+    const parsed = JSON.parse(value) as {
+      rows?: Array<{
+        player_name?: unknown
+        card_number?: unknown
+        item_type?: unknown
+        quantity?: unknown
+        status?: unknown
+        notes?: unknown
+      }>
+    }
+
+    if (!Array.isArray(parsed.rows)) return 0
+
+    return parsed.rows.reduce((sum, row) => {
+      const playerName = String(row?.player_name ?? '').trim()
+      const cardNumber = String(row?.card_number ?? '').trim()
+      const itemType = String(row?.item_type ?? 'single_card')
+      const status = String(row?.status ?? 'available')
+      const notes = String(row?.notes ?? '').trim()
+
+      const hasMeaningfulData =
+        playerName !== '' ||
+        cardNumber !== '' ||
+        itemType !== 'single_card' ||
+        String(row?.quantity ?? '1') !== '1' ||
+        status !== 'available' ||
+        notes !== ''
+
+      if (!hasMeaningfulData) return sum
+
+      const quantity = Math.max(1, Math.floor(Number(row?.quantity ?? 1)))
+      return sum + (Number.isFinite(quantity) ? quantity : 1)
+    }, 0)
+  } catch {
+    return 0
+  }
+}
+
 export default function ChecklistBreakEntry({
   breakId,
   cardsReceived,
   checklists,
   sections,
   items,
+  canEditChecklistRows = false,
 }: Props) {
   const [activeCategory, setActiveCategory] =
     useState<ChecklistCategory>('baseball')
@@ -339,6 +394,9 @@ export default function ChecklistBreakEntry({
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const baseNotesRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const parallelNotesRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const [editingChecklistItemId, setEditingChecklistItemId] = useState('')
+  const [checklistRowEditMessage, setChecklistRowEditMessage] = useState('')
+  const [researchChecklistItemId, setResearchChecklistItemId] = useState('')
 
   const draftStorageKey = `hits:break-checklist-entry:${breakId}`
 
@@ -367,9 +425,13 @@ export default function ChecklistBreakEntry({
         const parsed = JSON.parse(raw) as Omit<
           Partial<ChecklistEntryDraft>,
           'version'
-        > & { version?: 1 | 2 }
+        > & { version?: 1 | 2 | 3 }
 
-        if (parsed.version !== 1 && parsed.version !== 2) {
+        if (
+          parsed.version !== 1 &&
+          parsed.version !== 2 &&
+          parsed.version !== 3
+        ) {
           window.localStorage.removeItem(draftStorageKey)
           if (!cancelled) setDraftReady(true)
           return
@@ -384,21 +446,34 @@ export default function ChecklistBreakEntry({
           setActiveCategory(parsed.activeCategory)
         }
 
-        let restoredItems = items
+        let restoredItems = [...items]
+        let restoredChecklists = [...checklists]
+        let restoredSections = [...sections]
 
-        if (
-          parsed.selectedChecklistId &&
-          checklists.some(
-            (checklist) => checklist.id === parsed.selectedChecklistId
+        const checklistIdsToRestore = Array.from(
+          new Set(
+            [
+              ...(parsed.version === 3 && Array.isArray(parsed.checklistIds)
+                ? parsed.checklistIds.filter(
+                    (value): value is string =>
+                      typeof value === 'string' && Boolean(value)
+                  )
+                : []),
+              parsed.selectedChecklistId || '',
+            ].filter(Boolean)
           )
-        ) {
-          const alreadyLoaded = items.some(
-            (item) => item.checklist_id === parsed.selectedChecklistId
+        )
+
+        for (const checklistId of checklistIdsToRestore) {
+          const alreadyLoaded = restoredItems.some(
+            (item) => item.checklist_id === checklistId
           )
 
-          if (!alreadyLoaded) {
+          if (alreadyLoaded) continue
+
+          try {
             const response = await fetch(
-              `/api/checklists/${encodeURIComponent(parsed.selectedChecklistId)}/entry-data`,
+              `/api/checklists/${encodeURIComponent(checklistId)}/entry-data`,
               { cache: 'no-store' }
             )
 
@@ -412,70 +487,84 @@ export default function ChecklistBreakEntry({
 
             if (!response.ok || !json.ok || !json.checklist) {
               throw new Error(
-                json.error || 'The saved checklist draft could not be loaded.'
+                json.error || 'A saved checklist draft could not be loaded.'
               )
             }
 
             if (cancelled) return
 
-            setAvailableChecklists((current) => [
-              ...current.filter(
-                (checklist) => checklist.id !== parsed.selectedChecklistId
+            restoredChecklists = [
+              ...restoredChecklists.filter(
+                (checklist) => checklist.id !== checklistId
               ),
-              json.checklist as ChecklistOption,
-            ])
-
-            setAvailableSections((current) => [
-              ...current.filter(
-                (section) => section.checklist_id !== parsed.selectedChecklistId
+              json.checklist,
+            ]
+            restoredSections = [
+              ...restoredSections.filter(
+                (section) => section.checklist_id !== checklistId
               ),
               ...(json.sections ?? []),
-            ])
-
-            setAvailableItems((current) => [
-              ...current.filter(
-                (item) => item.checklist_id !== parsed.selectedChecklistId
+            ]
+            restoredItems = [
+              ...restoredItems.filter(
+                (item) => item.checklist_id !== checklistId
               ),
               ...(json.items ?? []),
-            ])
+            ]
+          } catch (error) {
+            if (parsed.selectedChecklistId === checklistId) {
+              throw error
+            }
 
-            restoredItems = json.items ?? []
-          } else {
-            restoredItems = items.filter(
-              (item) => item.checklist_id === parsed.selectedChecklistId
-            )
+            // Keep restoring the other pending checklist entries even if an
+            // older/deleted checklist can no longer be loaded.
           }
+        }
 
-          setSelectedChecklistId(parsed.selectedChecklistId)
+        if (cancelled) return
 
-          if (
-            parsed.selectedTeam &&
-            restoredItems.some(
-              (item) =>
-                (clean(item.printed_team) || 'Other / Unassigned') ===
-                parsed.selectedTeam
-            )
-          ) {
-            setSelectedTeam(parsed.selectedTeam)
+        setAvailableChecklists(restoredChecklists)
+        setAvailableSections(restoredSections)
+        setAvailableItems(restoredItems)
+
+        if (parsed.selectedChecklistId) {
+          const selectedItems = restoredItems.filter(
+            (item) => item.checklist_id === parsed.selectedChecklistId
+          )
+
+          if (selectedItems.length > 0) {
+            setSelectedChecklistId(parsed.selectedChecklistId)
 
             if (
-              parsed.selectedSectionId &&
-              restoredItems.some(
+              parsed.selectedTeam &&
+              selectedItems.some(
                 (item) =>
                   (clean(item.printed_team) || 'Other / Unassigned') ===
-                    parsed.selectedTeam &&
-                  (item.section_id ||
-                    `other:${parsed.selectedChecklistId}`) ===
-                    parsed.selectedSectionId
+                  parsed.selectedTeam
               )
             ) {
-              setSelectedSectionId(parsed.selectedSectionId)
+              setSelectedTeam(parsed.selectedTeam)
+
+              if (
+                parsed.selectedSectionId &&
+                selectedItems.some(
+                  (item) =>
+                    (clean(item.printed_team) || 'Other / Unassigned') ===
+                      parsed.selectedTeam &&
+                    (item.section_id ||
+                      `other:${parsed.selectedChecklistId}`) ===
+                      parsed.selectedSectionId
+                )
+              ) {
+                setSelectedSectionId(parsed.selectedSectionId)
+              }
             }
           }
         }
 
+        const validItemIds = new Set(restoredItems.map((item) => item.id))
+
         if (parsed.entries && typeof parsed.entries === 'object') {
-          const validItemIds = new Set(restoredItems.map((item) => item.id))
           const restoredEntries: EntryState = {}
 
           for (const [itemId, entry] of Object.entries(parsed.entries)) {
@@ -507,11 +596,10 @@ export default function ChecklistBreakEntry({
         }
 
         if (
-          parsed.version === 2 &&
+          (parsed.version === 2 || parsed.version === 3) &&
           parsed.parallelEntries &&
           typeof parsed.parallelEntries === 'object'
         ) {
-          const validItemIds = new Set(restoredItems.map((item) => item.id))
           const restoredParallelEntries: ParallelEntryState = {}
 
           for (const [itemId, rows] of Object.entries(parsed.parallelEntries)) {
@@ -577,12 +665,28 @@ export default function ChecklistBreakEntry({
     draftSaveTimerRef.current = setTimeout(() => {
       try {
         const savedAt = new Date().toISOString()
+        const pendingItemIds = new Set([
+          ...Object.keys(entries),
+          ...Object.keys(parallelEntries),
+        ])
+        const checklistIds = Array.from(
+          new Set(
+            [
+              selectedChecklistId,
+              ...availableItems
+                .filter((item) => pendingItemIds.has(item.id))
+                .map((item) => item.checklist_id),
+            ].filter(Boolean)
+          )
+        )
+
         const draft: ChecklistEntryDraft = {
-          version: 2,
+          version: 3,
           activeCategory,
           selectedChecklistId,
           selectedTeam,
           selectedSectionId,
+          checklistIds,
           entries,
           parallelEntries,
           savedAt,
@@ -609,6 +713,7 @@ export default function ChecklistBreakEntry({
     selectedSectionId,
     entries,
     parallelEntries,
+    availableItems,
   ])
 
   useEffect(() => {
@@ -674,6 +779,20 @@ export default function ChecklistBreakEntry({
   const sectionById = useMemo(
     () => new Map(availableSections.map((section) => [section.id, section])),
     [availableSections]
+  )
+
+  const editableSections = useMemo(
+    () =>
+      availableSections
+        .filter((section) => section.checklist_id === selectedChecklistId)
+        .sort((a, b) => {
+          const aSort = Number(a.sort_order ?? Number.MAX_SAFE_INTEGER)
+          const bSort = Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)
+
+          if (aSort !== bSort) return aSort - bSort
+          return compareNatural(clean(a.name), clean(b.name))
+        }),
+    [availableSections, selectedChecklistId]
   )
 
   const filteredChecklistOptions = useMemo(() => {
@@ -899,7 +1018,12 @@ export default function ChecklistBreakEntry({
     return baseTotal + parallelTotal
   }, [entries, parallelEntries])
 
-  const totalAccountedFor = alreadyEnteredCount + totalEnteredQuantity
+  const manualDraftCount = useMemo(
+    () => enteredUnitsFromManualDraft(manualDraftJson),
+    [manualDraftJson]
+  )
+  const totalThisEntryQuantity = manualDraftCount + totalEnteredQuantity
+  const totalAccountedFor = alreadyEnteredCount + totalThisEntryQuantity
   const remainingCount = Math.max(0, receivedCount - totalAccountedFor)
 
   const submittedEntries = useMemo(() => {
@@ -1115,6 +1239,7 @@ export default function ChecklistBreakEntry({
           setChecklistSearch('')
           setActiveCategory(checklistCategory(json.checklist))
           setChecklistPickerOpen(false)
+          setResearchChecklistItemId('')
         }
 
         return json.checklist as ChecklistOption
@@ -1255,11 +1380,13 @@ export default function ChecklistBreakEntry({
     setChecklistCardSearch('')
     setChecklistSearch('')
     setChecklistPickerOpen(false)
+    setResearchChecklistItemId('')
   }
 
   function selectTeam(team: string) {
     setSelectedTeam(team)
     setSelectedSectionId('')
+    setResearchChecklistItemId('')
   }
 
   function itemSavedCount(itemId: string) {
@@ -1307,6 +1434,116 @@ export default function ChecklistBreakEntry({
       return sum + itemEnteredCount(item.id)
     }, 0)
   }
+
+  function toggleChecklistCardResearch(itemId: string) {
+    setResearchChecklistItemId((current) =>
+      current === itemId ? '' : itemId
+    )
+  }
+
+  function openChecklistRowEditor(item: ChecklistItem) {
+    if (!canEditChecklistRows) return
+
+    setChecklistRowEditMessage('')
+    setEditingChecklistItemId(item.id)
+  }
+
+  function closeChecklistRowEditor() {
+    setEditingChecklistItemId('')
+  }
+
+  function handleChecklistRowSaved(updatedItem: SavedChecklistRow) {
+    setAvailableItems((current) =>
+      current.map((item) =>
+        item.id === updatedItem.id
+          ? {
+              ...item,
+              ...updatedItem,
+              section_id: updatedItem.section_id || item.section_id,
+              card_number: updatedItem.card_number || '',
+              player_name: updatedItem.player_name || '',
+              rookie_flag: Boolean(updatedItem.rookie_flag),
+              auto_flag: Boolean(updatedItem.auto_flag),
+              relic_flag: Boolean(updatedItem.relic_flag),
+              serial_flag: Boolean(updatedItem.serial_flag),
+              print_run:
+                updatedItem.print_run === null ||
+                updatedItem.print_run === undefined
+                  ? null
+                  : Number(updatedItem.print_run),
+              quantity_required:
+                updatedItem.quantity_required ?? item.quantity_required,
+            }
+          : item
+      )
+    )
+
+    setChecklistRowEditMessage('Checklist row updated.')
+    setEditingChecklistItemId('')
+  }
+
+  function handleChecklistRowDeleted(itemId: string) {
+    setAvailableItems((current) =>
+      current.filter((item) => item.id !== itemId)
+    )
+
+    setEntries((current) => {
+      if (!(itemId in current)) return current
+      const next = { ...current }
+      delete next[itemId]
+      return next
+    })
+
+    setParallelEntries((current) => {
+      if (!(itemId in current)) return current
+      const next = { ...current }
+      delete next[itemId]
+      return next
+    })
+
+    setSavedByChecklistItem((current) => {
+      if (!(itemId in current)) return current
+      const next = { ...current }
+      delete next[itemId]
+      return next
+    })
+
+    delete baseNotesRefs.current[itemId]
+
+    if (highlightedChecklistItemId === itemId) {
+      setHighlightedChecklistItemId(null)
+    }
+
+    if (researchChecklistItemId === itemId) {
+      setResearchChecklistItemId('')
+    }
+
+    setChecklistRowEditMessage('Checklist row deleted.')
+    setEditingChecklistItemId('')
+  }
+
+  const editingChecklistItem = editingChecklistItemId
+    ? availableItems.find((item) => item.id === editingChecklistItemId) ?? null
+    : null
+
+  const checklistRowEditorItem: ChecklistRowEditorItem | null =
+    editingChecklistItem
+      ? {
+          ...editingChecklistItem,
+        }
+      : null
+
+  const checklistRowEditorSections: ChecklistRowEditorSection[] =
+    editableSections.map((section) => ({
+      ...section,
+      name: clean(section.name) || 'Uncategorized',
+    }))
+
+  const checklistRowDeleteBlockedReason = editingChecklistItemId
+    ? itemEnteredCount(editingChecklistItemId) > 0
+      ? 'This checklist row currently has unsaved break-entry quantity or added versions. Clear those entries before deleting the checklist row.'
+      : null
+    : null
 
   function openChecklistItemFromNavigation(item: ChecklistItem) {
     const team = clean(item.printed_team) || 'Other / Unassigned'
@@ -1388,12 +1625,12 @@ export default function ChecklistBreakEntry({
   function handleChecklistSubmit(
     event: React.FormEvent<HTMLFormElement>
   ) {
-    const totalAfterThisEntry = alreadyEnteredCount + totalEnteredQuantity
+    const totalAfterThisEntry = alreadyEnteredCount + totalThisEntryQuantity
 
     if (totalAfterThisEntry > receivedCount) {
       event.preventDefault()
       window.alert(
-        `This break already has ${alreadyEnteredCount} saved card${alreadyEnteredCount === 1 ? '' : 's'}. Adding ${totalEnteredQuantity} more would make ${totalAfterThisEntry}, but Items Received is ${receivedCount}. Update Items Received or reduce the new quantities before saving.`
+        `This break already has ${alreadyEnteredCount} saved card${alreadyEnteredCount === 1 ? '' : 's'}. Adding ${totalThisEntryQuantity} more (${manualDraftCount} manual + ${totalEnteredQuantity} checklist) would make ${totalAfterThisEntry}, but Items Received is ${receivedCount}. Update Items Received or reduce the new quantities before saving.`
       )
       return
     }
@@ -1401,7 +1638,7 @@ export default function ChecklistBreakEntry({
     if (totalAfterThisEntry < receivedCount) {
       const remaining = receivedCount - totalAfterThisEntry
       const confirmed = window.confirm(
-        `${alreadyEnteredCount} card${alreadyEnteredCount === 1 ? '' : 's'} already saved + ${totalEnteredQuantity} in this entry = ${totalAfterThisEntry} of ${receivedCount}. ${remaining} card${remaining === 1 ? '' : 's'} will still be unentered. Continue anyway?`
+        `${alreadyEnteredCount} card${alreadyEnteredCount === 1 ? '' : 's'} already saved + ${totalThisEntryQuantity} in this entry (${manualDraftCount} manual + ${totalEnteredQuantity} checklist) = ${totalAfterThisEntry} of ${receivedCount}. ${remaining} card${remaining === 1 ? '' : 's'} will still be unentered. Continue anyway?`
       )
 
       if (!confirmed) {
@@ -1508,8 +1745,13 @@ export default function ChecklistBreakEntry({
               {' · '}
               This Entry:{' '}
               <span className="font-semibold text-zinc-100">
-                {totalEnteredQuantity}
+                {totalThisEntryQuantity}
               </span>
+              {(manualDraftCount > 0 || totalEnteredQuantity > 0) && (
+                <span className="ml-1 text-xs text-zinc-500">
+                  (Manual {manualDraftCount} · Checklist {totalEnteredQuantity})
+                </span>
+              )}
               {' · '}
               Received:{' '}
               <span className="font-semibold text-zinc-100">
@@ -1675,6 +1917,12 @@ export default function ChecklistBreakEntry({
         </div>
       )}
 
+      {checklistRowEditMessage ? (
+        <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-200">
+          {checklistRowEditMessage}
+        </div>
+      ) : null}
+
       {selectedChecklistId && (
         <section className="app-section p-4">
           <div className="flex flex-col gap-4">
@@ -1812,31 +2060,107 @@ export default function ChecklistBreakEntry({
                         item.print_run ? `/${item.print_run}` : '',
                       ].filter(Boolean)
 
+                      const savedCount = itemSavedCount(item.id)
+
                       return (
-                        <button
+                        <div
                           key={item.id}
-                          type="button"
-                          onClick={() =>
-                            openChecklistItemFromNavigation(item)
-                          }
-                          className="grid w-full gap-1 px-4 py-3 text-left hover:bg-zinc-900/70 md:grid-cols-[90px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:items-center md:gap-3"
+                          className={`grid gap-2 px-4 py-3 ${
+                            canEditChecklistRows
+                              ? 'md:grid-cols-[70px_minmax(0,1fr)_90px_130px_minmax(180px,1fr)_44px_64px]'
+                              : 'md:grid-cols-[70px_minmax(0,1fr)_90px_130px_minmax(180px,1fr)_44px]'
+                          } md:items-center md:gap-3`}
                         >
-                          <span className="font-semibold text-cyan-200">
+                          <button
+                            type="button"
+                            onClick={() => openChecklistItemFromNavigation(item)}
+                            className="text-left font-semibold text-cyan-200 hover:underline"
+                            title="Jump to this card in the checklist"
+                          >
                             {item.card_number || '—'}
-                          </span>
-                          <span className="font-medium text-zinc-100">
-                            {item.player_name || 'Unnamed item'}
-                          </span>
-                          <span className="text-sm text-zinc-400">
-                            {clean(item.printed_team) || 'Other / Unassigned'}
-                          </span>
-                          <span className="text-xs text-zinc-500">
-                            {sectionName}
-                            {details.length > 0
-                              ? ` • ${details.join(' • ')}`
-                              : ''}
-                          </span>
-                        </button>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openChecklistItemFromNavigation(item)}
+                            className="min-w-0 text-left hover:underline"
+                            title="Jump to this card in the checklist"
+                          >
+                            <span className="block truncate font-medium text-zinc-100">
+                              {item.player_name || 'Unnamed item'}
+                            </span>
+                            <span className="block truncate text-xs text-zinc-500">
+                              {clean(item.printed_team) || 'Other / Unassigned'}
+                              {' • '}
+                              {sectionName}
+                              {details.length > 0 ? ` • ${details.join(' • ')}` : ''}
+                              {savedCount > 0 ? ` • Saved: ${savedCount}` : ''}
+                            </span>
+                          </button>
+
+                          <input
+                            type="number"
+                            min={0}
+                            value={entries[item.id]?.quantity ?? ''}
+                            onChange={(event) =>
+                              updateEntry(item.id, { quantity: event.target.value })
+                            }
+                            className="app-input w-full"
+                            placeholder="Qty"
+                            aria-label={`Quantity for ${item.player_name} ${item.card_number}`}
+                          />
+
+                          <select
+                            value={entries[item.id]?.status ?? 'available'}
+                            onChange={(event) =>
+                              updateEntry(item.id, { status: event.target.value })
+                            }
+                            className="app-select w-full"
+                            aria-label={`Status for ${item.player_name} ${item.card_number}`}
+                          >
+                            <option value="available">For Sale</option>
+                            <option value="personal">Personal</option>
+                            <option value="junk">Junk</option>
+                          </select>
+
+                          <input
+                            ref={(el) => {
+                              baseNotesRefs.current[item.id] = el
+                            }}
+                            value={entries[item.id]?.notes ?? ''}
+                            onChange={(event) =>
+                              updateBaseNotesWithCompletion(
+                                item.id,
+                                event.target.value,
+                                event
+                              )
+                            }
+                            className="app-input w-full"
+                            placeholder="Optional notes"
+                            aria-label={`Notes for ${item.player_name} ${item.card_number}`}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => addParallelEntry(item.id)}
+                            className="app-button px-2.5"
+                            title="Add another version / parallel of this card"
+                            aria-label={`Add another version of ${item.player_name} ${item.card_number}`}
+                          >
+                            +
+                          </button>
+
+                          {canEditChecklistRows ? (
+                            <button
+                              type="button"
+                              onClick={() => openChecklistRowEditor(item)}
+                              className="app-button px-2.5 text-cyan-200"
+                              title="Edit this checklist row"
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+                        </div>
                       )
                     })}
                   </div>
@@ -1937,8 +2261,8 @@ export default function ChecklistBreakEntry({
               ) : (
                 <>
                   <div className="border-b border-zinc-800 px-4 py-4">
-                    <div className="flex flex-wrap items-end justify-between gap-3">
-                      <div>
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+                      <div className="min-w-0 xl:w-56 xl:shrink-0">
                         <div className="text-lg font-semibold text-zinc-100">
                           {selectedTeam}
                         </div>
@@ -1947,7 +2271,53 @@ export default function ChecklistBreakEntry({
                         </div>
                       </div>
 
-                      <div className="text-xs text-zinc-500">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                          <input
+                            type="search"
+                            value={checklistCardSearch}
+                            onChange={(event) =>
+                              setChecklistCardSearch(event.target.value)
+                            }
+                            className="app-input min-w-0 flex-1"
+                            placeholder={
+                              checklistBrowseMode === 'player'
+                                ? 'Search players in this checklist...'
+                                : checklistBrowseMode === 'section'
+                                  ? 'Search sections in this checklist...'
+                                  : 'Search this checklist: player, card #, team, insert, parallel...'
+                            }
+                          />
+
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            {(
+                              [
+                                ['team', 'Team'],
+                                ['player', 'Player'],
+                                ['section', 'Section'],
+                              ] as Array<[ChecklistBrowseMode, string]>
+                            ).map(([mode, label]) => (
+                              <button
+                                key={`browser-${mode}`}
+                                type="button"
+                                onClick={() => {
+                                  setChecklistBrowseMode(mode)
+                                  setChecklistCardSearch('')
+                                }}
+                                className={
+                                  checklistBrowseMode === mode
+                                    ? 'app-button-primary'
+                                    : 'app-button'
+                                }
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-xs text-zinc-500">
                         {selectedTeamItems.length} checklist card
                         {selectedTeamItems.length === 1 ? '' : 's'}
                       </div>
@@ -1955,6 +2325,125 @@ export default function ChecklistBreakEntry({
                   </div>
 
                   <div className="p-4">
+                    {checklistBrowseMode === 'player' &&
+                      !checklistCardSearch.trim() && (
+                        <div className="mb-4 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
+                          <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                            {filteredPlayerNavigationOptions.map((player) => (
+                              <button
+                                key={`browser-player-${player.name}`}
+                                type="button"
+                                onClick={() =>
+                                  choosePlayerFromNavigation(player.name)
+                                }
+                                className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-900/70"
+                              >
+                                <span className="truncate text-zinc-200">
+                                  {player.name}
+                                </span>
+                                <span className="shrink-0 text-xs text-zinc-500">
+                                  {player.count}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {checklistBrowseMode === 'section' &&
+                      !checklistCardSearch.trim() && (
+                        <div className="mb-4 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30 p-2">
+                          <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-3">
+                            {filteredSectionNavigationOptions.map((section) => (
+                              <button
+                                key={`browser-section-${section.id}`}
+                                type="button"
+                                onClick={() =>
+                                  chooseSectionFromNavigation(section.name)
+                                }
+                                className="flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-zinc-900/70"
+                              >
+                                <span className="truncate text-zinc-200">
+                                  {section.name}
+                                </span>
+                                <span className="shrink-0 text-xs text-zinc-500">
+                                  {section.count}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {checklistCardSearch.trim() && (
+                      <div className="mb-4 max-h-80 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-950/30">
+                        {checklistCardSearchResults.length > 0 ? (
+                          <div className="divide-y divide-zinc-800">
+                            {checklistCardSearchResults.map((item) => {
+                              const sectionName =
+                                sectionById.get(item.section_id)?.name ?? 'Other'
+                              const details = [
+                                clean(item.parallel_name),
+                                clean(item.variation),
+                                item.rookie_flag ? 'RC' : '',
+                                item.auto_flag ? 'Auto' : '',
+                                item.relic_flag ? 'Relic' : '',
+                                item.serial_flag ? 'Serial' : '',
+                                item.print_run ? `/${item.print_run}` : '',
+                              ].filter(Boolean)
+
+                              return (
+                                <div
+                                  key={`browser-search-${item.id}`}
+                                  className="flex items-stretch"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openChecklistItemFromNavigation(item)
+                                    }
+                                    className="grid min-w-0 flex-1 gap-1 px-4 py-3 text-left hover:bg-zinc-900/70 md:grid-cols-[90px_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)] md:items-center md:gap-3"
+                                  >
+                                    <span className="font-semibold text-cyan-200">
+                                      {item.card_number || '—'}
+                                    </span>
+                                    <span className="font-medium text-zinc-100">
+                                      {item.player_name || 'Unnamed item'}
+                                    </span>
+                                    <span className="text-sm text-zinc-400">
+                                      {clean(item.printed_team) || 'Other / Unassigned'}
+                                    </span>
+                                    <span className="text-xs text-zinc-500">
+                                      {sectionName}
+                                      {details.length > 0
+                                        ? ` • ${details.join(' • ')}`
+                                        : ''}
+                                    </span>
+                                  </button>
+
+                                  {canEditChecklistRows ? (
+                                    <div className="flex shrink-0 items-center px-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => openChecklistRowEditor(item)}
+                                        className="app-button px-2.5 text-cyan-200"
+                                      >
+                                        Edit
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="px-4 py-6 text-center text-sm text-zinc-500">
+                            No checklist cards match that search.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                       {sectionOptions.map((section) => {
                         const active = section.id === selectedSectionId
@@ -2046,7 +2535,13 @@ export default function ChecklistBreakEntry({
                                       <th className="px-3 py-2.5">Qty</th>
                                       <th className="px-3 py-2.5">Status</th>
                                       <th className="px-3 py-2.5">Notes</th>
-                                      <th className="w-12 px-2 py-2.5"></th>
+                                      <th
+                                        className={
+                                          canEditChecklistRows
+                                            ? 'w-28 px-2 py-2.5'
+                                            : 'w-12 px-2 py-2.5'
+                                        }
+                                      ></th>
                                     </tr>
                                   </thead>
 
@@ -2079,11 +2574,29 @@ export default function ChecklistBreakEntry({
                                               .join(' ')}
                                           >
                                             <td className="px-3 py-2.5 font-semibold text-cyan-200">
-                                              {item.card_number}
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  toggleChecklistCardResearch(item.id)
+                                                }
+                                                className="text-left hover:underline"
+                                                title="Open card research"
+                                              >
+                                                {item.card_number}
+                                              </button>
                                             </td>
 
                                             <td className="px-3 py-2.5 font-medium text-zinc-100">
-                                              {item.player_name}
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  toggleChecklistCardResearch(item.id)
+                                                }
+                                                className="text-left hover:underline"
+                                                title="Open card research"
+                                              >
+                                                {item.player_name}
+                                              </button>
                                             </td>
 
                                             <td className="px-3 py-2.5 text-zinc-400">
@@ -2168,19 +2681,60 @@ export default function ChecklistBreakEntry({
                                             </td>
 
                                             <td className="px-2 py-2.5 text-right">
-                                              <button
-                                                type="button"
-                                                onClick={() =>
-                                                  addParallelEntry(item.id)
-                                                }
-                                                className="app-button px-2.5"
-                                                title="Add another version / parallel of this card"
-                                                aria-label={`Add another version of ${item.player_name} ${item.card_number}`}
-                                              >
-                                                +
-                                              </button>
+                                              <div className="flex items-center justify-end gap-2">
+                                                {canEditChecklistRows ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      openChecklistRowEditor(item)
+                                                    }
+                                                    className="app-button px-2.5 text-cyan-200"
+                                                    title="Edit this checklist row"
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                ) : null}
+
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    addParallelEntry(item.id)
+                                                  }
+                                                  className="app-button px-2.5"
+                                                  title="Add another version / parallel of this card"
+                                                  aria-label={`Add another version of ${item.player_name} ${item.card_number}`}
+                                                >
+                                                  +
+                                                </button>
+                                              </div>
                                             </td>
                                           </tr>
+
+                                          {researchChecklistItemId === item.id ? (
+                                            <tr className="bg-cyan-950/10">
+                                              <td
+                                                colSpan={7}
+                                                className="px-3 py-3"
+                                              >
+                                                <ChecklistCardResearch
+                                                  year={selectedChecklist?.year}
+                                                  brand={
+                                                    clean(selectedChecklist?.brand) ||
+                                                    clean(selectedChecklist?.manufacturer)
+                                                  }
+                                                  setName={
+                                                    clean(selectedChecklist?.product_name) ||
+                                                    clean(selectedChecklist?.name)
+                                                  }
+                                                  playerName={item.player_name}
+                                                  cardNumber={item.card_number}
+                                                  parallel={item.parallel_name}
+                                                  variation={item.variation}
+                                                  rookie={item.rookie_flag}
+                                                />
+                                              </td>
+                                            </tr>
+                                          ) : null}
 
                                           {(parallelEntries[item.id] ?? []).map(
                                             (parallel) => (
@@ -2324,6 +2878,19 @@ export default function ChecklistBreakEntry({
         </section>
       )}
 
+      {canEditChecklistRows && editingChecklistItemId ? (
+        <ChecklistRowEditor
+          open={Boolean(editingChecklistItemId)}
+          checklistId={selectedChecklistId}
+          item={checklistRowEditorItem}
+          sections={checklistRowEditorSections}
+          onClose={closeChecklistRowEditor}
+          onSaved={handleChecklistRowSaved}
+          onDeleted={handleChecklistRowDeleted}
+          deleteBlockedReason={checklistRowDeleteBlockedReason}
+        />
+      ) : null}
+
       <div className="sticky bottom-3 z-30 flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/90 px-4 py-3 backdrop-blur">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-400">
           <span>
@@ -2334,8 +2901,13 @@ export default function ChecklistBreakEntry({
             {' · '}
             This Entry:{' '}
             <span className="font-semibold text-zinc-100">
-              {totalEnteredQuantity}
+              {totalThisEntryQuantity}
             </span>
+            {(manualDraftCount > 0 || totalEnteredQuantity > 0) && (
+              <span className="ml-1 text-xs text-zinc-500">
+                (Manual {manualDraftCount} · Checklist {totalEnteredQuantity})
+              </span>
+            )}
             {' · '}
             Received:{' '}
             <span className="font-semibold text-zinc-100">{receivedCount}</span>
@@ -2406,7 +2978,7 @@ export default function ChecklistBreakEntry({
           className="app-button-primary inline-flex items-center justify-center gap-2"
           suppressHydrationWarning
           disabled={
-            isSavingChecklist || !progressReady || totalEnteredQuantity <= 0
+            isSavingChecklist || !progressReady || totalThisEntryQuantity <= 0
           }
         >
           {isSavingChecklist ? (
