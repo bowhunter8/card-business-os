@@ -12,6 +12,14 @@ export const SEARCH_PHRASE_ALIASES: Array<[RegExp, string]> = [
   [/\bboston\s+red\s+sox\b/g, 'redsox'],
   [/\bred\s+sox\b/g, 'redsox'],
   [/\bd\s+backs\b/g, 'dbacks'],
+  [/\bx\s+fractor\b/g, 'xfractor'],
+  [/\bsuper\s+fractor\b/g, 'superfractor'],
+  [/\blogo\s+fractor\b/g, 'logofractor'],
+  [/\bsuper\s+short\s+print\b/g, 'ssp'],
+  [/\bshort\s+print\b/g, 'sp'],
+  [/\bserial\s+numbered\b/g, 'numbered'],
+  [/\bimage\s+variation\b/g, 'imagevariation'],
+  [/\bphoto\s+variation\b/g, 'imagevariation'],
 ]
 
 const SEARCH_TOKEN_ALIASES: Record<string, string[]> = {
@@ -114,6 +122,60 @@ const SEARCH_TOKEN_ALIASES: Record<string, string[]> = {
 
   ag: ['allen', 'ginter'],
   bw: ['black', 'white'],
+
+  prism: ['prizm'],
+  prizm: ['prism'],
+
+  superfractor: ['super'],
+  super: ['superfractor'],
+
+  variation: ['var'],
+  var: ['variation'],
+
+  numbered: ['serial'],
+  serial: ['numbered'],
+
+  sp: ['shortprint'],
+  shortprint: ['sp'],
+
+  ssp: ['supershortprint'],
+  supershortprint: ['ssp'],
+
+  imagevariation: ['photovariation'],
+  photovariation: ['imagevariation'],
+
+  // Common hobby-entry misspellings
+  refracter: ['refractor'],
+  refrctor: ['refractor'],
+  refracor: ['refractor'],
+
+  paralel: ['parallel'],
+  parralel: ['parallel'],
+  paralell: ['parallel'],
+  parrallel: ['parallel'],
+
+  autograpgh: ['autograph'],
+  autogragh: ['autograph'],
+  autogrpah: ['autograph'],
+
+  rooky: ['rookie'],
+  rokie: ['rookie'],
+
+  superfracter: ['superfractor'],
+  superfrctor: ['superfractor'],
+
+  logofracter: ['logofractor'],
+  logofrctor: ['logofractor'],
+
+  prisim: ['prism', 'prizm'],
+  prizim: ['prism', 'prizm'],
+
+  varation: ['variation'],
+  vairation: ['variation'],
+  variaton: ['variation'],
+
+  seriel: ['serial'],
+  serialed: ['serial'],
 }
 
 export function normalizeSearchText(

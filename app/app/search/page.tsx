@@ -7,6 +7,7 @@ import CancelDetailsButton from './CancelDetailsButton'
 import BulkEbayDraftExportButton from '../inventory/BulkEbayDraftExportButton'
 import StickyBulkActions from './StickyBulkActions'
 import { updateInventoryBulkStatusShared, updateInventoryProcessingStatusShared } from '@/app/actions/inventory-bulk'
+import { buildSearchTokenVariants as buildSharedSearchTokenVariants } from '@/lib/searchAliases'
 
 type WhatnotOrderRow = {
   id: string
@@ -158,6 +159,114 @@ const INVENTORY_STATUS_FILTERS: InventoryStatusFilter[] = [
   'disposed',
   'giveaway',
 ]
+
+type InventorySortKey = 'item' | 'notes' | 'status' | 'qty' | 'available' | 'cost' | 'value'
+type SortDirection = 'asc' | 'desc'
+
+const INVENTORY_SORT_KEYS: InventorySortKey[] = ['item', 'notes', 'status', 'qty', 'available', 'cost', 'value']
+
+function normalizeInventorySortKey(value: string | null | undefined): InventorySortKey | null {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return INVENTORY_SORT_KEYS.includes(normalized as InventorySortKey)
+    ? (normalized as InventorySortKey)
+    : null
+}
+
+function normalizeSortDirection(value: string | null | undefined): SortDirection {
+  return String(value ?? '').trim().toLowerCase() === 'desc' ? 'desc' : 'asc'
+}
+
+function inventorySortValue(item: InventoryItemRow, key: InventorySortKey): string | number {
+  if (key === 'item') return buildInventoryDisplay(item) || item.title || ''
+  if (key === 'notes') return cleanText(item.notes || '')
+  if (key === 'status') return cleanText(item.status || '')
+  if (key === 'qty') return Number(item.quantity ?? 0)
+  if (key === 'available') return Number(item.available_quantity ?? 0)
+  if (key === 'cost') return Number(item.cost_basis_total ?? 0)
+  return Number(item.estimated_value_total ?? 0)
+}
+
+function sortInventoryRows(rows: InventoryItemRow[], key: InventorySortKey | null, direction: SortDirection) {
+  if (!key) return rows
+
+  return [...rows].sort((left, right) => {
+    const leftValue = inventorySortValue(left, key)
+    const rightValue = inventorySortValue(right, key)
+    let comparison = 0
+
+    if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+      comparison = leftValue - rightValue
+    } else {
+      comparison = String(leftValue).localeCompare(String(rightValue), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    }
+
+    return direction === 'desc' ? -comparison : comparison
+  })
+}
+
+function buildInventorySortHref({
+  q,
+  status,
+  currentSort,
+  currentDirection,
+  nextSort,
+}: {
+  q: string
+  status: InventoryStatusFilter | null
+  currentSort: InventorySortKey | null
+  currentDirection: SortDirection
+  nextSort: InventorySortKey
+}) {
+  const params = new URLSearchParams()
+  if (q.trim()) params.set('q', q.trim())
+  if (status) params.set('inventory_status', status)
+
+  const nextDirection: SortDirection =
+    currentSort === nextSort && currentDirection === 'asc' ? 'desc' : 'asc'
+
+  params.set('inventory_sort', nextSort)
+  params.set('inventory_dir', nextDirection)
+  return `/app/search?${params.toString()}#matching-inventory-items`
+}
+
+function InventorySortableHeader({
+  label,
+  sortKey,
+  q,
+  status,
+  currentSort,
+  currentDirection,
+  className = '',
+}: {
+  label: string
+  sortKey: InventorySortKey
+  q: string
+  status: InventoryStatusFilter | null
+  currentSort: InventorySortKey | null
+  currentDirection: SortDirection
+  className?: string
+}) {
+  const isActive = currentSort === sortKey
+  const indicator = isActive ? (currentDirection === 'asc' ? '▲' : '▼') : '↕'
+
+  return (
+    <th className={`app-th ${className}`.trim()}>
+      <Link
+        href={buildInventorySortHref({ q, status, currentSort, currentDirection, nextSort: sortKey })}
+        className="inline-flex items-center gap-1 whitespace-nowrap hover:text-zinc-100"
+        title={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        <span className={isActive ? 'text-zinc-200' : 'text-zinc-600'} aria-hidden="true">
+          {indicator}
+        </span>
+      </Link>
+    </th>
+  )
+}
 
 const BULK_ORDERS_FORM_ID = 'bulk-delete-orders-form'
 const BULK_BREAKS_FORM_ID = 'bulk-delete-breaks-form'
@@ -1033,6 +1142,10 @@ function buildTokenVariants(token: string) {
   const normalizedToken = normalizeSearchAliasPhrases(token)
   const variants = new Set<string>([normalizedToken])
 
+  for (const sharedVariant of buildSharedSearchTokenVariants(normalizedToken)) {
+    variants.add(sharedVariant)
+  }
+
   if (normalizedToken.endsWith('s') && normalizedToken.length > 3) {
     variants.add(normalizedToken.slice(0, -1))
   }
@@ -1903,11 +2016,15 @@ export default async function GlobalSearchPage({
     inventory_status?: string
     status_updated?: string
     status_error?: string
+    inventory_sort?: string
+    inventory_dir?: string
   }>
 }) {
   const params = searchParams ? await searchParams : undefined
   const qRaw = String(params?.q ?? '').trim()
   const activeInventoryStatusFilter = normalizeInventoryStatusFilter(params?.inventory_status)
+  const activeInventorySort = normalizeInventorySortKey(params?.inventory_sort)
+  const activeInventorySortDirection = normalizeSortDirection(params?.inventory_dir)
   const parsedSearch = parseSearchQuery(qRaw)
   const searchTokens = buildSearchTokens(parsedSearch.searchTextForMatching || qRaw)
   const searchFilters = parsedSearch.filters
@@ -2398,6 +2515,12 @@ export default async function GlobalSearchPage({
     }
   }
 
+  matchingInventory = sortInventoryRows(
+    matchingInventory,
+    activeInventorySort,
+    activeInventorySortDirection
+  )
+
   const totalHits =
     matchingOrders.length + matchingBreaks.length + matchingInventory.length + matchingSales.length
 
@@ -2782,13 +2905,13 @@ export default async function GlobalSearchPage({
                         label="Select all inventory items"
                       />
                     </th>
-                    <th className="app-th">Item</th>
-                    <th className="app-th min-w-45">Notes</th>
-                    <th className="app-th">Status</th>
-                    <th className="app-th">Qty</th>
-                    <th className="app-th">Available</th>
-                    <th className="app-th text-right">Cost</th>
-                    <th className="app-th text-right">Est. Value</th>
+                    <InventorySortableHeader label="Item" sortKey="item" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} />
+                    <InventorySortableHeader label="Notes" sortKey="notes" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} className="min-w-45" />
+                    <InventorySortableHeader label="Status" sortKey="status" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} />
+                    <InventorySortableHeader label="Qty" sortKey="qty" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} />
+                    <InventorySortableHeader label="Available" sortKey="available" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} />
+                    <InventorySortableHeader label="Cost" sortKey="cost" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} className="text-right" />
+                    <InventorySortableHeader label="Est. Value" sortKey="value" q={qRaw} status={activeInventoryStatusFilter} currentSort={activeInventorySort} currentDirection={activeInventorySortDirection} className="text-right" />
                     <th className="app-th min-w-55">Actions</th>
                   </tr>
                 </thead>

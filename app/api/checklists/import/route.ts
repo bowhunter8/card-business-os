@@ -1287,7 +1287,7 @@ function isDescriptiveParallelHeading(value: string) {
     /\b\d+\s*:\s*\d[\d,]*\b/.test(candidate) ||
     /\bprinting plates?\b/.test(candidate) ||
     /\bparallel(?:s)?\b/.test(candidate) ||
-    /\bplatinum\b/.test(candidate) ||
+    /^platinum(?:\s+parallel)?s?$/.test(candidate) ||
     /\bwood mini\b/.test(candidate) ||
     /\bglossy\b/.test(candidate) ||
     /\bfoilfractor\b/.test(candidate) ||

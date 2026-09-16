@@ -12,6 +12,7 @@ type ChecklistCardResearchProps = {
   variation?: string | null
   rookie?: boolean | null
   className?: string
+  showReferenceValue?: boolean
 }
 
 function clean(value: string | null | undefined) {
@@ -129,32 +130,34 @@ export default function ChecklistCardResearch(
         </div>
       </div>
 
-      <div className="mt-4 border-t border-slate-800 pt-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end">
-          <label className="block min-w-0 flex-1">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Reference Value
-            </span>
+      {props.showReferenceValue !== false ? (
+        <div className="mt-4 border-t border-slate-800 pt-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <label className="block min-w-0 flex-1">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Reference Value
+              </span>
 
-            <div className="flex items-center gap-2">
-              <span className="text-slate-400">$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={referenceValue}
-                onChange={(event) => setReferenceValue(event.target.value)}
-                className="app-input w-full"
-                placeholder="Optional"
-              />
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={referenceValue}
+                  onChange={(event) => setReferenceValue(event.target.value)}
+                  className="app-input w-full"
+                  placeholder="Optional"
+                />
+              </div>
+            </label>
+
+            <div className="text-xs text-slate-500 md:max-w-80">
+              Optional for now. This value is not saved to HITS yet.
             </div>
-          </label>
-
-          <div className="text-xs text-slate-500 md:max-w-80">
-            Optional for now. This value is not saved to HITS yet.
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   )
 }

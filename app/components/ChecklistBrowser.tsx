@@ -24,6 +24,7 @@ import ChecklistRowEditor, {
   type ChecklistRowEditorSection,
 } from '@/app/components/ChecklistRowEditor'
 import ChecklistCardResearch from '@/app/components/ChecklistCardResearch'
+import ChecklistMyInventory from '@/app/components/ChecklistMyInventory'
 
 type Checklist = {
   id: string
@@ -693,6 +694,7 @@ export default function ChecklistBrowser({
   const [people, setPeople] = useState<ChecklistPerson[]>([])
 
   const [mode, setMode] = useState<BrowseMode>('team')
+  const [myInventoryOpen, setMyInventoryOpen] = useState(false)
 
   const [selectedTeam, setSelectedTeam] = useState('')
   const [selectedPlayer, setSelectedPlayer] = useState('')
@@ -825,6 +827,7 @@ export default function ChecklistBrowser({
     setBuildQuote(null)
     setBuildQuoteLoading(false)
     setBuildPreferredInventoryByChecklistItemId(new Map())
+    setMyInventoryOpen(false)
     setMode('team')
   }, [checklistId])
 
@@ -1623,6 +1626,24 @@ export default function ChecklistBrowser({
     }
   }
 
+  async function openMyInventory() {
+    setMyInventoryOpen(true)
+
+    if (inventoryResultsLoaded) return
+
+    setInventoryCheckError('')
+
+    try {
+      await loadInventoryResults()
+    } catch (err) {
+      setInventoryCheckError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load checklist inventory results.'
+      )
+    }
+  }
+
   function switchMode(nextMode: BrowseMode) {
     setMode(nextMode)
     setSearchInput('')
@@ -2312,6 +2333,33 @@ export default function ChecklistBrowser({
             </div>
           </div>
 
+          <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950 p-1">
+            <button
+              type="button"
+              onClick={() => setMyInventoryOpen(false)}
+              className={`rounded-md px-3 py-2 text-xs font-semibold ${
+                !myInventoryOpen
+                  ? 'bg-sky-900 text-sky-100'
+                  : 'text-slate-300 hover:bg-slate-900'
+              }`}
+            >
+              Checklist
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void openMyInventory()}
+              className={`rounded-md px-3 py-2 text-xs font-semibold ${
+                myInventoryOpen
+                  ? 'bg-emerald-900 text-emerald-100'
+                  : 'text-slate-300 hover:bg-slate-900'
+              }`}
+            >
+              My Inventory
+            </button>
+          </div>
+
+          {!myInventoryOpen ? (
           <form
             onSubmit={submitSearch}
             className="flex min-w-75 flex-1 justify-end gap-2"
@@ -2344,16 +2392,27 @@ export default function ChecklistBrowser({
               </button>
             ) : null}
           </form>
+          ) : null}
         </div>
       </div>
 
-      {checklistRowEditMessage ? (
+      {myInventoryOpen ? (
+        <ChecklistMyInventory
+          checklist={checklist}
+          sections={sections}
+          items={items}
+          matches={inventoryMatches}
+          onClose={() => setMyInventoryOpen(false)}
+        />
+      ) : null}
+
+      {!myInventoryOpen && checklistRowEditMessage ? (
         <div className="rounded-xl border border-emerald-800 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
           {checklistRowEditMessage}
         </div>
       ) : null}
 
-      <div className="flex h-[calc(100vh-18rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-slate-800 bg-black">
+      <div className={`${myInventoryOpen ? 'hidden' : 'flex'} h-[calc(100vh-18rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-slate-800 bg-black`}>
         <div className="flex shrink-0 flex-wrap gap-2 border-b border-slate-800 p-3">
           <button
             type="button"

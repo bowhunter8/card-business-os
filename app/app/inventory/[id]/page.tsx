@@ -167,6 +167,50 @@ function buildDisplay(item: InventoryItem) {
   return parts.filter(Boolean).join(" • ");
 }
 
+function cleanResearchText(value: string | number | null | undefined) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function buildInventoryResearchQuery(item: InventoryItem) {
+  const parts = [
+    item.player_name,
+    item.year,
+    item.set_name,
+    item.card_number ? `#${cleanResearchText(item.card_number).replace(/^#/, "")}` : null,
+    item.parallel_name,
+  ];
+
+  const structured = parts.map(cleanResearchText).filter(Boolean).join(" ");
+
+  if (structured) return structured;
+
+  return cleanResearchText(item.title)
+    .replace(/[•·]/g, " ")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\((?:\d+\s*)?orders?\)/gi, " ")
+    .replace(/\bcombined\b/gi, " ")
+    .replace(/\bwhatnot\b/gi, " ")
+    .replace(/\borders?\b/gi, " ")
+    .replace(/\bbreaks?\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildInventoryEbaySoldUrl(searchQuery: string) {
+  const url = new URL("https://www.ebay.com/sch/i.html");
+  url.searchParams.set("_nkw", searchQuery);
+  url.searchParams.set("LH_Sold", "1");
+  url.searchParams.set("LH_Complete", "1");
+  url.searchParams.set("rt", "nc");
+  return url.toString();
+}
+
+function buildInventoryGoogleUrl(searchQuery: string) {
+  const url = new URL("https://www.google.com/search");
+  url.searchParams.set("q", searchQuery);
+  return url.toString();
+}
+
 function buildRelatedSourceItemDisplay(item: RelatedSourceInventoryItem) {
   const primary = item.title || item.player_name || "Untitled item";
   const details = [
@@ -282,7 +326,7 @@ function EditableField({
   disabled?: boolean;
 }) {
   return (
-    <div className="app-metric-card p-3">
+    <div className="app-metric-card p-2">
       <label
         className="text-xs font-medium uppercase tracking-wide text-zinc-400"
         htmlFor={name}
@@ -298,7 +342,7 @@ function EditableField({
         min={min}
         defaultValue={defaultValue}
         disabled={disabled}
-        className={`app-input mt-1.5 ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
+        className={`app-input mt-1 ${disabled ? "cursor-not-allowed opacity-70" : ""}`}
       />
     </div>
   );
@@ -312,11 +356,11 @@ function ReadonlyMetric({
   value: string | number;
 }) {
   return (
-    <div className="app-metric-card p-3">
+    <div className="app-metric-card p-2">
       <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
         {label}
       </div>
-      <div className="mt-1 text-lg font-semibold leading-tight">{value}</div>
+      <div className="mt-0.5 text-base font-semibold leading-tight">{value}</div>
     </div>
   );
 }
@@ -369,7 +413,7 @@ function EstimateValueMetric({
   formId: string;
 }) {
   return (
-    <div className="app-metric-card p-3 md:col-span-2">
+    <div className="app-metric-card p-2">
       <input
         id="estimated_value_unit"
         form={formId}
@@ -378,12 +422,12 @@ function EstimateValueMetric({
         defaultValue={item.estimated_value_unit ?? 0}
       />
 
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-1.5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-35">
           <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
             Estimated Value
           </div>
-          <div className="mt-1 text-lg font-semibold leading-tight">
+          <div className="mt-0.5 text-base font-semibold leading-tight">
             {money(item.estimated_value_unit)}
           </div>
         </div>
@@ -654,6 +698,9 @@ export default async function InventoryDetailPage({
   const itemFormId = "inventory-inline-edit-form";
   const itemName =
     buildDisplay(item) || item.title || item.player_name || "Untitled item";
+  const researchQuery = buildInventoryResearchQuery(item);
+  const ebaySoldCompsUrl = buildInventoryEbaySoldUrl(researchQuery);
+  const googleResearchUrl = buildInventoryGoogleUrl(researchQuery);
   const hasActiveSales = activeSales.length > 0;
   const relatedBreakHref = item.source_break_id
     ? `/app/breaks/${item.source_break_id}`
@@ -1109,6 +1156,24 @@ export default async function InventoryDetailPage({
         </div>
 
         <div className="flex flex-wrap items-start gap-2">
+          <a
+            href={ebaySoldCompsUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="app-button whitespace-nowrap"
+          >
+            eBay Sold Comps
+          </a>
+
+          <a
+            href={googleResearchUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="app-button whitespace-nowrap"
+          >
+            Google
+          </a>
+
           {isLockedForBusinessEvent ? (
             <span className="app-button pointer-events-none opacity-60">
               Locked
@@ -1248,526 +1313,7 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      <div className="app-section mt-0 p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h2 className="text-base font-semibold leading-tight">
-              Inventory Actions
-            </h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Use these actions to move quantity out of sellable inventory while
-              preserving the audit trail.
-            </p>
-          </div>
-          <div className="text-xs text-zinc-500">
-            Available: {availableQuantity}
-          </div>
-        </div>
 
-        {isLockedForBusinessEvent ? (
-          <div className="app-alert-warning mt-3">
-            {isDisassembledBuild
-              ? "This finished build has been disassembled and is retained only for audit/history."
-              : "This item is locked because it has already been finalized for giveaway or tax review."}
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-3 lg:grid-cols-4">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
-              <div className="text-sm font-semibold text-zinc-100">Sell</div>
-              <p className="mt-1 text-xs text-zinc-400">
-                Record a sale and reduce available quantity through the sales
-                workflow.
-              </p>
-              {hasAvailableToSell ? (
-                <>
-                  <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-                    Quantity
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={item.available_quantity ?? undefined}
-                    defaultValue={1}
-                    className="app-input mt-2 w-full"
-                    readOnly
-                  />
-                  <Link
-                    href={`/app/inventory/${item.id}/sell?quantity=1`}
-                    className="app-button-primary mt-3 w-full justify-center"
-                  >
-                    Sell Item
-                  </Link>
-                  <a
-                    href={`/app/inventory/${item.id}/ebay-draft`}
-                    className="app-button mt-2 w-full justify-center"
-                  >
-                    Export eBay Draft CSV
-                  </a>
-                  <form
-                    action={addToWhatnotUploadAction}
-                    className="mt-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5"
-                  >
-                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
-                      Whatnot Bulk Inventory
-                    </div>
-
-                    {isQueuedForWhatnot ? (
-                      <div className="mt-2 space-y-1.5 text-xs text-zinc-400">
-                        <div>
-                          Queued Price:{" "}
-                          <span className="font-semibold text-zinc-200">
-                            {money(
-                              Number(
-                                (whatnotQueueData as {
-                                  price?: number | null;
-                                } | null)?.price ?? 0,
-                              ),
-                            )}
-                          </span>
-                        </div>
-                        <div>
-                          Queued Quantity:{" "}
-                          <span className="font-semibold text-zinc-200">
-                            {Number(
-                              (whatnotQueueData as {
-                                quantity?: number | null;
-                              } | null)?.quantity ?? 1,
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-                          Whatnot Price
-                        </label>
-                        <input
-                          name="whatnot_price"
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          required
-                          defaultValue={
-                            Number(item.estimated_value_unit ?? 0) > 0
-                              ? moneyInput(item.estimated_value_unit)
-                              : ""
-                          }
-                          placeholder="Required"
-                          className="app-input mt-1 w-full"
-                        />
-                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                          {Number(item.estimated_value_unit ?? 0) > 0
-                            ? `Prefilled from HITS Estimated Value: ${money(item.estimated_value_unit)}. Change it here without changing the inventory estimate.`
-                            : "Whatnot requires a price for this bulk listing. HITS does not currently have an estimated value to prefill."}
-                        </div>
-
-                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-                          Quantity
-                        </label>
-                        <input
-                          name="whatnot_quantity"
-                          type="number"
-                          min={1}
-                          max={availableQuantity}
-                          step={1}
-                          required
-                          defaultValue={1}
-                          className="app-input mt-1 w-full"
-                        />
-
-                        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
-                          <input
-                            name="whatnot_offerable"
-                            type="checkbox"
-                            defaultChecked
-                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
-                          />
-                          Allow offers on Whatnot
-                        </label>
-                      </>
-                    )}
-
-                    <AppLoadingButton
-                      type="submit"
-                      loadingText="Adding..."
-                      overlayText="Adding item to Whatnot Upload Queue..."
-                      showOverlayOnClick
-                      disabled={isQueuedForWhatnot}
-                      className="app-button mt-2 w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isQueuedForWhatnot
-                        ? "In Whatnot Upload Queue"
-                        : "Add to Whatnot Bulk Inventory"}
-                    </AppLoadingButton>
-                  </form>
-                  <form action={markItemListedAction} className="mt-2">
-                    <AppLoadingButton
-                      type="submit"
-                      loadingText="Marking..."
-                      overlayText="Marking item listed..."
-                      showOverlayOnClick
-                      disabled={item.status === "listed"}
-                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {item.status === "listed" ? "Listed" : "Mark Listed"}
-                    </AppLoadingButton>
-                  </form>
-                  <form action={putItemAwayAction} className="mt-2">
-                    <AppLoadingButton
-                      type="submit"
-                      loadingText="Updating..."
-                      overlayText="Marking item put away..."
-                      showOverlayOnClick
-                      disabled={item.processing_status === "put_away"}
-                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {item.processing_status === "put_away"
-                        ? "Put Away"
-                        : "Mark Put Away"}
-                    </AppLoadingButton>
-                  </form>
-                </>
-              ) : (
-                <span className="app-button mt-3 w-full justify-center pointer-events-none opacity-60">
-                  Not Available
-                </span>
-              )}
-            </div>
-
-            <form
-              action={moveToPersonalAction}
-              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
-            >
-              <input type="hidden" name="inventory_item_id" value={item.id} />
-              <input type="hidden" name="action_type" value="personal" />
-              <div className="text-sm font-semibold text-zinc-100">
-                Move to Personal
-              </div>
-              <p className="mt-1 text-xs text-zinc-400">
-                Keep one or more items for your personal collection.
-              </p>
-              <div className="mt-3 grid gap-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Quantity
-                </label>
-                <input
-                  name="quantity_to_move"
-                  type="number"
-                  min={1}
-                  max={availableQuantity ?? undefined}
-                  defaultValue={1}
-                  className="app-input"
-                />
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Notes
-                </label>
-                <input
-                  name="movement_notes"
-                  type="text"
-                  className="app-input"
-                  placeholder="Optional"
-                />
-                <AppLoadingButton
-                  type="submit"
-                  loadingText="Moving..."
-                  overlayText="Moving to personal collection..."
-                  showOverlayOnClick
-                  disabled={availableQuantity <= 0}
-                  className="app-button mt-1 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Move to Personal
-                </AppLoadingButton>
-              </div>
-            </form>
-
-            <form
-              action={markAsGiveawayAction}
-              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
-            >
-              <input type="hidden" name="inventory_item_id" value={item.id} />
-              <input type="hidden" name="action_type" value="giveaway" />
-              <div className="text-sm font-semibold text-zinc-100">
-                Giveaway
-              </div>
-              <p className="mt-1 text-xs text-zinc-400">
-                Move quantity out of inventory for a giveaway or buyer bonus.
-              </p>
-              <div className="mt-3 grid gap-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Quantity
-                </label>
-                <input
-                  name="quantity_to_move"
-                  type="number"
-                  min={1}
-                  max={availableQuantity ?? undefined}
-                  defaultValue={1}
-                  className="app-input"
-                />
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Reason
-                </label>
-                <select name="reason" className="app-select">
-                  <option value="Customer Appreciation">
-                    Customer Appreciation
-                  </option>
-                  <option value="Package Insert / Buyer Bonus">
-                    Package Insert / Buyer Bonus
-                  </option>
-                  <option value="Streamer Giveaway">Streamer Giveaway</option>
-                  <option value="Marketing">Marketing</option>
-                  <option value="Other">Other</option>
-                </select>
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Notes
-                </label>
-                <input
-                  name="movement_notes"
-                  type="text"
-                  className="app-input"
-                  placeholder="Optional"
-                />
-                <AppLoadingButton
-                  type="submit"
-                  loadingText="Recording..."
-                  overlayText="Recording giveaway..."
-                  showOverlayOnClick
-                  disabled={availableQuantity <= 0}
-                  className="app-button-warning mt-1 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Record Giveaway
-                </AppLoadingButton>
-              </div>
-            </form>
-
-            <form
-              action={disposeInventoryAction}
-              className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"
-            >
-              <input type="hidden" name="inventory_item_id" value={item.id} />
-              <input type="hidden" name="action_type" value="junk" />
-              <div className="text-sm font-semibold text-zinc-100">
-                Dispose / Junk
-              </div>
-              <p className="mt-1 text-xs text-zinc-400">
-                Remove damaged, lost, or unsellable quantity from active
-                inventory.
-              </p>
-              <div className="mt-3 grid gap-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Quantity
-                </label>
-                <input
-                  name="quantity_to_move"
-                  type="number"
-                  min={1}
-                  max={availableQuantity ?? undefined}
-                  defaultValue={1}
-                  className="app-input"
-                />
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Reason
-                </label>
-                <select name="reason" className="app-select">
-                  <option value="Damaged">Damaged</option>
-                  <option value="Lost">Lost</option>
-                  <option value="Destroyed">Destroyed</option>
-                  <option value="Unsellable">Unsellable</option>
-                  <option value="Other">Other</option>
-                </select>
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Notes
-                </label>
-                <input
-                  name="movement_notes"
-                  type="text"
-                  className="app-input"
-                  placeholder="Optional"
-                />
-                <AppLoadingButton
-                  type="submit"
-                  loadingText="Recording..."
-                  overlayText="Recording disposal..."
-                  showOverlayOnClick
-                  disabled={availableQuantity <= 0}
-                  className="app-button-danger mt-1 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Dispose / Junk
-                </AppLoadingButton>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {!isLockedForBusinessEvent && canDelete ? (
-          <div className="mt-3 flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-sm font-semibold text-zinc-100">
-                Delete Item
-              </div>
-              <p className="mt-1 text-xs text-zinc-400">
-                Only delete records that were entered by mistake. Use Dispose /
-                Junk when the item physically existed but is no longer sellable.
-              </p>
-            </div>
-            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
-          </div>
-        ) : null}
-
-        {!isLockedForBusinessEvent && isFinalizedBuild ? (
-          <div className="app-alert-info mt-3">
-            Built inventory items are not deleted directly. Use Disassemble
-            Build above to restore the original component inventory and preserve
-            the audit trail.
-          </div>
-        ) : null}
-      </div>
-
-      {item.source_break_id ? (
-        <div className="app-section mt-0 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                Original Source
-              </div>
-              <h2 className="mt-1 text-base font-semibold leading-tight">
-                {relatedBreakTitle}
-              </h2>
-              <p className="mt-1 text-sm text-zinc-400">
-                This item was created from a saved break. Use these links to
-                review the original break, continue entering items, or jump to
-                the other items from the same break.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Link href={relatedBreakHref} className="app-button">
-                Open Break Details
-              </Link>
-              <Link
-                href={relatedBreakAddItemsHref}
-                className="app-button-primary"
-              >
-                Continue Entering Items
-              </Link>
-              <Link href={relatedBreakItemsHref} className="app-button">
-                View Break Items
-              </Link>
-            </div>
-          </div>
-
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
-            <Detail
-              label="Created From"
-              value={buildSourceTypeLabel(item.source_type)}
-            />
-            <Detail
-              label="Break Date"
-              value={formatDate(relatedBreak?.break_date)}
-            />
-            <Detail
-              label="Breaker / Source"
-              value={relatedBreak?.source_name || "—"}
-            />
-            <Detail label="Order #" value={relatedBreak?.order_number || "—"} />
-            <Detail label="Format" value={relatedBreak?.format_type || "—"} />
-            <Detail
-              label="Items Received"
-              value={String(relatedBreak?.cards_received ?? "—")}
-            />
-            <Detail label="Created" value={formatDate(item.created_at)} />
-            <Detail label="Last Updated" value={formatDate(item.updated_at)} />
-          </div>
-
-          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
-            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Item History
-                </div>
-                <div className="mt-1 text-sm text-zinc-300">
-                  Created from break inventory entry. Cost basis and quantity
-                  are preserved on this item for sale, giveaway, personal, junk,
-                  or write-off tracking.
-                </div>
-              </div>
-              <div className="text-xs text-zinc-500">
-                Source ID: {item.source_break_id}
-              </div>
-            </div>
-          </div>
-
-          {relatedSourceItems.length > 0 ? (
-            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70">
-              <div className="flex flex-col gap-1 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
-                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                  Other Inventory Items From This Break
-                </div>
-                <div className="text-xs text-zinc-500">
-                  Showing {relatedSourceItems.length} related item(s)
-                </div>
-              </div>
-              <div className="divide-y divide-zinc-800">
-                {relatedSourceItems.map((relatedItem) => (
-                  <Link
-                    key={relatedItem.id}
-                    href={`/app/inventory/${relatedItem.id}`}
-                    className="flex flex-col gap-1 px-3 py-2.5 transition hover:bg-zinc-900/70 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="wrap-break-word text-sm font-medium text-zinc-100">
-                        {buildRelatedSourceItemDisplay(relatedItem)}
-                      </div>
-                      <div className="mt-0.5 text-xs text-zinc-500">
-                        Qty {relatedItem.quantity ?? 0} • Cost{" "}
-                        {money(relatedItem.cost_basis_total)}
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      {renderStatusPill(relatedItem.status)}
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="app-alert-info mt-3">
-              No other active inventory items were found with this same source
-              break ID.
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="app-alert-info">
-          This item does not have a saved source break ID. It may have been
-          created manually, imported, or created before source linking was
-          added.
-        </div>
-      )}
-
-      {!isDisassembledBuild &&
-      (effectiveStatus === "personal" ||
-        effectiveStatus === "giveaway" ||
-        effectiveStatus === "junk") ? (
-        <div className="app-alert-warning">
-          This status change affects tax reporting. Ensure this item is not also
-          counted as an expense or inventory elsewhere to avoid double counting.
-        </div>
-      ) : null}
-
-      {effectiveStatus === "junk" ? (
-        <div className="app-alert-info">
-          This item is marked as Junk and is being kept for recordkeeping, not
-          active selling.
-        </div>
-      ) : null}
-
-      {effectiveStatus === "personal" && !isDisassembledBuild ? (
-        <div className="app-alert-info">
-          This item is marked as Personal Collection and is not currently part
-          of your active sell inventory.
-        </div>
-      ) : null}
 
       {isPlannedGiveaway ? (
         <div className="app-alert-info">
@@ -1965,7 +1511,57 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-4">
+      <div className="app-section mt-0 p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <h2 className="shrink-0 pb-2 text-sm font-semibold leading-tight">Item Details</h2>
+
+          <div className="min-w-[20rem] flex-1">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Title</label>
+            <input form={itemFormId} name="title" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.title ?? ""} className={`app-input w-full ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+
+          {isLockedForBusinessEvent ? (
+            <span className="app-badge app-badge-neutral mb-2 shrink-0">Locked</span>
+          ) : null}
+        </div>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Player / Item</label>
+            <input form={itemFormId} name="player_name" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.player_name ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Year</label>
+            <input form={itemFormId} name="year" disabled={isLockedForBusinessEvent} type="text" placeholder="2023-24" defaultValue={item.year ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">#</label>
+            <input form={itemFormId} name="card_number" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.card_number ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Brand</label>
+            <input form={itemFormId} name="brand" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.brand ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Parallel</label>
+            <input form={itemFormId} name="parallel_name" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.parallel_name ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Team</label>
+            <input form={itemFormId} name="team" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.team ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Location</label>
+            <input form={itemFormId} name="storage_location" disabled={isLockedForBusinessEvent} type="text" defaultValue={item.storage_location ?? ""} className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+          <div className="sm:col-span-2 lg:col-span-4 xl:col-span-7">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-400">Notes</label>
+            <textarea form={itemFormId} name="notes" disabled={isLockedForBusinessEvent} rows={2} defaultValue={item.notes ?? ""} className={`app-textarea ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`} />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid items-stretch gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(22rem,2.25fr)_minmax(0,1fr)_minmax(0,1fr)]">
         {isFinalizedDisposal ? (
           <ReadonlyMetric label="Status" value="Written Off - Tax Locked" />
         ) : isFinalizedGiveaway ? (
@@ -1989,6 +1585,24 @@ export default async function InventoryDetailPage({
           disabled={isLockedForBusinessEvent}
         />
 
+        <EditableField
+          label="Unit Cost"
+          name="cost_basis_unit"
+          type="number"
+          step="0.01"
+          min={0}
+          defaultValue={moneyInput(item.cost_basis_unit)}
+          formId={itemFormId}
+          disabled={isLockedForBusinessEvent}
+        />
+
+        <ReadonlyMetric
+          label="Total Cost"
+          value={money(item.cost_basis_total)}
+        />
+
+        <EstimateValueMetric item={item} formId={itemFormId} />
+
         <ReadonlyMetric
           label="Available"
           value={item.available_quantity ?? 0}
@@ -2003,175 +1617,503 @@ export default async function InventoryDetailPage({
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-4">
-        <EditableField
-          label="Unit Cost"
-          name="cost_basis_unit"
-          type="number"
-          step="0.01"
-          min={0}
-          defaultValue={moneyInput(item.cost_basis_unit)}
-          formId={itemFormId}
-          disabled={isLockedForBusinessEvent}
-        />
-        <ReadonlyMetric
-          label="Total Cost"
-          value={money(item.cost_basis_total)}
-        />
-        <EstimateValueMetric item={item} formId={itemFormId} />
+      <div className="app-section mt-0 p-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold leading-tight">
+              Inventory Actions
+            </h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Use these actions to move quantity out of sellable inventory while
+              preserving the audit trail.
+            </p>
+          </div>
+          <div className="text-xs text-zinc-500">
+            Available: {availableQuantity}
+          </div>
+        </div>
+
+        {isLockedForBusinessEvent ? (
+          <div className="app-alert-warning mt-3">
+            {isDisassembledBuild
+              ? "This finished build has been disassembled and is retained only for audit/history."
+              : "This item is locked because it has already been finalized for giveaway or tax review."}
+          </div>
+        ) : (
+          <div className="mt-2 grid items-start gap-2 xl:grid-cols-[minmax(20rem,1.55fr)_minmax(14rem,1fr)_minmax(14rem,1fr)_minmax(14rem,1fr)]">
+            <div className="self-start rounded-xl border border-zinc-800 bg-zinc-950/70 p-2">
+              <div className="text-sm font-semibold text-zinc-100">Sell</div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Record a sale and reduce available quantity through the sales
+                workflow.
+              </p>
+              {hasAvailableToSell ? (
+                <>
+                  <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                    Quantity
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={item.available_quantity ?? undefined}
+                    defaultValue={1}
+                    className="app-input mt-1 w-full"
+                    readOnly
+                  />
+                  <Link
+                    href={`/app/inventory/${item.id}/sell?quantity=1`}
+                    className="app-button-primary mt-2 w-full justify-center"
+                  >
+                    Sell Item
+                  </Link>
+                  <a
+                    href={`/app/inventory/${item.id}/ebay-draft`}
+                    className="app-button mt-2 w-full justify-center"
+                  >
+                    Export eBay Draft CSV
+                  </a>
+                  <form
+                    action={addToWhatnotUploadAction}
+                    className="mt-1.5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
+                      Whatnot Bulk Inventory
+                    </div>
+
+                    {isQueuedForWhatnot ? (
+                      <div className="mt-2 space-y-1.5 text-xs text-zinc-400">
+                        <div>
+                          Queued Price:{" "}
+                          <span className="font-semibold text-zinc-200">
+                            {money(
+                              Number(
+                                (whatnotQueueData as {
+                                  price?: number | null;
+                                } | null)?.price ?? 0,
+                              ),
+                            )}
+                          </span>
+                        </div>
+                        <div>
+                          Queued Quantity:{" "}
+                          <span className="font-semibold text-zinc-200">
+                            {Number(
+                              (whatnotQueueData as {
+                                quantity?: number | null;
+                              } | null)?.quantity ?? 1,
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                          Whatnot Price
+                        </label>
+                        <input
+                          name="whatnot_price"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          required
+                          defaultValue={
+                            Number(item.estimated_value_unit ?? 0) > 0
+                              ? moneyInput(item.estimated_value_unit)
+                              : ""
+                          }
+                          placeholder="Required"
+                          className="app-input mt-1 w-full"
+                        />
+                        <div className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                          {Number(item.estimated_value_unit ?? 0) > 0
+                            ? `Prefilled from HITS Estimated Value: ${money(item.estimated_value_unit)}. Change it here without changing the inventory estimate.`
+                            : "Whatnot requires a price for this bulk listing. HITS does not currently have an estimated value to prefill."}
+                        </div>
+
+                        <label className="mt-2 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+                          Quantity
+                        </label>
+                        <input
+                          name="whatnot_quantity"
+                          type="number"
+                          min={1}
+                          max={availableQuantity}
+                          step={1}
+                          required
+                          defaultValue={1}
+                          className="app-input mt-1 w-full"
+                        />
+
+                        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
+                          <input
+                            name="whatnot_offerable"
+                            type="checkbox"
+                            defaultChecked
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-950"
+                          />
+                          Allow offers on Whatnot
+                        </label>
+                      </>
+                    )}
+
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Adding..."
+                      overlayText="Adding item to Whatnot Upload Queue..."
+                      showOverlayOnClick
+                      disabled={isQueuedForWhatnot}
+                      className="app-button mt-2 w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isQueuedForWhatnot
+                        ? "In Whatnot Upload Queue"
+                        : "Add to Whatnot Bulk Inventory"}
+                    </AppLoadingButton>
+                  </form>
+                  <form action={markItemListedAction} className="mt-2">
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Marking..."
+                      overlayText="Marking item listed..."
+                      showOverlayOnClick
+                      disabled={item.status === "listed"}
+                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {item.status === "listed" ? "Listed" : "Mark Listed"}
+                    </AppLoadingButton>
+                  </form>
+                  <form action={putItemAwayAction} className="mt-2">
+                    <AppLoadingButton
+                      type="submit"
+                      loadingText="Updating..."
+                      overlayText="Marking item put away..."
+                      showOverlayOnClick
+                      disabled={item.processing_status === "put_away"}
+                      className="app-button w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {item.processing_status === "put_away"
+                        ? "Put Away"
+                        : "Mark Put Away"}
+                    </AppLoadingButton>
+                  </form>
+                </>
+              ) : (
+                <span className="app-button mt-3 w-full justify-center pointer-events-none opacity-60">
+                  Not Available
+                </span>
+              )}
+            </div>
+
+            <form
+              action={moveToPersonalAction}
+              className="self-start rounded-xl border border-zinc-800 bg-zinc-950/70 p-2"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="personal" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Move to Personal
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Keep one or more items for your personal collection.
+              </p>
+              <div className="mt-2 grid gap-1.5">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity ?? undefined}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Moving..."
+                  overlayText="Moving to personal collection..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
+                  className="app-button mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Move to Personal
+                </AppLoadingButton>
+              </div>
+            </form>
+
+            <form
+              action={markAsGiveawayAction}
+              className="self-start rounded-xl border border-zinc-800 bg-zinc-950/70 p-2"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="giveaway" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Giveaway
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Move quantity out of inventory for a giveaway or buyer bonus.
+              </p>
+              <div className="mt-2 grid gap-1.5">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity ?? undefined}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Reason
+                </label>
+                <select name="reason" className="app-select">
+                  <option value="Customer Appreciation">
+                    Customer Appreciation
+                  </option>
+                  <option value="Package Insert / Buyer Bonus">
+                    Package Insert / Buyer Bonus
+                  </option>
+                  <option value="Streamer Giveaway">Streamer Giveaway</option>
+                  <option value="Marketing">Marketing</option>
+                  <option value="Other">Other</option>
+                </select>
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Recording..."
+                  overlayText="Recording giveaway..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
+                  className="app-button-warning mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Record Giveaway
+                </AppLoadingButton>
+              </div>
+            </form>
+
+            <form
+              action={disposeInventoryAction}
+              className="self-start rounded-xl border border-zinc-800 bg-zinc-950/70 p-2"
+            >
+              <input type="hidden" name="inventory_item_id" value={item.id} />
+              <input type="hidden" name="action_type" value="junk" />
+              <div className="text-sm font-semibold text-zinc-100">
+                Dispose / Junk
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Remove damaged, lost, or unsellable quantity from active
+                inventory.
+              </p>
+              <div className="mt-2 grid gap-1.5">
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Quantity
+                </label>
+                <input
+                  name="quantity_to_move"
+                  type="number"
+                  min={1}
+                  max={availableQuantity ?? undefined}
+                  defaultValue={1}
+                  className="app-input"
+                />
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Reason
+                </label>
+                <select name="reason" className="app-select">
+                  <option value="Damaged">Damaged</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Destroyed">Destroyed</option>
+                  <option value="Unsellable">Unsellable</option>
+                  <option value="Other">Other</option>
+                </select>
+                <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Notes
+                </label>
+                <input
+                  name="movement_notes"
+                  type="text"
+                  className="app-input"
+                  placeholder="Optional"
+                />
+                <AppLoadingButton
+                  type="submit"
+                  loadingText="Recording..."
+                  overlayText="Recording disposal..."
+                  showOverlayOnClick
+                  disabled={availableQuantity <= 0}
+                  className="app-button-danger mt-1 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Dispose / Junk
+                </AppLoadingButton>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {!isLockedForBusinessEvent && canDelete ? (
+          <div className="mt-2 flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-2.5 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-zinc-100">
+                Delete Item
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Only delete records that were entered by mistake. Use Dispose /
+                Junk when the item physically existed but is no longer sellable.
+              </p>
+            </div>
+            <DeleteInventoryItemButton itemId={item.id} itemName={itemName} />
+          </div>
+        ) : null}
+
+        {!isLockedForBusinessEvent && isFinalizedBuild ? (
+          <div className="app-alert-info mt-3">
+            Built inventory items are not deleted directly. Use Disassemble
+            Build above to restore the original component inventory and preserve
+            the audit trail.
+          </div>
+        ) : null}
       </div>
 
-      <div className="app-section mt-0 p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-base font-semibold leading-tight">
-            Quick Edit Item
-          </h2>
 
-          {isLockedForBusinessEvent ? (
-            <span className="app-button pointer-events-none opacity-60">
-              Locked
-            </span>
+      {item.source_break_id ? (
+        <div className="app-section mt-0 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Original Source
+              </div>
+              <h2 className="mt-1 text-base font-semibold leading-tight">
+                {relatedBreakTitle}
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                This item was created from a saved break. Use these links to
+                review the original break, continue entering items, or jump to
+                the other items from the same break.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Link href={relatedBreakHref} className="app-button">
+                Open Break Details
+              </Link>
+              <Link
+                href={relatedBreakAddItemsHref}
+                className="app-button-primary"
+              >
+                Continue Entering Items
+              </Link>
+              <Link href={relatedBreakItemsHref} className="app-button">
+                View Break Items
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <Detail
+              label="Created From"
+              value={buildSourceTypeLabel(item.source_type)}
+            />
+            <Detail
+              label="Break Date"
+              value={formatDate(relatedBreak?.break_date)}
+            />
+            <Detail
+              label="Breaker / Source"
+              value={relatedBreak?.source_name || "—"}
+            />
+            <Detail label="Order #" value={relatedBreak?.order_number || "—"} />
+            <Detail label="Format" value={relatedBreak?.format_type || "—"} />
+            <Detail
+              label="Items Received"
+              value={String(relatedBreak?.cards_received ?? "—")}
+            />
+            <Detail label="Created" value={formatDate(item.created_at)} />
+            <Detail label="Last Updated" value={formatDate(item.updated_at)} />
+          </div>
+
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Item History
+                </div>
+                <div className="mt-1 text-sm text-zinc-300">
+                  Created from break inventory entry. Cost basis and quantity
+                  are preserved on this item for sale, giveaway, personal, junk,
+                  or write-off tracking.
+                </div>
+              </div>
+              <div className="text-xs text-zinc-500">
+                Source ID: {item.source_break_id}
+              </div>
+            </div>
+          </div>
+
+          {relatedSourceItems.length > 0 ? (
+            <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70">
+              <div className="flex flex-col gap-1 border-b border-zinc-800 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Other Inventory Items From This Break
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Showing {relatedSourceItems.length} related item(s)
+                </div>
+              </div>
+              <div className="divide-y divide-zinc-800">
+                {relatedSourceItems.map((relatedItem) => (
+                  <Link
+                    key={relatedItem.id}
+                    href={`/app/inventory/${relatedItem.id}`}
+                    className="flex flex-col gap-1 px-3 py-2.5 transition hover:bg-zinc-900/70 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="wrap-break-word text-sm font-medium text-zinc-100">
+                        {buildRelatedSourceItemDisplay(relatedItem)}
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        Qty {relatedItem.quantity ?? 0} • Cost{" "}
+                        {money(relatedItem.cost_basis_total)}
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {renderStatusPill(relatedItem.status)}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
           ) : (
-            <AppLoadingButton
-              type="submit"
-              form={itemFormId}
-              loadingText="Saving..."
-              className="app-button disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Save Changes
-            </AppLoadingButton>
+            <div className="app-alert-info mt-3">
+              No other active inventory items were found with this same source
+              break ID.
+            </div>
           )}
         </div>
-
-        <div className="mt-3 grid gap-2.5 md:grid-cols-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Title
-            </label>
-            <input
-              form={itemFormId}
-              name="title"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.title ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Player / Item Name
-            </label>
-            <input
-              form={itemFormId}
-              name="player_name"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.player_name ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Year
-            </label>
-            <input
-              form={itemFormId}
-              name="year"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              placeholder="2023-24"
-              defaultValue={item.year ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              #
-            </label>
-            <input
-              form={itemFormId}
-              name="card_number"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.card_number ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Brand
-            </label>
-            <input
-              form={itemFormId}
-              name="brand"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.brand ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Parallel
-            </label>
-            <input
-              form={itemFormId}
-              name="parallel_name"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.parallel_name ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Team
-            </label>
-            <input
-              form={itemFormId}
-              name="team"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.team ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Storage Location
-            </label>
-            <input
-              form={itemFormId}
-              name="storage_location"
-              disabled={isLockedForBusinessEvent}
-              type="text"
-              defaultValue={item.storage_location ?? ""}
-              className={`app-input ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
-
-          <div className="md:col-span-3">
-            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-300">
-              Notes
-            </label>
-            <textarea
-              form={itemFormId}
-              name="notes"
-              disabled={isLockedForBusinessEvent}
-              rows={3}
-              defaultValue={item.notes ?? ""}
-              className={`app-textarea ${isLockedForBusinessEvent ? "cursor-not-allowed opacity-70" : ""}`}
-            />
-          </div>
+      ) : (
+        <div className="app-alert-info">
+          This item does not have a saved source break ID. It may have been
+          created manually, imported, or created before source linking was
+          added.
         </div>
-      </div>
+      )}
 
       <div className="app-section mt-0 p-4">
         <h2 className="text-base font-semibold leading-tight">
@@ -2258,32 +2200,6 @@ export default async function InventoryDetailPage({
             )}
           </div>
         </form>
-      </div>
-
-      <div className="app-section mt-0 p-4">
-        <h2 className="text-base font-semibold leading-tight">Item Details</h2>
-
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <Detail label="Year" value={item.year?.toString() || "—"} />
-          <Detail label="Player / Item Name" value={item.player_name || "—"} />
-          <Detail label="#" value={item.card_number || "—"} />
-          <Detail label="Brand" value={item.brand || "—"} />
-          <Detail label="Parallel" value={item.parallel_name || "—"} />
-          <Detail label="Team" value={item.team || "—"} />
-          <Detail label="Item Type" value={item.item_type || "—"} />
-          <Detail label="Location" value={item.storage_location || "—"} />
-        </div>
-
-        {item.notes ? (
-          <div className="mt-3">
-            <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-              Notes
-            </div>
-            <div className="mt-1.5 whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-sm leading-relaxed">
-              {item.notes}
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <div className="app-section mt-0 p-4">
@@ -2459,11 +2375,11 @@ export default async function InventoryDetailPage({
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (
-    <div className="app-card-tight p-3">
+    <div className="app-card-tight p-2.5">
       <div className="text-xs font-medium uppercase tracking-wide text-zinc-400">
         {label}
       </div>
-      <div className="mt-1 text-base font-semibold leading-tight">{value}</div>
+      <div className="mt-0.5 text-sm font-semibold leading-tight">{value}</div>
     </div>
   );
 }
